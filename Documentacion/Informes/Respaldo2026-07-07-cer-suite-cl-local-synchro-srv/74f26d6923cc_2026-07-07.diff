@@ -1,0 +1,78 @@
+--- Diff for /Dockerfile ---
+--- a//Dockerfile
++++ b//Dockerfile
+@@ -1,21 +1,16 @@
+-FROM docker.io/library/maven:3-eclipse-temurin-25 AS build
+-WORKDIR /app
++FROM eclipse-temurin:25-jre
+ 
+-COPY . .
+-
+-RUN mvn clean package -DskipTests
+-
+-FROM docker.io/library/eclipse-temurin:25-jre
+ WORKDIR /app
+ 
+ RUN groupadd --gid 10001 appgroup && \
+     useradd --uid 10001 --gid appgroup --shell /bin/bash --create-home appuser
+ 
+-COPY --from=build /app/target/*.jar app.jar
++COPY target/*.jar app.jar
++
+ RUN chown -R appuser:appgroup /app
+ 
+ USER appuser
+ 
+ EXPOSE 8080
+ 
+-ENTRYPOINT ["java", "-XX:+UseG1GC", "-Djava.security.egd=file:/dev/./urandom", "-jar", "app.jar"]
++ENTRYPOINT ["java","-jar","app.jar"]
+
+--- Diff for /build.sh ---
+--- a//build.sh
++++ b//build.sh
+@@ -1,28 +1,21 @@
+ #!/bin/bash
+ set -e
+ 
+-ARTIFACT_ID=$(mvn help:evaluate -Dexpression=project.artifactId -q -DforceStdout | tr -d '\r\n[:space:]')
+-VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout | tr -d '\r\n[:space:]')
++ARTIFACT_ID=$(mvn help:evaluate -Dexpression=project.artifactId -q -DforceStdout)
++VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
++REGISTRY="localhost:30500"
+ 
+-if [ -z "$ARTIFACT_ID" ] || [ -z "$VERSION" ]; then
+-    echo "Error: Failed to extract artifactId or version from pom.xml"
+-    exit 1
++IMAGE_NAME="${REGISTRY}/${ARTIFACT_ID}:${VERSION}"
++LATEST_NAME="${REGISTRY}/${ARTIFACT_ID}:latest"
++
++# Skaffold inyecta $IMAGE cuando orquesta el build
++if [ -n "$IMAGE" ]; then
++    IMAGE_NAME="$IMAGE"
++    LATEST_NAME="${IMAGE%%:*}:latest"
+ fi
+ 
+-IMAGE_TAG_VERSION="localhost:30500/${ARTIFACT_ID}:${VERSION}"
+-IMAGE_TAG_LATEST="localhost:30500/${ARTIFACT_ID}:latest"
++echo "Building image: ${IMAGE_NAME}"
++podman build -t "${IMAGE_NAME}" -t "${LATEST_NAME}" .
+ 
+-echo "Building image: ${IMAGE_TAG_VERSION} and ${IMAGE_TAG_LATEST} using Podman..."
+-podman build -f docker/dev/Dockerfile -t "${IMAGE_TAG_VERSION}" -t "${IMAGE_TAG_LATEST}" .
+-
+-echo "Pushing images to local registry..."
+-podman push --tls-verify=false "${IMAGE_TAG_VERSION}"
+-podman push --tls-verify=false "${IMAGE_TAG_LATEST}"
+-
+-if [ -n "$IMAGE" ]; then
+-    echo "Skaffold dynamic tagging: tagging as $IMAGE"
+-    podman tag "${IMAGE_TAG_VERSION}" "$IMAGE"
+-    podman push --tls-verify=false "$IMAGE"
+-fi
+-
+-echo "Build and push completed successfully."
++podman push --tls-verify=false "${IMAGE_NAME}"
++podman push --tls-verify=false "${LATEST_NAME}"
+
+

@@ -1,0 +1,14 @@
+--- Diff for /src/main/resources/application-dev.yml ---
+--- a//src/main/resources/application-dev.yml
++++ b//src/main/resources/application-dev.yml
+@@ -13,7 +13,7 @@
+         enabled: true
+       firestore:
+         enabled: true
+-        database-id: ${:cer-suite-multilocal}
++        database-id: ${FIRESTORE_DATABASE_ID:cer-suite-multilocal}
+ 
+ logging:
+   level:
+
+

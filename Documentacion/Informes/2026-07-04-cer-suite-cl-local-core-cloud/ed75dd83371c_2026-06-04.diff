@@ -1,0 +1,545 @@
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/TslTransactionHeader.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/TslTransactionHeader.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/TslTransactionHeader.java
+@@ -25,6 +25,7 @@
+     Integer ringElapsedTime,        // f[10] RINGTIME en segundos
+     Integer tenderElapsedTime,      // f[11] TENDERTI en segundos
+     int idleElapsedTime,            // f[13] IDLETIME en segundos
++    Integer lockElapsedTime,        // f[12] SPECIAL â tiempo de bloqueo del terminal; null = omitir en XML
+     String transactionSubType,      // f[4] TRANTYPE â "00"=venta,"12"=devoluciÃ³n,"16"=anulada
+     int xmlTransactionTypeCode,     // 1/2/3 derivado de transactionSubType via TslTransactionType
+     boolean cancelFlag,
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/TslFrameParserService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/TslFrameParserService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/TslFrameParserService.java
+@@ -135,6 +135,7 @@
+      *   [8] GROSSPOS  â grossPositiveAmountCents en centavos
+      *  [10] RINGTIME  â ringElapsedTime en segundos
+      *  [11] TENDERTI  â tenderElapsedTime en segundos
++     *  [12] SPECIAL   â lockElapsedTime en segundos; null si vacÃ­o (omite <LockElapsedTime> en XML)
+      *  [13] IDLETIME  â idleElapsedTime en segundos (ISSUE-17)
+      */
+     private void processHeader(TransactionBuilder b, String[] f) {
+@@ -146,6 +147,7 @@
+         b.grossNegativeAmountCents = parseLong(safeGet(f, 9)); // ISSUE-P2: GROSSNEG directo del POS
+         b.ringElapsedTime    = parseIntOrNull(safeGet(f, 10));
+         b.tenderElapsedTime  = parseIntOrNull(safeGet(f, 11));
++        b.lockElapsedTime    = parseIntOrNull(safeGet(f, 12));
+         b.idleElapsedTime    = parseInt(safeGet(f, 13));
+ 
+         LocalDateTime tslEnd = parseTslDateTime(safeGet(f, 3));
+@@ -299,6 +301,7 @@
+             last.isPorMayor(),
+             last.appliedTaxCents()
+         ));
++        b.innerSeqExplicitIndexes.add(lastIdx);
+     }
+ 
+     /**
+@@ -334,6 +337,9 @@
+         processTaxType(b, f, 10, 14, "F");
+         processTaxType(b, f, 11, 15, "G");
+         processTaxType(b, f, 12, 16, "H");
++        if (!b.lineItems.isEmpty()) {
++            b.innerSeqHighWaterMarkIndex = Math.max(b.innerSeqHighWaterMarkIndex, b.lineItems.size() - 1);
++        }
+     }
+ 
+     private void processTaxType(TransactionBuilder b, String[] f,
+@@ -500,10 +506,11 @@
+             }
+ 
+             case VTA_MAYOREO -> {
+-                // 99|06|16: venta al por mayor â registrar ordinal del Ãºltimo item y cantidad
++                // 99|06|16: venta al por mayor â registrar ordinal del ultimo item valido y cantidad
+                 // El sequenceNumber se resuelve en build() usando ordinalToSeqNum
+-                if (!b.lineItems.isEmpty()) {
+-                    int lastIdx = b.lineItems.size() - 1;
++                int lastIdx = findLastLegacySaleReturnCandidateIndex(b.lineItems);
++                if (lastIdx >= 0) {
++                    markReverseSearchVisitedLineItems(b, lastIdx);
+                     TslLineItem lastItem = b.lineItems.get(lastIdx);
+                     int lastOrdinal = lastItem.ordinalNumber();
+                     int quantity    = parseInt(safeGet(f, 5));
+@@ -739,11 +746,12 @@
+                 // f[7]=AUT_NUM, f[8]=TIPO, f[9]=BIN, f[10]=PUNTOS,
+                 // f[11]=ITEMCODE, f[12]=ORDINAL_NUMBER
+                 int seqNum = b.pointsRedemptionDataList.size() + 1;
++                int discount = parseInt(safeGet(f, 4));
+                 int ordinalNum = (f.length > 12) ? parseInt(safeGet(f, 12)) : 0;
+                 b.pointsRedemptionDataList.add(new TslPointsRedemptionData(
+                     seqNum,
+                     safeGet(f, 3),           // time
+-                    parseInt(safeGet(f, 4)), // discount
++                    discount,                // discount
+                     safeGet(f, 5),           // codNegocio
+                     safeGet(f, 6),           // referenceNbr
+                     safeGet(f, 7),           // authorizationNbr
+@@ -753,6 +761,9 @@
+                     safeGet(f, 11),          // codItem
+                     ordinalNum               // ordinalNumber
+                 ));
++                if (discount != 0) {
++                    markPointsRedemptionVisitedLineItem(b, ordinalNum);
++                }
+             }
+ 
+             case GIFTCARD_DATA -> {
+@@ -916,6 +927,52 @@
+         return PROMOTION_ITEM_CODE.equals(itemCode) || REDEMPTION_PROMOTION_ITEM_CODE.equals(itemCode);
+     }
+ 
++    private int findLastLegacySaleReturnCandidateIndex(List<TslLineItem> lineItems) {
++        for (int i = lineItems.size() - 1; i >= 0; i--) {
++            if (isLegacySaleReturnCandidate(lineItems.get(i))) {
++                return i;
++            }
++        }
++        return -1;
++    }
++
++    private boolean isLegacySaleReturnCandidate(TslLineItem item) {
++        return item.itemType() != STORE_COUPON_ITEM_TYPE
++            && !"SERVICE".equalsIgnoreCase(item.entryMethodCode());
++    }
++
++    private void markReverseSearchVisitedLineItems(TransactionBuilder b, int matchedIndex) {
++        for (int idx = matchedIndex; idx < b.lineItems.size(); idx++) {
++            b.innerSeqExplicitIndexes.add(idx);
++        }
++    }
++
++    private void markPointsRedemptionVisitedLineItem(TransactionBuilder b, int ordinalNumber) {
++        if (b.lineItems.isEmpty()) {
++            return;
++        }
++
++        int matchedIndex = -1;
++        for (int idx = 0; idx < b.lineItems.size(); idx++) {
++            TslLineItem item = b.lineItems.get(idx);
++            boolean matchesOrdinal = ordinalNumber > 0 && item.ordinalNumber() == ordinalNumber;
++            boolean matchesFirstEligible = ordinalNumber <= 0
++                && isLegacySaleReturnCandidate(item)
++                && !b.pointsRedemptionLineItemIndexes.contains(idx);
++            if ((matchesOrdinal || matchesFirstEligible)
++                    && !b.pointsRedemptionLineItemIndexes.contains(idx)) {
++                matchedIndex = idx;
++                break;
++            }
++        }
++
++        int visitedIndex = matchedIndex >= 0 ? matchedIndex : b.lineItems.size() - 1;
++        b.innerSeqHighWaterMarkIndex = Math.max(b.innerSeqHighWaterMarkIndex, visitedIndex);
++        if (matchedIndex >= 0) {
++            b.pointsRedemptionLineItemIndexes.add(matchedIndex);
++        }
++    }
++
+     boolean isBitOn(long value, int bitPosition) {
+         return (value & (1L << bitPosition)) != 0L;
+     }
+@@ -1005,6 +1062,7 @@
+         boolean cancelFlag           = false;
+         Integer ringElapsedTime;
+         Integer tenderElapsedTime;
++        Integer lockElapsedTime      = null;  // f[12] SPECIAL del registro "00"
+         int idleElapsedTime          = 0;
+         String operatorId             = "";
+         long grossPositiveAmountCents = 0L;
+@@ -1052,6 +1110,8 @@
+         TslFerricardData                     ferricardData            = null;
+         TslIlimitadaData                     ilimitadaData            = null;
+         final List<TslPointsRedemptionData>  pointsRedemptionDataList = new ArrayList<>();
++        final Set<Integer>                   innerSeqExplicitIndexes = new HashSet<>(); // Type02 y busquedas inversas
++        final Set<Integer>                   pointsRedemptionLineItemIndexes = new HashSet<>();
+         final List<TslGiftcardData>          giftcardDataList         = new ArrayList<>();
+         final List<TslRecaudacionData>       recaudacionDataList      = new ArrayList<>();
+         // VentaMayoreo â raw data: (itemCode, quantity)
+@@ -1062,6 +1122,7 @@
+         // - SubType41 usa getLineItemToSetTax()       â itera hasta el primer item sin tax
+         // Todos los items en Ã­ndices 0..innerSeqHighWaterMarkIndex emiten <sequenceNumber>.
+         // Items aÃ±adidos DESPUÃS del Ãºltimo SubType53/41 nunca son visitados â no emiten.
++        // Also set by Type07/08 and SubType63; exact visits go in innerSeqExplicitIndexes.
+         int innerSeqHighWaterMarkIndex = -1;
+ 
+         // --- datos estructurados de subtypes ---
+@@ -1109,10 +1170,12 @@
+                     // Paridad legacy: emitir <sequenceNumber> para todos los items que habrÃ­an
+                     // sido visitados por getSaleLI() durante las bÃºsquedas lineales de SubType53
+                     // (getLineItemSeqNumByOrdNum) y SubType41 (getLineItemToSetTax).
+-                    emitSequenceNumber = i <= innerSeqHighWaterMarkIndex;
++                    emitSequenceNumber = i <= innerSeqHighWaterMarkIndex
++                        || innerSeqExplicitIndexes.contains(i);
+                 } else {
+                     // Sin SubType53 ni SubType41: solo Ã­tems no-promo emiten sequenceNumber
+-                    emitSequenceNumber = !item.isPromo();
++                    emitSequenceNumber = !item.isPromo()
++                        || innerSeqExplicitIndexes.contains(i);
+                 }
+                 lineItems.set(i, item.withEmitSaleReturnSequenceNumber(emitSequenceNumber));
+             }
+@@ -1136,7 +1199,9 @@
+             for (int i = 0; i < lineItems.size(); i++) {
+                 TslLineItem item = lineItems.get(i);
+                 boolean emitSequenceNumber = !item.isPromo()
+-                    || ordinalsWithSeq.contains(item.ordinalNumber());
++                    || ordinalsWithSeq.contains(item.ordinalNumber())
++                    || i <= innerSeqHighWaterMarkIndex
++                    || innerSeqExplicitIndexes.contains(i);
+                 lineItems.set(i, item.withEmitSaleReturnSequenceNumber(emitSequenceNumber));
+             }
+         }
+@@ -1246,6 +1311,10 @@
+                 }
+             }
+ 
++            // lockElapsedTime solo aplica a RetailTransaction (xmlTypeCode=1); para
++            // TenderControlTransaction y ControlTransaction el campo no existe.
++            Integer resolvedLockElapsed = (xmlTransactionTypeCode == 1) ? lockElapsedTime : null;
++
+             TslTransactionHeader header = new TslTransactionHeader(
+                 workstationId,
+                 sequenceNumber,
+@@ -1255,6 +1324,7 @@
+                 ringElapsedTime,
+                 tenderElapsedTime,
+                 idleElapsedTime,
++                resolvedLockElapsed,
+                 transactionSubType,
+                 xmlTransactionTypeCode,
+                 cancelFlag,
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorService.java
+@@ -141,6 +141,10 @@
+         child(doc, rt, "RingElapsedTime",   h.ringElapsedTime()   != null ? h.ringElapsedTime()   : 0);
+         child(doc, rt, "TenderElapsedTime", h.tenderElapsedTime() != null ? h.tenderElapsedTime() : 0);
+         child(doc, rt, "IdleElapsedTime",   h.idleElapsedTime());
++        // LockElapsedTime: presente solo cuando el terminal reporta tiempo de bloqueo (f[12] SPECIAL)
++        if (h.lockElapsedTime() != null) {
++            child(doc, rt, "LockElapsedTime", h.lockElapsedTime());
++        }
+         // ItemCount legacy: suma cantidades con signo; los void restan unidades.
+         double itemCount  = tx.lineItems().stream().mapToDouble(this::getSignedItemQuantity).sum();
+         long scannedCount = tx.lineItems().stream()
+
+
+--- Diff for /src/main/resources/application-local.yml ---
+--- a//src/main/resources/application-local.yml
++++ b//src/main/resources/application-local.yml
+@@ -62,6 +62,8 @@
+     com.elrosado.cersuitecloudlocalcore: DEBUG
+     org.springframework: INFO
+     org.hibernate.SQL: DEBUG
++  pattern:
++    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg %kvp%n"
+ 
+ management:
+   health:
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/ProcessSaleServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/ProcessSaleServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/ProcessSaleServiceTest.java
+@@ -71,6 +71,7 @@
+                 LocalDateTime.of(2025, 1, 1, 11, 58),
+                 "20250101",
+                 80, 40, 0,
++                null,     // lockElapsedTime
+                 "00", 1,
+                 false, false, false,
+                 "0012", "99999999", "",
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/TslFrameParserServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/TslFrameParserServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/TslFrameParserServiceTest.java
+@@ -121,6 +121,33 @@
+                     "05|11|0500|00||00," +
+                     "99|06|20|20260526|164909|000586999|01|0|081-001-000000001|0|0'|'20260526";
+ 
++    static final String TRAMA_CHECKOUT_PROMO_TAX_NO_SUBTYPE53 =
++            "000300S'|'10'|'000'|'100'|'1'|'20250808170649'|'" +
++                    "00|0005|6605|2508081706|00|0006|222118|99999999|0100|00|10|05||00|04194304|00," +
++                    "01|40000001|0100|73|080000|265221|00|00|00|01,," +
++                    "01|811099999998|00|73|000000|0273|00|75|00|02,,," +
++                    "07|13||||100'|'20250808";
++
++    static final String TRAMA_CHECKOUT_PROMO_ITEM_EXTENSION =
++            "000280S'|'10'|'000'|'100'|'1'|'20250808170649'|'" +
++                    "00|0005|6606|2508081706|00|0006|222118|99999999|0000|00|10|05||00|04194304|00," +
++                    "01|811099999998|00|73|000000|0273|00|75|00|02,,," +
++                    "02|||||0000|1'|'20250808";
++
++    static final String TRAMA_CHECKOUT_MAYOREO_LAST_PROMO =
++            "000330S'|'10'|'000'|'100'|'1'|'20250808170649'|'" +
++                    "00|0005|6607|2508081706|00|0006|222118|99999999|0100|00|10|05||00|04194304|00," +
++                    "01|40000001|0100|73|080000|265221|00|00|00|10,," +
++                    "01|811099999998|00|73|000000|0273|00|75|00|20,,," +
++                    "99|06|16|1|40000001|2'|'20250808";
++
++    static final String TRAMA_CHECKOUT_POINTS_REDEMPTION_PROMO_ORDINAL =
++            "000420S'|'10'|'000'|'100'|'1'|'20250808170649'|'" +
++                    "00|0005|6608|2508081706|00|0006|222118|99999999|0100|00|10|05||00|04194304|00," +
++                    "01|40000001|0100|73|080000|265221|00|00|00|01,," +
++                    "01|811099999998|00|73|000000|0273|00|75|00|02,,," +
++                    "99|06|63|170649|5|01|REF001|AUT001|1|123456|10|811099999998|2'|'20250808";
++
+     private TslFrameParserService service;
+     private RetailStore sampleStore;
+ 
+@@ -227,6 +254,50 @@
+         assertEquals(99L, tx.header().grossPositiveAmountCents());
+     }
+ 
++    // f[12] SPECIAL vacÃ­o â lockElapsedTime null (no se emite <LockElapsedTime>)
++    @Test
++    void buildTransaction_checkout_lockElapsedTime_emptySpecial_isNull() {
++        TslFrame frame = service.parseFrame(TRAMA_CHECKOUT);
++        SaleTransaction tx = service.buildTransaction("trx-001", frame, sampleStore);
++
++        assertNull(tx.header().lockElapsedTime(),
++                "f[12] vacÃ­o debe producir lockElapsedTime=null (XML omite <LockElapsedTime>)");
++    }
++
++    // f[12] SPECIAL con valor numÃ©rico â lockElapsedTime propagado al header
++    @Test
++    void buildTransaction_checkout_lockElapsedTime_withValue_isSet() {
++        // Trama con f[12]="045" (SPECIAL con tiempo de bloqueo de 45 segundos)
++        String tramaConLock =
++                "000438S'|'10'|'000'|'100'|'1'|'20250808081335'|'" +
++                "00|0002|0735|2508080813|00|0012|222118|99999999|99|00|16|20|045|02|00|00," +
++                "05|11|0100|00||00," +
++                "09|11|01," +
++                "07|13||||86'|'20250808";
++
++        TslFrame frame = service.parseFrame(tramaConLock);
++        SaleTransaction tx = service.buildTransaction("trx-lock-001", frame, sampleStore);
++
++        assertEquals(Integer.valueOf(45), tx.header().lockElapsedTime(),
++                "f[12]=045 debe producir lockElapsedTime=45");
++    }
++
++    // f[12] con valor numÃ©rico en TenderControlTransaction â lockElapsedTime debe ser null
++    @Test
++    void buildTransaction_tenderControl_lockElapsedTime_alwaysNull() {
++        // TRANTYPE=03 (CASHIER_LOAN) â TenderControlTransaction; f[12] con valor
++        String tramaLoanConLock =
++                "000152S'|'10'|'000'|'100'|'1'|'20250808073812'|'" +
++                "00|0202|7286|2508080738|03|0001|99910002|99999999|00|00||||030|0576|00," +
++                "13|01|030000|00|00|11|030000|99'|'20250808";
++
++        TslFrame frame = service.parseFrame(tramaLoanConLock);
++        SaleTransaction tx = service.buildTransaction("trx-loan-001", frame, sampleStore);
++
++        assertNull(tx.header().lockElapsedTime(),
++                "LockElapsedTime debe ser null para TenderControlTransaction (no aplica al tipo)");
++    }
++
+     @Test
+     void buildTransaction_checkout_oneLineItem() {
+         TslFrame frame = service.parseFrame(TRAMA_CHECKOUT);
+@@ -407,6 +478,67 @@
+     }
+ 
+     @Test
++    void buildAndGenerate_checkoutPromoTaxNoSubtype53_emitsInternalSequenceFromTaxSideEffect() {
++        TslFrame frame = service.parseFrame(TRAMA_CHECKOUT_PROMO_TAX_NO_SUBTYPE53);
++        SaleTransaction tx = service.buildTransaction("trx-promo-tax", frame, sampleStore);
++        XmlGeneratorService generator = new XmlGeneratorService(new TslProperties(true));
++
++        String xml = generator.generate(tx);
++
++        assertTrue(lineItemXml(xml, "2")
++                .contains("<Sale><sequenceNumber>2</sequenceNumber><ItemCode>811099999998</ItemCode>"));
++    }
++
++    @Test
++    void buildAndGenerate_checkoutPromoItemExtension_emitsInternalSequenceFromType02SideEffect() {
++        TslFrame frame = service.parseFrame(TRAMA_CHECKOUT_PROMO_ITEM_EXTENSION);
++        SaleTransaction tx = service.buildTransaction("trx-promo-extension", frame, sampleStore);
++        XmlGeneratorService generator = new XmlGeneratorService(new TslProperties(true));
++
++        String xml = generator.generate(tx);
++
++        assertTrue(lineItemXml(xml, "1")
++                .contains("<Sale><sequenceNumber>1</sequenceNumber><ItemCode>811099999998</ItemCode>"));
++    }
++
++    @Test
++    void buildTransaction_checkoutMayoristaLastPromo_marksLastNonServiceNonStoreCoupon() {
++        TslFrame frame = service.parseFrame(TRAMA_CHECKOUT_MAYOREO_LAST_PROMO);
++        SaleTransaction tx = service.buildTransaction("trx-mayoreo-last-promo", frame, sampleStore);
++        XmlGeneratorService generator = new XmlGeneratorService(new TslProperties(true));
++
++        TslLineItem wholesaleItem = lineItemByOrdinal(tx, 10);
++        TslLineItem promoItem = lineItemByOrdinal(tx, 20);
++
++        assertTrue(wholesaleItem.isPorMayor());
++        assertFalse(promoItem.isPorMayor());
++        assertEquals(2, tx.ventaMayoreoItems().size());
++        assertEquals(1, tx.ventaMayoreoItems().get(0).sequenceNumber());
++        assertEquals(2, tx.ventaMayoreoItems().get(0).sequenceNumberMay());
++        assertEquals(1, tx.ventaMayoreoItems().get(1).sequenceNumber());
++        assertEquals(3, tx.ventaMayoreoItems().get(1).sequenceNumberMay());
++
++        String xml = generator.generate(tx);
++        assertTrue(lineItemXml(xml, "1").contains("<OrdinalNumber>10</OrdinalNumber><IsPorMayor>true</IsPorMayor>"));
++        assertFalse(lineItemXml(xml, "2").contains("<IsPorMayor>true</IsPorMayor>"));
++        assertTrue(lineItemXml(xml, "2")
++                .contains("<Sale><sequenceNumber>2</sequenceNumber><ItemCode>811099999998</ItemCode>"));
++    }
++
++    @Test
++    void buildAndGenerate_checkoutPointsRedemptionPromoOrdinal_emitsInternalSequenceFromRedemptionSearch() {
++        TslFrame frame = service.parseFrame(TRAMA_CHECKOUT_POINTS_REDEMPTION_PROMO_ORDINAL);
++        SaleTransaction tx = service.buildTransaction("trx-redemption-promo", frame, sampleStore);
++        XmlGeneratorService generator = new XmlGeneratorService(new TslProperties(true));
++
++        String xml = generator.generate(tx);
++
++        assertEquals(1, tx.pointsRedemptionDataList().size());
++        assertTrue(lineItemXml(xml, "2")
++                .contains("<Sale><sequenceNumber>2</sequenceNumber><ItemCode>811099999998</ItemCode>"));
++    }
++
++    @Test
+     void buildTransaction_checkout_receiptNumber() {
+         TslFrame frame = service.parseFrame(TRAMA_CHECKOUT);
+         SaleTransaction tx = service.buildTransaction("trx-001", frame, sampleStore);
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorServiceTest.java
+@@ -51,6 +51,7 @@
+                 16,                                        // ringElapsedTime
+                 20,                                        // tenderElapsedTime
+                 0,                                         // idleElapsedTime
++                null,                                      // lockElapsedTime (f[12] SPECIAL vacÃ­o)
+                 "00",                                      // transactionSubType
+                 1,                                         // xmlTransactionTypeCode
+                 false,                                     // cancelFlag
+@@ -71,6 +72,7 @@
+                 LocalDateTime.of(2025, 8, 8, 8, 6, 8),
+                 "20250808",
+                 32, 22, 0,
++                null,     // lockElapsedTime
+                 "00", 1,
+                 false, false, false,
+                 "0025",
+@@ -137,6 +139,18 @@
+         );
+     }
+ 
++    private SaleTransaction minimalRetailTx(String firestoreId, TslTransactionHeader header) {
++        return new SaleTransaction(
++                firestoreId, "100", sampleStore, header,
++                List.of(), List.of(), List.of(), 0L, false,
++                "", "", "", "", "", "",
++                List.of(), Map.of(), null, null, null, null,
++                List.of(), List.of(), List.of(), "", List.of(),
++                List.of(), List.of(), null, null, List.of(), List.of(), List.of(), List.of(),
++                0L, 0L, 0L, 0L, 0L, 0L, 0L, List.of()
++        );
++    }
++
+     // -----------------------------------------------------------------------
+     // Estructura raÃ­z <Transaction>
+     // -----------------------------------------------------------------------
+@@ -428,6 +442,73 @@
+     }
+ 
+     // -----------------------------------------------------------------------
++    // LockElapsedTime â f[12] SPECIAL
++    // -----------------------------------------------------------------------
++
++    @Test
++    void generate_lockElapsedTime_null_omitsNode() throws Exception {
++        // null â <LockElapsedTime> no debe aparecer en el XML
++        TslTransactionHeader h = new TslTransactionHeader(
++                "0002", "0001",
++                LocalDateTime.of(2025, 8, 8, 8, 0),
++                LocalDateTime.of(2025, 8, 8, 7, 59),
++                "20250808", 10, 10, 5,
++                null,    // lockElapsedTime vacÃ­o â omitir
++                "00", 1, false, false, false,
++                "0012", "99999999", "", 0L, ""
++        );
++        SaleTransaction tx = minimalRetailTx("trx-lock-null", h);
++        String xml = generator.generate(tx);
++
++        assertFalse(xml.contains("LockElapsedTime"),
++                "<LockElapsedTime> no debe estar en el XML cuando el valor es null");
++    }
++
++    @Test
++    void generate_lockElapsedTime_withValue_emitsNode() throws Exception {
++        // 123 â <LockElapsedTime>123</LockElapsedTime> debe aparecer
++        TslTransactionHeader h = new TslTransactionHeader(
++                "0002", "0001",
++                LocalDateTime.of(2025, 8, 8, 8, 0),
++                LocalDateTime.of(2025, 8, 8, 7, 59),
++                "20250808", 10, 10, 5,
++                123,     // lockElapsedTime con valor
++                "00", 1, false, false, false,
++                "0012", "99999999", "", 0L, ""
++        );
++        SaleTransaction tx = minimalRetailTx("trx-lock-val", h);
++        String xml = generator.generate(tx);
++
++        assertTrue(xml.contains("<LockElapsedTime>123</LockElapsedTime>"),
++                "<LockElapsedTime>123</LockElapsedTime> debe estar presente en el XML");
++        // Debe aparecer entre <IdleElapsedTime> y <ItemCount>
++        int idlePos  = xml.indexOf("<IdleElapsedTime>");
++        int lockPos  = xml.indexOf("<LockElapsedTime>");
++        int countPos = xml.indexOf("<ItemCount>");
++        assertTrue(idlePos < lockPos && lockPos < countPos,
++                "<LockElapsedTime> debe ir entre <IdleElapsedTime> y <ItemCount>");
++    }
++
++    @Test
++    void generate_lockElapsedTime_zero_emitsNode() throws Exception {
++        // 0 (f[12]="0000") â <LockElapsedTime>0</LockElapsedTime> debe aparecer
++        TslTransactionHeader h = new TslTransactionHeader(
++                "0002", "0001",
++                LocalDateTime.of(2025, 8, 8, 8, 0),
++                LocalDateTime.of(2025, 8, 8, 7, 59),
++                "20250808", 10, 10, 5,
++                0,       // lockElapsedTime = 0 (no null)
++                "00", 1, false, false, false,
++                "0012", "99999999", "", 0L, ""
++        );
++        SaleTransaction tx = minimalRetailTx("trx-lock-zero", h);
++        String xml = generator.generate(tx);
++
++        assertTrue(xml.contains("<LockElapsedTime>0</LockElapsedTime>"),
++                "<LockElapsedTime>0</LockElapsedTime> debe estar presente cuando el valor es 0");
++    }
++
++    // -----------------------------------------------------------------------
+     // ControlTransaction (tipo 2 â EOD)
+     // -----------------------------------------------------------------------
+ 
+@@ -439,6 +520,7 @@
+                 LocalDateTime.of(2025, 8, 8, 17, 59),
+                 "20250808",
+                 60, 0, 0,
++                null,     // lockElapsedTime
+                 "17", 2,
+                 false, false, false,
+                 "0001", "", "", 0L, ""
+@@ -477,6 +559,7 @@
+                 LocalDateTime.of(2025, 8, 8, 7, 37),
+                 "20250808",
+                 null, null, 0,
++                null,     // lockElapsedTime (no aplica a TenderControlTransaction)
+                 "03", 3,
+                 false, false, false,
+                 "0001", "", "", 0L, ""
+
+

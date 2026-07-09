@@ -1,0 +1,266 @@
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -15,6 +15,7 @@
+   GCP_PUBSUB_SUB_VENTAS: "retail.local.ventas.request.v1-sub"
+   GCP_PUBSUB_TOPIC_VENTAS: "retail.local.ventas.request.v1"
+   GCP_PUBSUB_TOPIC_DISTRIBUTOR: "retail.local.distributor.request.v1"
++  FIRESTORE_DATABASE_ID: "cer-suite-multilocal"
+   GCP_FIRESTORE_COLLECTION: "frames"
+   GCP_FIRESTORE_COLLECTION_REPRO: "frames_repro"
+ 
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorService.java
+@@ -30,6 +30,11 @@
+ 
+     private static final DocumentBuilderFactory DBF = DocumentBuilderFactory.newInstance();
+     private static final DateTimeFormatter ISO_FMT  = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss");
++    private static final int TYPE02_SALE_PRICE_INDEX = 4;
++    private static final int TYPE02_QTY_OR_WEIGHT_OR_VOLUME_INDEX = 5;
++    private static final int TYPE02_INDICAT1_INDEX = 6;
++    private static final int TYPE02_SCALE_WEIGHT_BIT_POSITION = 3;
++    private static final int TYPE02_WEIGHT_OR_VOLUME_KEY_BIT_POSITION = 6;
+ 
+     private final TslProperties properties;
+ 
+@@ -340,33 +345,11 @@
+         child(doc, s, "ItemCode",       item.itemCode());
+         child(doc, s, "ItemType",       item.itemType());
+ 
+-        // Extraer cantidad y precio unitario (ISSUE-07)
+-        long unitPriceCents;
+-        double qty;
+-        if (!item.extensions().isEmpty()) {
+-            String[] parts = item.extensions().getFirst().split("\\|", -1);
+-            // extension = f[1..N] del registro "02" concatenados con "|"
+-            // split[4] = f[5] original = unitPriceCents
+-            // split[5] = f[6] original = quantity
+-            long parsedUnitPrice = parts.length > 4 ? parseLong(parts[4]) : 0L;
+-            long parsedQty       = parts.length > 5 ? parseLong(parts[5]) : 0L;
+-            if (parsedQty > 0) {
+-                qty           = parsedQty;
+-                unitPriceCents = parsedUnitPrice > 0 ? parsedUnitPrice : item.extendedAmountCents();
+-            } else {
+-                qty           = 1.0;
+-                unitPriceCents = item.extendedAmountCents();
+-            }
+-        } else {
+-            qty           = 1.0;
+-            unitPriceCents = item.extendedAmountCents();
+-        }
+-
+-        String qtyStr = qty == Math.floor(qty) ? (long) qty + ".0" : String.valueOf(qty);
+-
+-        child(doc, s, "Quantity",              qtyStr);
+-        child(doc, s, "units",                 "0.0");
+-        child(doc, s, "RegularSalesUnitPrice", centsToFloat(unitPriceCents));
++        SaleReturnExtensionValues extensionValues = resolveSaleReturnExtensionValues(item);
++
++        child(doc, s, "Quantity",              formatLegacyDouble(extensionValues.quantity()));
++        child(doc, s, "units",                 formatLegacyDouble(extensionValues.units()));
++        child(doc, s, "RegularSalesUnitPrice", formatLegacyDouble(extensionValues.unitPriceCents()));
+         child(doc, s, "ActualSalesUnitPrice",  "0.0");
+         child(doc, s, "ExtendedAmount",        centsToFloat(item.extendedAmountCents()));
+         child(doc, s, "unitDiscountAmount",    "0.0");
+@@ -835,14 +818,41 @@
+     // Utilidades privadas
+     // -----------------------------------------------------------------------
+ 
+-    /** Extrae la quantity real de un item desde su registro de extensiÃ³n "02|". */
++    /** Valores derivados del Type02 para Sale/Return. */
++    private record SaleReturnExtensionValues(double quantity, double units, double unitPriceCents) {}
++
++    /** Interpreta Type02 igual que legacy: peso/volumen va a units y conserva Quantity=1. */
++    private SaleReturnExtensionValues resolveSaleReturnExtensionValues(TslLineItem item) {
++        if (item.extensions().isEmpty()) {
++            return new SaleReturnExtensionValues(1.0, 0.0, item.extendedAmountCents());
++        }
++
++        String[] parts = item.extensions().getFirst().split("\\|", -1);
++        double unitPriceCents = parts.length > TYPE02_SALE_PRICE_INDEX
++                && !parts[TYPE02_SALE_PRICE_INDEX].isBlank()
++            ? parseDouble(parts[TYPE02_SALE_PRICE_INDEX])
++            : item.extendedAmountCents();
++        boolean hasQtyOrWeightOrVolume = parts.length > TYPE02_QTY_OR_WEIGHT_OR_VOLUME_INDEX
++                && !parts[TYPE02_QTY_OR_WEIGHT_OR_VOLUME_INDEX].isBlank();
++        if (!hasQtyOrWeightOrVolume) {
++            return new SaleReturnExtensionValues(1.0, 0.0, unitPriceCents);
++        }
++
++        double qtyOrWeightOrVolume = parseDouble(parts[TYPE02_QTY_OR_WEIGHT_OR_VOLUME_INDEX]);
++        long indicat1 = parts.length > TYPE02_INDICAT1_INDEX
++            ? parseLong(parts[TYPE02_INDICAT1_INDEX])
++            : 0L;
++
++        if (isBitOn(indicat1, TYPE02_SCALE_WEIGHT_BIT_POSITION)
++                || isBitOn(indicat1, TYPE02_WEIGHT_OR_VOLUME_KEY_BIT_POSITION)) {
++            return new SaleReturnExtensionValues(1.0, qtyOrWeightOrVolume, unitPriceCents);
++        }
++        return new SaleReturnExtensionValues(qtyOrWeightOrVolume, 0.0, unitPriceCents);
++    }
++
++    /** Extrae la quantity legacy de un item desde Type01 o Type02. */
+     private double getItemQuantity(TslLineItem item) {
+-        if (!item.extensions().isEmpty()) {
+-            String[] parts = item.extensions().getFirst().split("\\|", -1);
+-            long parsedQty = parts.length > 5 ? parseLong(parts[5]) : 0L;
+-            if (parsedQty > 0) return parsedQty;
+-        }
+-        return 1.0;
++        return resolveSaleReturnExtensionValues(item).quantity();
+     }
+ 
+     /** Calcula unidades con signo para ItemCount legacy. */
+@@ -854,6 +864,12 @@
+     /** Convierte centavos crudos a string float legacy: 171 -> "171.0" */
+     private String centsToFloat(long cents) {
+         return cents + ".0";
++    }
++
++    /** Formatea numeros Double como XStream legacy. */
++    private String formatLegacyDouble(double value) {
++        if (Double.isNaN(value) || Double.isInfinite(value)) return "0.0";
++        return value == Math.floor(value) ? (long) value + ".0" : String.valueOf(value);
+     }
+ 
+     /** Convierte entryMethod string a float string: "5" â "5.0" */
+@@ -889,10 +905,20 @@
+         catch (NumberFormatException e) { return 0L; }
+     }
+ 
++    private double parseDouble(String value) {
++        if (value == null || value.isBlank()) return 0.0;
++        try { return Double.parseDouble(value.trim()); }
++        catch (NumberFormatException e) { return 0.0; }
++    }
++
+     private long parseLongSafe(String value) {
+         if (value == null || value.isBlank()) return 0L;
+         try { return Long.parseLong(value.trim()); }
+         catch (NumberFormatException e) { return 0L; }
++    }
++
++    private boolean isBitOn(long value, int bitPosition) {
++        return (value & (1L << bitPosition)) != 0L;
+     }
+ 
+     private String serialize(Document doc) throws Exception {
+
+
+--- Diff for /src/main/resources/application-dev.yml ---
+--- a//src/main/resources/application-dev.yml
++++ b//src/main/resources/application-dev.yml
+@@ -11,6 +11,9 @@
+         enabled: true
+       pubsub:
+         enabled: true
++      firestore:
++        enabled: true
++        database-id: ${:cer-suite-multilocal}
+ 
+ logging:
+   level:
+@@ -46,3 +49,8 @@
+       topic-distributor: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR}
+     firestore:
+       collection: ${GCP_FIRESTORE_COLLECTION:frames}
++      collection-repro: ${GCP_FIRESTORE_COLLECTION_REPRO:frames_repro}
++  repro:
++    enabled: true
++    polling-interval-ms: 30000
++    batch-size: 10
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorServiceTest.java
+@@ -140,6 +140,46 @@
+         );
+     }
+ 
++    private SaleTransaction checkoutTransactionWithLineItems(List<TslLineItem> lineItems) {
++        return new SaleTransaction(
++                "trx-test-items", "100", sampleStore,
++                retailHeader(),
++                lineItems,
++                List.of(effectiveTender()),
++                List.of(taxA()),
++                1L,
++                false,
++                "", "", "", "", "", "",
++                List.of(),
++                Map.of(),
++                null,
++                null,
++                null,
++                null,
++                List.of(),
++                List.of(),
++                List.of(),
++                "",
++                List.of(),
++                List.of(),
++                List.of(),
++                null,
++                null,
++                List.of(),
++                List.of(),
++                List.of(),
++                List.of(),
++                0L,
++                0L,
++                0L,
++                0L,
++                0L,
++                0L,
++                0L,
++                List.of()
++        );
++    }
++
+     private SaleTransaction minimalRetailTx(String firestoreId, TslTransactionHeader header) {
+         return new SaleTransaction(
+                 firestoreId, "100", sampleStore, header,
+@@ -240,6 +280,38 @@
+         Document doc = parse(xml);
+ 
+         assertEquals("1.0", text(doc, "ItemCount"));
++    }
++
++    @Test
++    void generate_saleType02Quantity_usesQuantityAndKeepsUnitsZero() throws Exception {
++        TslLineItem quantityItem = new TslLineItem(
++                1, "40000001", 200L,
++                "73", 80000, "Sale", false, "A", "SCANNED",
++                List.of("00||00|01|0100|2|0"), 0, 0L
++        );
++        String xml = generator.generate(checkoutTransactionWithLineItems(List.of(quantityItem)));
++        Document doc = parse(xml);
++
++        assertEquals("2.0", text(doc, "ItemCount"));
++        assertEquals("2.0", text(doc, "Quantity"));
++        assertEquals("0.0", text(doc, "units"));
++        assertEquals("100.0", text(doc, "RegularSalesUnitPrice"));
++    }
++
++    @Test
++    void generate_saleType02Weight_usesUnitsAndCountsOneQuantity() throws Exception {
++        TslLineItem weightItem = new TslLineItem(
++                1, "40353401", 344L,
++                "89", 281605, "Sale", false, "A", "SCANNED",
++                List.of("00||00|01|1194|288|72"), 0, 0L
++        );
++        String xml = generator.generate(checkoutTransactionWithLineItems(List.of(weightItem)));
++        Document doc = parse(xml);
++
++        assertEquals("1.0", text(doc, "ItemCount"));
++        assertEquals("1.0", text(doc, "Quantity"));
++        assertEquals("288.0", text(doc, "units"));
++        assertEquals("1194.0", text(doc, "RegularSalesUnitPrice"));
+     }
+ 
+     // -----------------------------------------------------------------------
+
+

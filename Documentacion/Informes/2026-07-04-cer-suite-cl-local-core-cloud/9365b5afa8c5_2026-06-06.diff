@@ -1,0 +1,142 @@
+--- Diff for /Dockerfile ---
+--- a//Dockerfile
++++ b//Dockerfile
+@@ -1,48 +1,30 @@
+-# ==========================================
+-# Etapa 1: Compilación de la Aplicación
+-# ==========================================
+-FROM maven:3.9.9-eclipse-temurin-25-noble AS builder
+-WORKDIR /workspace
+-
+-# Copiar archivos de dependencias para caching de capas docker
+-COPY pom.xml .
+-RUN mvn dependency:go-offline -B
+-
+-# Copiar el código fuente
+-COPY src ./src
+-
+-# Compilar empaquetando el artefacto jar sin correr pruebas
+-RUN mvn package -DskipTests -B
+-
+-# ==========================================
+-# Etapa 2: Imagen de Ejecución de Producción
+-# ==========================================
+-FROM eclipse-temurin:25-jre-noble
+-
+-# Definir variables de entorno de JVM recomendadas para contenedores y Java 25
+-ENV JAVA_OPTS="-XX:+UseG1GC \
+-               -XX:+UseNUMA \
+-               -XX:+UseStringDeduplication \
+-               -XX:MaxRAMPercentage=75.0 \
+-               -XX:MinRAMPercentage=50.0 \
+-               -XX:+UseVirtualThreadScheduler \
+-               --enable-preview"
+-
++FROM docker.io/library/maven:3-eclipse-temurin-25 AS build
+ WORKDIR /app
+ 
+-# Crear grupo y usuario de sistema "spring" no-root para seguridad del pod en GKE
+-RUN groupadd -g 1001 spring && \
+-    useradd -r -u 1001 -g spring spring && \
+-    chown -R spring:spring /app
++# Copiar codigo fuente
++COPY . .
+ 
+-# Copiar el jar compilado desde la etapa constructora
+-COPY --from=builder --chown=spring:spring /workspace/target/*.jar app.jar
++# Compilar dentro del contenedor
++RUN mvn clean package -DskipTests
+ 
+-# Cambiar al usuario no privilegiado
+-USER spring:spring
++FROM docker.io/library/eclipse-temurin:25-jre
++WORKDIR /app
+ 
+-# Exponer el puerto estándar del microservicio
++
++# Crear usuario no root
++RUN groupadd --gid 10001 appgroup && \
++    useradd --uid 10001 --gid appgroup --shell /bin/bash --create-home appuser
++
++COPY --from=build /app/target/*.jar app.jar
++RUN chown -R appuser:appgroup /app
++
++
++
++# Switch to non-root user
++USER appuser
++
++# Expose the port
+ EXPOSE 8080
+ 
+-# Endpoint de inicio inyectando dinámicamente las JAVA_OPTS
+-ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
++# Run the jar file with optimized JVM options
++ENTRYPOINT ["java", "-XX:+UseG1GC", "-Djava.security.egd=file:/dev/./urandom", "-jar", "app.jar"]
+
+
+--- Diff for /docker/dev/Dockerfile ---
+--- a//docker/dev/Dockerfile
++++ b//docker/dev/Dockerfile
+@@ -1,36 +1,30 @@
+-# ==========================================
+-# Etapa 1: Compilación de la Aplicación
+-# ==========================================
+-FROM maven:3.9.9-eclipse-temurin-25-noble AS builder
+-WORKDIR /workspace
+-
+-COPY pom.xml .
+-RUN mvn dependency:go-offline -B
+-
+-COPY src ./src
+-RUN mvn package -DskipTests -B
+-
+-# ==========================================
+-# Etapa 2: Imagen de Ejecución para Desarrollo
+-# ==========================================
+-FROM eclipse-temurin:25-jre-noble
+-
+-ENV JAVA_OPTS="-XX:+UseG1GC \
+-               -XX:MaxRAMPercentage=75.0 \
+-               -XX:MinRAMPercentage=50.0 \
+-               --enable-preview" \
+-    SPRING_PROFILES_ACTIVE=dev
+-
++FROM docker.io/library/maven:3-eclipse-temurin-25 AS build
+ WORKDIR /app
+ 
+-RUN groupadd -g 1001 spring && \
+-    useradd -r -u 1001 -g spring spring && \
+-    chown -R spring:spring /app
++# Copiar codigo fuente
++COPY . .
+ 
+-COPY --from=builder --chown=spring:spring /workspace/target/*.jar app.jar
++# Compilar dentro del contenedor
++RUN mvn clean package -DskipTests
+ 
+-USER spring:spring
++FROM docker.io/library/eclipse-temurin:25-jre
++WORKDIR /app
+ 
++
++# Crear usuario no root
++RUN groupadd --gid 10001 appgroup && \
++    useradd --uid 10001 --gid appgroup --shell /bin/bash --create-home appuser
++
++COPY --from=build /app/target/*.jar app.jar
++RUN chown -R appuser:appgroup /app
++
++
++
++# Switch to non-root user
++USER appuser
++
++# Expose the port
+ EXPOSE 8080
+ 
+-ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
++# Run the jar file with optimized JVM options
++ENTRYPOINT ["java", "-XX:+UseG1GC", "-Djava.security.egd=file:/dev/./urandom", "-jar", "app.jar"]
+
+

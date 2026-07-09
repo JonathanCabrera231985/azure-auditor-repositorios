@@ -1,0 +1,27 @@
+--- Diff for /docker/dev/Dockerfile.dev ---
+--- a//docker/dev/Dockerfile.dev
++++ b//docker/dev/Dockerfile.dev
+@@ -0,0 +1,21 @@
++FROM docker.io/library/eclipse-temurin:25-jre
++WORKDIR /app
++
++
++# Crear usuario no root
++RUN groupadd --gid 10001 appgroup && \
++    useradd --uid 10001 --gid appgroup --shell /bin/bash --create-home appuser
++
++COPY target/*.jar app.jar
++RUN chown -R appuser:appgroup /app
++
++
++
++# Switch to non-root user
++USER appuser
++
++# Expose the port
++EXPOSE 8080
++
++# Run the jar file with optimized JVM options
++ENTRYPOINT ["java", "-XX:+UseG1GC", "-Djava.security.egd=file:/dev/./urandom", "-jar", "app.jar"]
+
+

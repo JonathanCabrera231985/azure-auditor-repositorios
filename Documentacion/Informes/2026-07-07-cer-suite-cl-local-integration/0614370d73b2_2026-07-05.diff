@@ -1,0 +1,3795 @@
+--- Diff for /.claude_rules/rules_and_prompt.md ---
+--- a//.claude_rules/rules_and_prompt.md
++++ b//.claude_rules/rules_and_prompt.md
+@@ -1,380 +0,0 @@
+-# Prompt del Sistema y Reglas de Modernización: Java 25 & Spring Boot 4.0.x (GKE / GCP)
+-
+-Este archivo contiene el prompt maestro y el catálogo de reglas de ingeniería para modernizar microservicios heredados (Java 8) a una arquitectura nativa en la nube de última generación en Google Cloud Platform (GCP) utilizando **Java 25** y **Spring Boot 4.0.x**.
+-
+----
+-
+-## 1. PROMPT MAESTRO DEL SISTEMA (SYSTEM PROMPT)
+-
+-Copia y pega este prompt en el configurador de sistema de tu asistente de IA para iniciar el rol de experto.
+-
+-```text
+-Rol: Arquitecto de Software Principal & Desarrollador Senior Java 25, Spring Boot 4.0.x y Google Cloud Platform (GCP).
+-
+-Tu objetivo es actuar como un experto de élite y guiar la modernización de microservicios desarrollados originalmente en Java 8 y arquitecturas monolíticas/locales hacia sistemas altamente eficientes, inmutables y cloud-native en Java 25 y Spring Boot 4.0.x, desplegados sobre clusters de Google Kubernetes Engine (GKE).
+-
+-Reglas de Conducta y Principios Técnicos:
+-1. Java 25 Baseline: Utiliza siempre las últimas características de Java 25 de forma nativa (Virtual Threads para procesamiento I/O bloqueante, Records inmutables, Pattern Matching para switch e instanceof avanzado, mejoras en Streams API y programación funcional).
+-2. Arquitectura Hexagonal y DDD: El código debe estar rígidamente estructurado en tres capas independientes:
+-   - Capa de Dominio (domain/): Lógica de negocio pura, entidades inmutables (Records) y Puertos (interfaces de entrada/salida). Cero dependencias de frameworks (sin Spring, sin JPA, sin anotaciones externas).
+-   - Capa de Aplicación (application/): Casos de uso y servicios de aplicación que coordinan las transacciones y llaman a los puertos.
+-   - Capa de Infraestructura (infrastructure/): Adaptadores tecnológicos concretos (base de datos con JPA, mensajería con Pub/Sub, persistencia física con GCS, controladores web, schedulers de Spring).
+-3. Estructura de Persistencia en Base de Datos: Organizar el adaptador de base de datos bajo sub-paquetes limpios de Spring Boot:
+-   - infrastructure/adapter/out/db/entity/: Para albergar entidades de Hibernate/JPA puras.
+-   - infrastructure/adapter/out/db/repository/: Para albergar interfaces Spring Data JPA que extienden JpaRepository.
+-   - Toda la lógica del adaptador que implementa el puerto del dominio se mantiene en infrastructure/adapter/out/db/.
+-4. Eliminación de Stored Procedures (Repositorio Puro): No se permite la invocación de procedimientos almacenados en base de datos. La base de datos debe tratarse estrictamente como un motor de persistencia relacional (Cloud SQL). Toda la lógica de negocio debe migrarse a código Java funcional en la capa de aplicación y mapearse a través de Spring Data JPA.
+-5. Migración de Almacenamiento Físico: Queda prohibido el uso del sistema de archivos local. Todo almacenamiento físico de archivos (imágenes, reportes, logs manuales) debe migrarse de manera transparente al uso de Buckets de Google Cloud Storage (GCS).
+-6. Migración de Mensajería a GCP Pub/Sub: Sustituir integraciones síncronas o de mensajería heredada por Google Cloud Pub/Sub. Implementar procesamiento altamente concurrente mediante Virtual Threads para que la lectura de tópicos y el procesamiento de mensajes sea extremadamente eficiente, rápido y no consuma pools de hilos pesados del sistema operativo.
+-7. Eliminación de Demonios Independientes (Schedules): Los demonios del sistema heredados que corren en hilos/bucles infinitos (`while(true)`) deben ser migrados a planificadores declarativos `@Scheduled` de Spring, configurados de manera eficiente con un Virtual Thread Task Executor.
+-8. Logs Estructurados en JSON para Cloud Logging: Todo el logging de la aplicación en producción debe realizarse de forma estructurada en formato JSON optimizado para Google Cloud Logging (Stackdriver) usando las capacidades nativas de Spring Boot 4/3.4+ (`logging.structured.format.console=gcp`).
+-9. Configuración Dinámica por Ambientes (Spring Profiles): Las configuraciones del microservicio deben organizarse en perfiles de configuración independientes bajo recursos:
+-   - application.yml: Contiene configuraciones genéricas compartidas (ej. activación de hilos virtuales, nombre de la aplicación).
+-   - application-local.yml: Configuración de desarrollo local con logs coloreados en texto plano y cadena de conexión a localhost.
+-   - application-prod.yml: Configuración productiva de GKE, forzando logs en JSON/GCP y leyendo base de datos y parámetros de GCP estrictamente de variables de entorno inyectadas.
+-10. Configuración K8s y Contenerización: El empaquetado debe ser multi-stage basado en Dockerfile optimizado para Java 25 (imagen de ejecución mínima, no-root para máxima seguridad). Generar manifiestos de Kubernetes bajo el directorio 'k8s' (Deployment, Service, HPA, ConfigMap, Secret) con sondas de vida (liveness/readiness probes) y límites de recursos estrictos.
+-11. Todo codigo, variables, entidad, dto, interfaces, repository, usecase, etc. Todo codigo escrito debe ser en ingles, codigo limpio y evitando codigo smells, aplicando buenas practicas de codigo, los comentarios deben ser en español.
+-Cuando respondas al usuario, proporciona siempre código limpio, optimizado, con tipado fuerte, utilizando las mejores prácticas de programación funcional (map, flatMap, filter, collect, records, pattern matching) y explicaciones técnicas de alto nivel.
+-12.- Existe un template en D:\SIPECOM\repository-git\cer-gcp\templates\templates donde se debe seguir la misma estructura para desarrollos y APIs.
+-13. Cobertura de código con JaCoCo: Todo proyecto Spring Boot debe incluir el plugin `jacoco-maven-plugin` versión 0.8.13 en el bloque `<build><plugins>` del `pom.xml`, con las dos ejecuciones estándar: `prepare-agent` (sin id explícito, fase por defecto) y `report` (id=report, fase=test). Esta configuración es compatible con Java 25 y genera el reporte en `target/site/jacoco/`. El objetivo mínimo de cobertura es 80% de líneas según estándar SonarQube.
+-```xml
+-<plugin>
+-    <groupId>org.jacoco</groupId>
+-    <artifactId>jacoco-maven-plugin</artifactId>
+-    <version>0.8.13</version>
+-    <executions>
+-        <execution>
+-            <goals>
+-                <goal>prepare-agent</goal>
+-            </goals>
+-        </execution>
+-        <execution>
+-            <id>report</id>
+-            <phase>test</phase>
+-            <goals>
+-                <goal>report</goal>
+-            </goals>
+-        </execution>
+-    </executions>
+-</plugin>
+-```
+-```
+-
+----
+-
+-## 2. REGLAS TÉCNICAS Y EQUIVALENCIAS DE CÓDIGO (JAVA 8 VS JAVA 25)
+-
+-Aplica estrictamente esta matriz de transformación técnica durante la migración del código base:
+-
+-| Elemento / Tecnología | Patrón en Java 8 (Heredado) | Patrón en Java 25 (Modernizado) |
+-| :--- | :--- | :--- |
+-| **Representación de Datos** | Clases POJO mutables con boilerplate (Getters/Setters, `hashCode`, `toString` manuales). | **Java Records**. Datos inmutables por defecto, declaración concisa con validaciones en constructor compacto. |
+-| **Estructuras de Control** | `if-else` en cadena, `instanceof` con casteo manual explícito, `switch` limitado a tipos primitivos y Strings. | **Pattern Matching para Switch**. Uso de `switch` como expresión con `yield`, emparejamiento por tipo de record y guardas condicionales (`when`). |
+-| **Acceso a Datos** | Llamadas directas JDBC/Hibernate a Procedimientos Almacenados (`SP_OBTIENE_DATOS...`). | **Spring Data JPA & Java Streams** (organizados en sub-directorios `/entity` y `/repository` del adaptador). |
+-| **Almacenamiento Físico** | Lectura/Escritura en disco duro local (`/opt/app/files/...`) mediante `java.io.FileWriter`. | **Google Cloud Storage (GCS)** a través de `Storage` de Spring Cloud GCP Starter Storage. |
+-| **Mensajería** | Colas heredadas locales o procesos batch síncronos. | **GCP Pub/Sub** interactuando a través de `PubSubTemplate` asíncrono. |
+-| **Concurrencia / Procesamiento** | Pools de hilos fijos (`ExecutorService` pesado de OS) o demonios bloqueantes. | **Virtual Threads (Project Loom)**. Hilos virtuales de Java 25 ultraligeros usando `Executors.newVirtualThreadPerTaskExecutor()`. |
+-| **Tareas del Sistema** | Demonios con bucle infinito `while(true) { Thread.sleep(...) }`. | Planificadores declarativos de Spring **`@Scheduled`** administrados por un Executor de hilos virtuales. |
+-| **Logging** | Logback estándar de texto plano (`%d{yyyy-MM-dd...} [%thread] %level...`). | **Logging JSON Estructurado** nativo de Spring Boot en producción (`logging.structured.format.console=gcp`). |
+-| **Configuraciones** | Archivos de propiedades locales `.properties` con credenciales quemadas. | **Spring Profiles** (`application.yml` genérico + `application-local.yml` + `application-prod.yml` inyectando K8s Secrets/ConfigMaps). |
+-
+----
+-
+-## 3. COMPENDIO DE CÓDIGO: ANTES VS DESPUÉS (MIGRACIÓN PRÁCTICA)
+-
+-### 3.1. Caso 1: Lógica de Negocio y Persistencia (Eliminación de SP)
+-
+-#### ❌ ANTES (Java 8 + Procedimiento Almacenado Bloqueante):
+-```java
+-public List<LegacyTransaction> procesarTransaccionesHeredadas(Long loteId) {
+-    Connection conn = null;
+-    CallableStatement stmt = null;
+-    ResultSet rs = null;
+-    List<LegacyTransaction> resultado = new ArrayList<>();
+-    try {
+-        conn = dataSource.getConnection();
+-        stmt = conn.prepareCall("{call SP_OBTIENE_Y_PROCESA_TRANSACCIONES(?, ?)}");
+-        stmt.setLong(1, loteId);
+-        stmt.registerOutParameter(2, Types.VARCHAR);
+-        rs = stmt.executeQuery();
+-        while (rs.next()) {
+-            LegacyTransaction tx = new LegacyTransaction();
+-            tx.setId(rs.getLong("id"));
+-            tx.setMonto(rs.getDouble("monto"));
+-            tx.setEstado(rs.getString("estado"));
+-            if ("APROBADO".equals(tx.getEstado())) {
+-                tx.setAplicaDescuento(true);
+-            }
+-            resultado.add(tx);
+-        }
+-    } catch (SQLException e) {
+-        log.error("Error ejecutando SP", e);
+-    }
+-    return resultado;
+-}
+-```
+-
+-####  DESPUÉS (Java 25 + JPA + Programación Funcional e Inmutabilidad en Dominio Hexagonal):
+-```java
+-// domain/model/Transaction.java (Inmutable Record)
+-public record Transaction(Long id, BigDecimal monto, String estado, boolean aplicaDescuento) {
+-    public Transaction withDescuento(boolean aplica) {
+-        return new Transaction(this.id, this.monto, this.estado, aplica);
+-    }
+-}
+-
+-// application/service/TransactionService.java
+-@Transactional(readOnly = true)
+-public List<Transaction> procesarTransaccionesModernas(Long loteId) {
+-    return transactionRepositoryPort.findByLoteId(loteId).stream()
+-        .map(entity -> new Transaction(entity.getId(), entity.getMonto(), entity.getEstado(), false))
+-        .map(tx -> switch (tx.estado()) {
+-            case "APROBADO" -> tx.withDescuento(true);
+-            case "RECHAZADO", "PENDIENTE" -> tx.withDescuento(false);
+-            case null, default -> throw new IllegalArgumentException("Estado desconocido: " + tx.estado());
+-        })
+-        .toList();
+-}
+-```
+-
+----
+-
+-### 3.2. Caso 2: Manejo de Archivos Físicos
+-
+-#### ❌ ANTES (Java 8 + Sistema de Archivos Local Rígido):
+-```java
+-public void guardarReporteLocal(String filename, byte[] content) throws IOException {
+-    File dir = new File("/opt/app/reportes");
+-    if (!dir.exists()) {
+-        dir.mkdirs();
+-    }
+-    File file = new File(dir, filename);
+-    try (FileOutputStream fos = new FileOutputStream(file)) {
+-        fos.write(content);
+-        fos.flush();
+-    }
+-}
+-```
+-
+-####  DESPUÉS (Java 25 + GCP Cloud Storage Adapter):
+-```java
+-// infrastructure/adapter/out/storage/GcsStorageAdapter.java
+-@Component
+-public class GcsStorageAdapter implements CloudStoragePort {
+-
+-    private final Storage googleCloudStorage;
+-    private final String bucketName;
+-
+-    public GcsStorageAdapter(Storage googleCloudStorage, 
+-                             @Value("${app.gcp.storage.bucket-name}") String bucketName) {
+-        this.googleCloudStorage = googleCloudStorage;
+-        this.bucketName = bucketName;
+-    }
+-
+-    @Override
+-    public void guardarArchivo(String rutaArchivo, byte[] contenido, String contentType) {
+-        var blobId = BlobId.of(bucketName, rutaArchivo);
+-        var blobInfo = BlobInfo.newBuilder(blobId)
+-                .setContentType(contentType)
+-                .build();
+-        
+-        googleCloudStorage.create(blobInfo, contenido);
+-        log.info("Archivo almacenado exitosamente en GCS. Bucket: {} | Path: {}", bucketName, rutaArchivo);
+-    }
+-}
+-```
+-
+----
+-
+-### 3.3. Caso 3: Demonios de Backend a Scheduled Tasks Concurrentes
+-
+-#### ❌ ANTES (Java 8 + Hilo/Loop Infinito Manual Bloqueante):
+-```java
+-public class DemonioProcesamiento implements Runnable {
+-    private boolean activo = true;
+-
+-    @Override
+-    public void run() {
+-        while (activo) {
+-            try {
+-                ejecutarAccionDeNegocio();
+-                Thread.sleep(60000);
+-            } catch (InterruptedException e) {
+-                Thread.currentThread().interrupt();
+-                activo = false;
+-            }
+-        }
+-    }
+-}
+-```
+-
+-####  DESPUÉS (Java 25 + Spring Scheduler con Hilos Virtuales):
+-```java
+-// infrastructure/adapter/in/scheduler/ScheduledTaskAdapter.java
+-@Component
+-public class ScheduledTaskAdapter {
+-
+-    private final ProcessTransactionUseCase processTransactionUseCase;
+-
+-    public ScheduledTaskAdapter(ProcessTransactionUseCase processTransactionUseCase) {
+-        this.processTransactionUseCase = processTransactionUseCase;
+-    }
+-
+-    @Scheduled(fixedRateString = "${app.scheduling.interval-ms:60000}")
+-    public void ejecutarTareaProgramada() {
+-        log.info("Iniciando ciclo planificado de procesamiento.");
+-        processTransactionUseCase.ejecutarMigracionLotesPendientes();
+-        log.info("Ciclo planificado finalizado con éxito.");
+-    }
+-}
+-```
+-
+----
+-
+-### 3.4. Caso 4: Logging Estructurado y Enriquecimiento de Logs (Serilog-Equivalent)
+-
+-#### ❌ ANTES (Java 8 + Logs Concatenados / Texto Plano / Sin Contexto):
+-```java
+-log.info("Iniciando procesamiento de lote " + codigoLote);
+-try {
+-    procesar(codigoLote);
+-    log.info("Lote " + codigoLote + " procesado exitosamente. Total: " + total);
+-} catch (Exception e) {
+-    log.error("Error al procesar lote: " + e.getMessage());
+-}
+-```
+-
+-#### ✔️ DESPUÉS (Java 25 + SLF4J 2.0+ Fluent API + Enriquecimiento MDC):
+-```java
+-// 1. Enriquecedores automáticos a nivel HTTP / Eventos / Schedules (MDC Context)
+-MDC.put("correlation_id", correlationId);
+-MDC.put("http.method", request.getMethod());
+-MDC.put("http.uri", request.getRequestURI());
+-
+-// 2. Logging de negocio usando la API Fluida de SLF4J 2.0+
+-log.atInfo()
+-   .setMessage("Lote de transacciones procesado exitosamente y cargado a GCS")
+-   .addKeyValue("lote.codigo", codigoLote)
+-   .addKeyValue("lote.total_transacciones", total)
+-   .addKeyValue("lote.ruta_gcs", rutaGcs)
+-   .log();
+-```
+-
+-*Nota: Cualquier metadato agregado con `addKeyValue` o inyectado en el `MDC` es capturado de manera automática por el formateador JSON de producción (`console: gcp`) convirtiéndolo en llaves estructuradas de primer nivel en GCP Cloud Logging para su posterior visualización en Dashboards.*
+-
+----
+-
+-### 3.5. Caso 5: Autenticación JWT y Reorganización Web (Controller / DTO)
+-
+-#### ❌ ANTES (Java 8 + Mezcla de DTOs y Controladores en un único paquete sin seguridad estándar):
+-```java
+-// infrastructure/web/TransactionController.java
+-@RestController
+-public class TransactionController {
+-    @PostMapping("/login")
+-    public Map<String, String> login(@RequestParam String user, @RequestParam String pass) {
+-        // Validación quemada y sin token estructurado
+-        if("admin".equals(user) && "admin".equals(pass)) {
+-            Map<String, String> map = new HashMap<>();
+-            map.put("token", "12345");
+-            return map;
+-        }
+-        throw new RuntimeException("Error");
+-    }
+-}
+-```
+-
+-#### ✔️ DESPUÉS (Java 25 + Spring Security 6.x + JWT + Records Inmutables en Subpaquetes web/controller y web/dto):
+-```java
+-// 1. DTO como Java Record inmutable bajo web/dto/
+-package com.example.migration.infrastructure.adapter.in.web.dto;
+-public record LoginRequest(String username, String password) {}
+-
+-// 2. Controlador REST limpio bajo web/controller/
+-package com.example.migration.infrastructure.adapter.in.web.controller;
+-
+-@RestController
+-@RequestMapping("/api/v1/auth")
+-public class AuthController {
+-    private final AuthenticationManager authManager;
+-    private final JwtTokenProvider tokenProvider;
+-
+-    @PostMapping("/login")
+-    public ResponseEntity<AuthResponse> login(@RequestBody LoginRequest req) {
+-        var auth = authManager.authenticate(new UsernamePasswordAuthenticationToken(req.username(), req.password()));
+-        String token = tokenProvider.generarToken(auth);
+-        return ResponseEntity.ok(new AuthResponse(token, tokenProvider.getExpirationMs()));
+-    }
+-}
+-```
+-
+----
+-
+-## Convenciones de código
+-
+-- **Nombres** (clases, métodos, variables, paquetes): inglés
+-- **Comentarios, logs, Javadoc, descripciones**: español
+-- Logs con nivel apropiado: `DEBUG` para flujo interno, `INFO` para eventos de negocio, `WARN` para situaciones degradadas manejadas, `ERROR` para fallos inesperados en el camino crítico
+-- No usar `System.out.println` — siempre SLF4J via `@Slf4j`
+-- Lombok `@Data`, `@Builder`, `@RequiredArgsConstructor`, `@Slf4j` son el estándar del proyecto
+-- Modelos de dominio sin estado mutable: preferir **Java Records** para datos inmutables
+-- Usar programación funcional (`stream`, `map`, `filter`, `.toList()`) en lugar de bucles imperativos donde sea legible
+-- No hardcodear valores de negocio en el código — todo debe venir de la configuración o de constantes en la clase correspondiente
+-- No generar codigo smells 
+-- No generar vulnerabilidades Sonar
+-- Todo codigo debe pasar las vulnerabilidades de SonarQube
+-
+----
+-
+-### Logging
+-
+-- Logs de flujo interno (un solo argumento): `log.debug/info/warn/error("mensaje {}", variable)`
+-- **Eventos de negocio con múltiples atributos**: usar la API fluida de SLF4J 2.0+:
+-  ```java
+-  log.atInfo()
+-     .setMessage("Descripción del evento")
+-     .addKeyValue("entidadId", id)
+-     .addKeyValue("atributo", valor)
+-     .log();
+-  ```
+-- Para logs con excepción: `.setCause(ex)` en lugar de pasar `ex.getMessage()` como argumento
+-- En producción, el formato GCP JSON (`logging.structured.format.console=gcp`) convierte automáticamente los `addKeyValue` en campos estructurados de Cloud Logging — **no concatenar valores en el mensaje**
+-- MDC para contexto transversal en operaciones largas
+-
+-
+----
+-
+-
+-### Variables de entorno (prod)
+-
+-| Variable | Descripción | Default |
+-|----------|-------------|---------|
+-| `GOOGLE_CLOUD_PROJECT` | Project ID de GCP | _(requerido en prod)_ |
+-| [agregar variables específicas del servicio] | | |
+-
+----
+-
+-## Tests
+-
+-- Los tests unitarios en `unit/` **no deben levantar contexto de Spring** ni conectarse a servicios externos. Solo JUnit 5 + Mockito (`@ExtendWith(MockitoExtension.class)`).
+-- Los tests de integración en `integration/` se anotan con `@Disabled` y requieren emuladores o infraestructura local.
+-- Cuando un stub de Mockito solo aplica a algunos tests de la clase, usar `lenient().when(...)` en el `@BeforeEach` para evitar `UnnecessaryStubbingException`.
+-- Cada puerto (interfaz de dominio) debe tener al menos un test de happy path y uno de error.
+-- Debes generar minimo 80% de codigo testeable de acuerdo a los estanderes de SonarQube
+-
+-```bash
+-# Solo tests unitarios
+-mvn test -Dtest="*Test" -Dexclude="*IntegrationTest"
+-
+-# Test de integración específico (requiere emuladores)
+-mvn test -Dtest=NombreIntegrationTest
+-```
+-
+----
+-
+-## 4. INSTRUCCIONES DE DESPLIEGUE EN GKE (GCP)
+-
+-Cuando ejecutes la migración de infraestructura, debes asegurar los siguientes estándares:
+-1. **Configuración de Conectividad**: Toda comunicación con Google Cloud (Storage, Pub/Sub) debe hacerse preferiblemente usando **Workload Identity** en GKE en lugar de inyectar llaves JSON en disco.
+-2. **Sondas Actuator**: Configura las sondas de Kubernetes (`livenessProbe` y `readinessProbe`) apuntando a `/actuator/health/liveness` y `/actuator/health/readiness` respectively.
+-3. **Escalamiento Dinámico (HPA)**: Define el HPA para escalar los pods del microservicio de forma horizontal basándote en la utilización de la CPU (ej. 75%) o en métricas de mensajería (mensajes pendientes en cola Pub/Sub).
+
+
+--- Diff for /.claude_rules/sharedlibs.md ---
+--- a//.claude_rules/sharedlibs.md
++++ b//.claude_rules/sharedlibs.md
+@@ -1,1080 +0,0 @@
+-# SharedLibs — Mapa de Dependencias y Guía de Uso
+-
+-> Referencia centralizada para agentes e ingenieros. Documenta **qué ofrece cada módulo**,
+-> **cuándo incluirlo**, **cómo declararlo en `pom.xml`** y **qué configurar en `application.yml`**.
+-
+----
+-
+-## Información del artefacto
+-
+-| Campo | Valor |
+-|---|---|
+-| `groupId` | `com.elrosado` |
+-| Versión actual | `1.0.0` |
+-| Registry | Azure Artifacts — `SUITE-CLOUD` |
+-| Registry URL | `https://azdevops1.sipecom.com/SIPEProyectos/CER-SUITE-CLOUD/_packaging/SUITE-CLOUD/maven/v1` |
+-| Java | 25 |
+-| Spring Boot | 4.0.6 |
+-| spring-cloud-gcp | 8.0.2 |
+-
+-### Declaración del BOM en el microservicio consumidor
+-
+-Antes de incluir cualquier módulo, el `pom.xml` del microservicio debe importar el BOM de GCP
+-para que las versiones de los starters queden gestionadas centralmente:
+-
+-```xml
+-<dependencyManagement>
+-  <dependencies>
+-    <dependency>
+-      <groupId>com.google.cloud</groupId>
+-      <artifactId>spring-cloud-gcp-dependencies</artifactId>
+-      <version>8.0.2</version>
+-      <type>pom</type>
+-      <scope>import</scope>
+-    </dependency>
+-  </dependencies>
+-</dependencyManagement>
+-```
+-
+----
+-
+-## Grafo de dependencias inter-módulo
+-
+-```
+-Tier 0 — sin dependencias entre módulos
+-  jlib-common
+-  jlib-logging
+-  jlib-kms
+-  jlib-sapcalls
+-  jlib-jwt
+-  jlib-storage
+-  jlib-redis
+-  jlib-documents
+-  jlib-sheet
+-  jlib-barcode
+-  jlib-timezone
+-  jlib-health
+-  jlib-pubsub
+-  jlib-firestore
+-  jlib-multisql
+-
+-Tier 1 — dependen de tier 0
+-  jlib-secretmanager  →  jlib-kms
+-  jlib-invoicing      →  jlib-documents
+-  jlib-pubsub-logging →  jlib-pubsub
+-  jlib-apicalls       (tier 0 real, clasificado en tier 1 para claridad de build)
+-
+-Tier 2 — dependen de tier 1
+-  jlib-sql            →  jlib-secretmanager  →  jlib-kms
+-  jlib-cache          →  jlib-apicalls  +  jlib-redis
+-  jlib-worker         →  jlib-timezone  +  jlib-common
+-  jlib-routervalidator →  jlib-apicalls
+-```
+-
+-> **Regla para el agente**: nunca invertir el sentido de las flechas.
+-> Un módulo de tier 0 NO puede depender de uno de tier 1 o 2.
+-
+----
+-
+-## Módulos — referencia completa
+-
+----
+-
+-### jlib-common
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-common\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | `CommonClassesLibrary`, anotaciones y excepciones base |
+-
+-**Qué ofrece**
+-
+-POJOs, anotaciones y excepciones reutilizables en cualquier contexto Java sin necesidad de Spring.
+-
+-- `PagedResult<T>` — envoltorio de paginación
+-- `@OriginalName` — preserva el nombre original de un campo
+-- `@TemplateParameter` — marca parámetros de plantilla
+-- `BusinessRuleValidationException` — excepción de negocio (400)
+-- `DuplicateResourceException` — recurso duplicado (409)
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio necesita los DTOs de paginación comunes.
+-- Se requieren las excepciones de negocio estandarizadas.
+-- Se usan las anotaciones de metadatos.
+-
+-**No incluir si** solo se necesitan excepciones genéricas de Spring (usa las nativas de Spring).
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-common</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml** — ninguna requerida.
+-
+----
+-
+-### jlib-logging
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-logging\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | `SerilogLibrary` (MDC filter + sink GCP Cloud Logging) |
+-
+-**Qué ofrece**
+-
+-- `MdcLoggingFilter` — enriquece automáticamente el MDC de cada request HTTP con:
+-  - `traceId` / `spanId` — del header `X-Cloud-Trace-Context`
+-  - `correlationId` — del header `X-Correlation-Id` o UUID generado
+-  - `logging.googleapis.com/trace` — campo nativo de Cloud Logging
+-- `logstash-logback-encoder` como dependencia transitiva.
+-- `logback-jlib-base.xml` — configuración base de Logback lista para incluir.
+-
+-**Cuándo incluirlo**
+-
+-Todo microservicio que corra en GCP debe incluirlo. Es la dependencia de infraestructura de logging obligatoria.
+-
+-**No incluirlo en otras librerías `jlib-*`** — las librerías no configuran su propio output.
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-logging</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-jlib:
+-  logging:
+-    enabled: true           # default: true
+-    correlation-header: X-Correlation-Id   # default
+-```
+-
+-**Configuración logback-spring.xml requerida en el microservicio**
+-
+-```xml
+-<configuration>
+-  <springProfile name="local">
+-    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+-      <encoder>
+-        <pattern>%d{HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n</pattern>
+-      </encoder>
+-    </appender>
+-    <root level="INFO"><appender-ref ref="CONSOLE"/></root>
+-  </springProfile>
+-  <springProfile name="!local">
+-    <include resource="logback-jlib-base.xml"/>
+-  </springProfile>
+-</configuration>
+-```
+-
+----
+-
+-### jlib-kms
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-kms\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | `KmsLibrary` |
+-
+-**Qué ofrece**
+-
+-- `IGoogleKmsService` / `GoogleKmsService` — cifrado y descifrado simétrico con GCP KMS.
+-- `KmsProperties` — configuración de key ring y key name.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio cifra datos sensibles en reposo (contraseñas, tokens, valores PII).
+-- Se requiere como transitiva al usar `jlib-secretmanager`.
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-kms</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-# Equivalente a appsettings.json: KmsSettings
+-google:
+-  kms:
+-    project-id: ${GCP_PROJECT_ID}
+-    location-id: ${KMS_LOCATION:us-central1}
+-    key-ring-id: ${KMS_KEY_RING}
+-    key-id: ${KMS_KEY_ID}
+-```
+-
+----
+-
+-### jlib-secretmanager
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-secretmanager\` |
+-| Tier | 1 — depende de `jlib-kms` |
+-| Equivalente .NET | `SecretManagerLibrary` |
+-
+-**Qué ofrece**
+-
+-- `ISecretManager` / `SecretManagerService` — lectura de secretos de GCP Secret Manager con descifrado KMS opcional.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio necesita leer API keys, contraseñas o connection strings de GCP Secret Manager.
+-- Es dependencia transitiva de `jlib-sql`.
+-
+-**Incluye transitivamente**: `jlib-kms`
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-secretmanager</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-spring:
+-  cloud:
+-    gcp:
+-      project-id: ${GCP_PROJECT_ID}
+-# KMS config requerida si se usa descifrado (ver jlib-kms)
+-```
+-
+----
+-
+-### jlib-apicalls
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-apicalls\` |
+-| Tier | 1 (clasificación de build) — sin dependencias inter-módulo |
+-| Equivalente .NET | `ApiCallsLibrary` |
+-
+-**Qué ofrece**
+-
+-- `ApiCaller` (clase abstracta) — cliente HTTP base con autenticación automática usando `WebClient`.
+-- `ISecurityMicroService` / `SecurityMicroService` — cliente del microservicio de Seguridad.
+-- `GenericResponse<T>` — DTO envoltorio de respuestas API.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio llama a otros microservicios de CER Suite Cloud autenticados.
+-- Es dependencia transitiva de `jlib-cache` y `jlib-routervalidator`.
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-apicalls</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-# Equivalente a appsettings.json: ApiConfig
+-api-config:
+-  security-url: ${SECURITY_SERVICE_URL}
+-  timeout-seconds: ${API_TIMEOUT:30}
+-```
+-
+----
+-
+-### jlib-sapcalls
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-sapcalls\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | `SapCallsLibrary` |
+-
+-**Qué ofrece**
+-
+-- `SapCaller` (clase abstracta) — cliente SOAP para servicios SAP con `WebClient`.
+-- `SoapXmlHelper` — utilidades de serialización/deserialización SOAP.
+-- `SoapVersion` (enum) — SOAP 1.1 / 1.2.
+-- `SapApiConfig` — configuración por instancia (URL, usuario, contraseña).
+-- `SapApiException` — excepción tipada de llamadas SAP.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio integra con SAP via SOAP (RFC, BAPI, IDocs expostos como web services).
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-sapcalls</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml** — la configuración SAP se pasa por instancia via `SapApiConfig` (builder). No requiere prefijo global.
+-
+----
+-
+-### jlib-jwt
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-jwt\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | `JwtValidatorLibrary` |
+-
+-**Qué ofrece**
+-
+-- `JwtDecoder` (bean) — validación de tokens Firebase JWT integrada con Spring Security OAuth2.
+-- `JwtProperties` — URL del JWKS de Firebase y audience.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio protege sus endpoints con tokens Firebase (autenticación).
+-- Se requiere validación de JWT en el gateway o en el microservicio directamente.
+-
+-**No incluirlo si** la autenticación la maneja exclusivamente el API Gateway (Cloud Endpoints / Apigee).
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-jwt</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-# Equivalente a appsettings.json: FirebaseJwtSettings
+-firebase:
+-  jwt:
+-    jwks-uri: https://www.googleapis.com/service_accounts/v1/jwk/securetoken%40system.gserviceaccount.com
+-    audience: ${FIREBASE_PROJECT_ID}
+-```
+-
+----
+-
+-### jlib-storage
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-storage\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | `GoogleCloudStorageServiceLibrary` |
+-
+-**Qué ofrece**
+-
+-- `IGoogleCloudStorageService` / `GoogleCloudStorageService` — upload, download, delete y metadata en GCS (síncrono y asíncrono).
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio almacena o recupera archivos de GCS (PDFs, imágenes, Excel, XML).
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-storage</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-spring:
+-  cloud:
+-    gcp:
+-      project-id: ${GCP_PROJECT_ID}
+-      storage:
+-        bucket: ${GCS_BUCKET_NAME}
+-```
+-
+----
+-
+-### jlib-redis
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-redis\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | `RedisLibrary` |
+-
+-**Qué ofrece**
+-
+-- `IRedisService` / `RedisService` — get, set, delete, TTL y operaciones batch en Redis.
+-- `RedisProperties` — host, port, password, TTL default.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio necesita caché en Redis (sesiones, tokens, resultados de consultas frecuentes).
+-- Es dependencia transitiva de `jlib-cache`.
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-redis</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-# Equivalente a appsettings.json: RedisSettings
+-redis:
+-  host: ${REDIS_HOST:localhost}
+-  port: ${REDIS_PORT:6379}
+-  password: ${REDIS_PASSWORD:}
+-  default-ttl-seconds: ${REDIS_TTL:3600}
+-```
+-
+----
+-
+-### jlib-cache
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-cache\` |
+-| Tier | 2 — depende de `jlib-apicalls` + `jlib-redis` |
+-| Equivalente .NET | `CommonCacheLibrary` |
+-
+-**Qué ofrece**
+-
+-- `ICatalogCacheUtils` — caché de catálogos del sistema.
+-- `ISocietyUtils` / `ISocietiesCacheInitializer` — caché de sociedades con inicialización al arranque.
+-- Caffeine como segundo nivel de caché en memoria.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio consume catálogos o datos de sociedades frecuentemente y quiere reducir llamadas al microservicio de Configuración.
+-
+-**Incluye transitivamente**: `jlib-apicalls`, `jlib-redis`
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-cache</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml** — requiere las propiedades de `jlib-apicalls` (`api-config`) y `jlib-redis` (`redis`).
+-
+----
+-
+-### jlib-sql
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-sql\` |
+-| Tier | 2 — depende de `jlib-secretmanager` → `jlib-kms` |
+-| Equivalente .NET | `SqlServerLibrary` |
+-
+-**Qué ofrece**
+-
+-- `SqlConnectionStringResolver` — resuelve connection strings de SQL Server desde Secret Manager o directamente desde `application.yml`.
+-- `SqlProperties` — configuración del datasource.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio conecta a **una sola** base de datos SQL Server y necesita resolver la connection string desde Secret Manager.
+-- Para múltiples bases de datos usar `jlib-multisql` en su lugar.
+-
+-**Incluye transitivamente**: `jlib-secretmanager`, `jlib-kms`
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-sql</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-# Equivalente a appsettings.json: SqlSettings
+-sql:
+-  secret-name: ${SQL_SECRET_NAME:}     # nombre del secreto en Secret Manager
+-  connection-string: ${SQL_CONN:}      # alternativa directa (solo para local/dev)
+-```
+-
+----
+-
+-### jlib-multisql
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-multisql\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | Sin equivalente directo (nuevo) |
+-
+-**Qué ofrece**
+-
+-- `MultiSqlAutoConfiguration` + `MultiSqlBeanRegistrar` — registro dinámico de múltiples `DataSource`, `EntityManagerFactory` y `TransactionManager` desde YAML.
+-- `MultiSqlProperties` — lista de configuraciones de bases de datos.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio necesita conectarse a **más de una** base de datos SQL Server con JPA/Hibernate.
+-- Cada base de datos tiene su propio paquete de entidades (para la separación de `EntityManagerFactory`).
+-
+-**No usar junto con `jlib-sql`** — son mutuamente excluyentes.
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-multisql</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-multi-sql:
+-  datasources:
+-    - name: principal
+-      url: ${DB_PRINCIPAL_URL}
+-      username: ${DB_PRINCIPAL_USER}
+-      password: ${DB_PRINCIPAL_PASS}
+-      entity-packages: com.empresa.servicio.domain.principal
+-    - name: auditoria
+-      url: ${DB_AUDIT_URL}
+-      username: ${DB_AUDIT_USER}
+-      password: ${DB_AUDIT_PASS}
+-      entity-packages: com.empresa.servicio.domain.auditoria
+-```
+-
+----
+-
+-### jlib-documents
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-documents\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | `ElectronicDocumentsLibrary` |
+-
+-**Qué ofrece**
+-
+-- `ElectronicDocumentGenerator` — genera XML de documentos electrónicos SRI Ecuador: facturas, notas de crédito/débito, guías de remisión, retenciones, liquidaciones de compra.
+-- `WorkflowDocumentGenerator` — orquesta el flujo completo de generación.
+-- Modelos XML por tipo de documento.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio genera documentos electrónicos para el SRI.
+-- Es dependencia transitiva de `jlib-invoicing`.
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-documents</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml** — ninguna requerida.
+-
+----
+-
+-### jlib-invoicing
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-invoicing\` |
+-| Tier | 1 — depende de `jlib-documents` |
+-| Equivalente .NET | `InvoicingLibrary` |
+-
+-**Qué ofrece**
+-
+-- `InvoicingHelpers` — flujo completo: generación XML → firma digital → envío a SRI → consulta de estado.
+-- `CreateInvoiceRequestDto` — DTO de solicitud de factura.
+-- Modelos XML específicos de factura (`InvoiceReceiptXml`, etc.).
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio necesita el ciclo completo de facturación electrónica con SRI (no solo generación de XML).
+-
+-**Incluye transitivamente**: `jlib-documents`
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-invoicing</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml** — ninguna requerida (la URL del SRI se pasa por parámetro al servicio).
+-
+----
+-
+-### jlib-sheet
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-sheet\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | `SheetLibrary` (ClosedXML → Apache POI) |
+-
+-**Qué ofrece**
+-
+-- `ISheetBuilder` / `SheetBuilderService` — generación de archivos `.xlsx` con tablas, texto, imágenes y estilos personalizados.
+-- `TableStyleConfig` — configuración de estilos de tabla.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio genera reportes o exportaciones en formato Excel.
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-sheet</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml** — ninguna requerida.
+-
+----
+-
+-### jlib-barcode
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-barcode\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | `BarcodeLibrary` (ZXing.Net.Bindings.Windows → ZXing javase) |
+-
+-**Qué ofrece**
+-
+-- `IBarcodeHelper` / `BarcodeHelper` — generación de imágenes de códigos de barras (PNG, `byte[]`) y códigos QR.
+-- Usa `BufferedImage` (portable Linux/GCP, no requiere GDI+).
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio genera imágenes de códigos de barras o QR (documentos, etiquetas, facturas).
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-barcode</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml** — ninguna requerida.
+-
+----
+-
+-### jlib-timezone
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-timezone\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | `TimeZoneConverterLibrary` |
+-
+-**Qué ofrece**
+-
+-- `ITimeZoneResolver` / `PortableTimeZoneResolver` — conversión de fechas entre zonas horarias usando identificadores IANA.
+-- `TimeProperties` — zona horaria default de la aplicación.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio opera en múltiples zonas horarias o necesita normalizar fechas a UTC.
+-- Es dependencia transitiva de `jlib-worker`.
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-timezone</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-# Equivalente a appsettings.json: TimeSettings
+-time:
+-  default-zone: ${DEFAULT_TIMEZONE:America/Guayaquil}
+-```
+-
+----
+-
+-### jlib-health
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-health\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | `HealthChecksLibrary` |
+-
+-**Qué ofrece**
+-
+-- `HealthAutoConfiguration` — configura `spring-boot-starter-actuator` con los endpoints de health estándar para liveness y readiness probes de Cloud Run / GKE.
+-
+-**Cuándo incluirlo**
+-
+-- Todo microservicio desplegado en Cloud Run o GKE debe incluirlo para los health checks de plataforma.
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-health</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-management:
+-  endpoints:
+-    web:
+-      exposure:
+-        include: health,info
+-  endpoint:
+-    health:
+-      probes:
+-        enabled: true
+-      show-details: never
+-```
+-
+----
+-
+-### jlib-pubsub
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-pubsub\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | `PubSubServiceLibrary` |
+-
+-**Qué ofrece**
+-
+-- `IMessagePublisher` / `MessagePublisher` — publicación de mensajes a topics de GCP Pub/Sub.
+-- `IMessageSubscriber` / `MessageSubscriber` — suscripción a subscriptions de GCP Pub/Sub.
+-- `PubSubProperties` — configuración de project-id, topic y subscription.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio publica o consume mensajes asincrónicos en GCP Pub/Sub.
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-pubsub</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-# Equivalente a appsettings.json: PubSubSettings
+-pubsub:
+-  project-id: ${GCP_PROJECT_ID}
+-  topic: ${PUBSUB_TOPIC:}
+-  subscription: ${PUBSUB_SUBSCRIPTION:}
+-```
+-
+-> Topics y subscriptions **no se crean desde código** — es responsabilidad de IaC (Terraform).
+-
+----
+-
+-### jlib-pubsub-logging
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-pubsub-logging\` |
+-| Tier | 1 — depende de `jlib-pubsub` |
+-| Equivalente .NET | Sin equivalente directo (nuevo) |
+-
+-**Qué ofrece**
+-
+-- `MdcMessageSubscriber` — decorador de `IMessageSubscriber` que inyecta automáticamente el contexto MDC (traceId, correlationId) en los handlers de mensajes Pub/Sub.
+-- `PubSubLoggingProperties` — activar/desactivar la decoración.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio usa `jlib-pubsub` y necesita correlación de logs entre el publicador y el suscriptor.
+-- Complementa `jlib-logging` para la parte de mensajería asíncrona.
+-
+-**Incluye transitivamente**: `jlib-pubsub`
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-pubsub-logging</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-pubsub-logging:
+-  enabled: true   # default: true
+-```
+-
+----
+-
+-### jlib-firestore
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-firestore\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | Sin equivalente directo (nuevo) |
+-
+-**Qué ofrece**
+-
+-- `IFirestoreService` / `FirestoreService` — operaciones CRUD sobre colecciones de Cloud Firestore (síncrono y asíncrono).
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio almacena o consulta documentos en Firestore (configuraciones dinámicas, eventos, históricos).
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-firestore</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-spring:
+-  cloud:
+-    gcp:
+-      project-id: ${GCP_PROJECT_ID}
+-      firestore:
+-        enabled: true
+-```
+-
+----
+-
+-### jlib-routervalidator
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-routervalidator\` |
+-| Tier | 2 — depende de `jlib-apicalls` |
+-| Equivalente .NET | `MicroServiceRouterValidator` |
+-
+-**Qué ofrece**
+-
+-- `RouteRoleAuthorizationFilter` — filtro Spring Security que valida roles por ruta HTTP (post-autenticación).
+-- `IRouteRolesCache` / `RouteRolesMemoryCache` — caché Caffeine de roles por ruta.
+-- `RouterValidatorProperties` — URL del servicio de configuración de rutas, TTL de caché.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio implementa autorización granular por ruta y rol (además de autenticación JWT).
+-- Complementa `jlib-jwt` — jwt autentica, routervalidator autoriza.
+-
+-**Incluye transitivamente**: `jlib-apicalls`
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-routervalidator</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-# Equivalente a appsettings.json: RouterValidatorSettings
+-router-validator:
+-  config-url: ${ROUTER_CONFIG_URL}
+-  cache-ttl-seconds: ${ROUTER_CACHE_TTL:300}
+-```
+-
+----
+-
+-### jlib-worker
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-worker\` |
+-| Tier | 2 — depende de `jlib-timezone` + `jlib-common` |
+-| Equivalente .NET | `CQRSWorkerLibrary` + `WorkerHostingLibrary` |
+-
+-**Qué ofrece**
+-
+-- `WorkerEndpoint` (clase abstracta) — base para handlers de comandos CQRS via `ApplicationEventPublisher`.
+-- `IWorkerRouter` / `WorkerRouter` — enrutador de comandos a handlers por reflexión.
+-- `IWorkerCommand` — marcador de comandos CQRS.
+-- `IWorkerScheduleAdmin` — gestión de trabajos programados.
+-- `WorkerJobRegistrar` / `RouteDispatchJob` — integración con Quartz para jobs programados.
+-- `WorkerProperties` — configuración de jobs y concurrencia.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio implementa CQRS con handlers de comandos desacoplados.
+-- El microservicio ejecuta trabajos programados (polling, cleanup, reportes periódicos).
+-
+-**Incluye transitivamente**: `jlib-timezone`, `jlib-common`
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-worker</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-# Equivalente a appsettings.json: WorkerSettings
+-worker:
+-  concurrency: ${WORKER_CONCURRENCY:4}
+-  jobs:
+-    - name: cleanup
+-      cron: ${CLEANUP_CRON:0 0 2 * * ?}
+-      command: com.empresa.servicio.commands.CleanupCommand
+-```
+-
+----
+-
+-## Reglas de decisión para el agente
+-
+-### Cuándo usar cada módulo
+-
+-| Necesidad del microservicio | Módulo(s) a incluir |
+-|---|---|
+-| Logging estructurado + correlación en GCP | `jlib-logging` (obligatorio en todos) |
+-| Health checks para Cloud Run / GKE | `jlib-health` (obligatorio en todos) |
+-| Autenticación JWT Firebase | `jlib-jwt` |
+-| Autorización por ruta y rol | `jlib-jwt` + `jlib-routervalidator` |
+-| Llamadas a microservicios internos | `jlib-apicalls` |
+-| Llamadas a SAP via SOAP | `jlib-sapcalls` |
+-| Base de datos SQL Server (una sola) | `jlib-sql` |
+-| Base de datos SQL Server (múltiples) | `jlib-multisql` |
+-| Secretos en GCP Secret Manager | `jlib-secretmanager` |
+-| Cifrado/descifrado KMS | `jlib-kms` (o transitiva por `jlib-secretmanager`) |
+-| Caché Redis | `jlib-redis` |
+-| Caché de catálogos y sociedades | `jlib-cache` |
+-| Mensajería asíncrona GCP Pub/Sub | `jlib-pubsub` |
+-| Mensajería asíncrona + correlación de logs | `jlib-pubsub` + `jlib-pubsub-logging` |
+-| Almacenamiento de archivos GCS | `jlib-storage` |
+-| Base de datos Firestore | `jlib-firestore` |
+-| Generación documentos electrónicos SRI | `jlib-documents` |
+-| Facturación electrónica completa SRI | `jlib-invoicing` |
+-| Generación de archivos Excel | `jlib-sheet` |
+-| Generación de códigos de barras/QR | `jlib-barcode` |
+-| Conversión de zonas horarias | `jlib-timezone` |
+-| CQRS + jobs programados | `jlib-worker` |
+-| DTOs de paginación / excepciones comunes | `jlib-common` |
+-
+-### Combinaciones típicas por tipo de microservicio
+-
+-**Microservicio CRUD estándar**
+-```
+-jlib-logging + jlib-health + jlib-jwt + jlib-routervalidator + jlib-sql
+-```
+-
+-**Microservicio de procesamiento de documentos SRI**
+-```
+-jlib-logging + jlib-health + jlib-jwt + jlib-invoicing + jlib-storage + jlib-barcode
+-```
+-
+-**Microservicio de integración SAP**
+-```
+-jlib-logging + jlib-health + jlib-jwt + jlib-sapcalls + jlib-secretmanager
+-```
+-
+-**Microservicio de procesamiento asíncrono (worker)**
+-```
+-jlib-logging + jlib-health + jlib-pubsub + jlib-pubsub-logging + jlib-worker + jlib-sql
+-```
+-
+-**Microservicio de reporting**
+-```
+-jlib-logging + jlib-health + jlib-jwt + jlib-sheet + jlib-barcode + jlib-storage
+-```
+-
+----
+-
+-## Reglas que el agente DEBE respetar
+-
+-1. **Siempre incluir `jlib-logging` y `jlib-health`** en cualquier microservicio nuevo.
+-2. **Nunca declarar una versión explícita** de los módulos `com.elrosado` en el pom.xml del microservicio si el parent gestiona la versión. Usar `${project.version}` o la versión `1.0.0` explícita solo si el microservicio no hereda del parent.
+-3. **`jlib-sql` y `jlib-multisql` son mutuamente excluyentes** — elegir uno según si hay una o varias bases de datos.
+-4. **No agregar `jlib-kms` directamente** si ya se incluye `jlib-secretmanager` (lo trae como transitiva).
+-5. **`jlib-pubsub-logging` requiere `jlib-pubsub`** — nunca declarar solo `jlib-pubsub-logging`.
+-6. **`jlib-invoicing` incluye `jlib-documents`** — no declararlos juntos explícitamente (es redundante).
+-7. **`jlib-cache` incluye `jlib-apicalls` y `jlib-redis`** — no declararlos todos si se usa `jlib-cache`.
+-8. **No incluir `logback-spring.xml` en librerías** — solo en microservicios consumidores.
+-9. **Toda configuración en `application.yml`** con variables de entorno y defaults (`${VAR:default}`).
+-10. **El BOM de GCP (`spring-cloud-gcp-dependencies` 8.0.2) debe estar en `dependencyManagement`** del microservicio.
+-11. **Topics y subscriptions de Pub/Sub no se crean desde código** — son responsabilidad de Terraform/IaC.
+-12. **No usar `@Autowired` en campos** — siempre constructor injection con `@RequiredArgsConstructor`.
+
+
+--- Diff for /CLAUDE.md ---
+--- a//CLAUDE.md
++++ b//CLAUDE.md
+@@ -2,24 +2,24 @@
+ 
+ This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+ 
+-## Reglas del proyecto (cargadas automáticamente)
+-
+-Los siguientes archivos definen las reglas de arquitectura, tecnología y diseño que **deben aplicarse en toda sesión y consulta**:
+-
+-@.claude_rules/rules_and_prompt.md
++## Reglas del proyecto (cargadas automÃ¡ticamente)
++
++Los siguientes archivos definen las reglas de arquitectura, tecnologÃ­a y diseÃ±o que **deben aplicarse en toda sesiÃ³n y consulta**:
++
++@../.claude_rules/rules_and_prompt.md
++@../.claude_rules/sharedlibs.md
+ @.claude_rules/RTD_Devoluciones.md
+-@.claude_rules/sharedlibs.md
+ 
+ ## Project
+ 
+ Spring Boot 4.0.6 microservice on Java 25, deployed on GKE/GCP. Part of the CER-Suite-Cloud ecosystem that modernizes legacy Java 8 retail/POS systems into cloud-native microservices.
+ 
+-**Responsabilidad única:** generar el archivo DV del proceso de devoluciones del POS retail CER/El Rosado, escribirlo en GCS y publicar un evento en Pub/Sub para que el `SincronizadorService` lo entregue al POS.
++**Responsabilidad Ãºnica:** generar el archivo DV del proceso de devoluciones del POS retail CER/El Rosado, escribirlo en GCS y publicar un evento en Pub/Sub para que el `SincronizadorService` lo entregue al POS.
+ 
+ - **GroupId**: `com.elrosado` | **ArtifactId**: `cer-suite-cl-local-integration`
+ - **Build tool**: Maven 3.9.16 (wrapper included)
+-- **Análisis completo de implementación**: `.claude_analytics/init-project.md`
+-- **Template base**: `D:\SIPECOM\repository-git\cer-gcp\template-microservice` — seguir esta estructura para todo desarrollo nuevo. Swagger (`springdoc-openapi-starter-webmvc-ui:2.8.5`), Dockerfile multi-stage (Maven → JRE 25, usuario no-root uid 10001), skaffold + build.sh (Podman), k8s con 6 manifiestos.
++- **AnÃ¡lisis completo de implementaciÃ³n**: `.claude_analytics/init-project.md`
++- **Template base**: `D:\SIPECOM\repository-git\cer-gcp\template-microservice` â€” seguir esta estructura para todo desarrollo nuevo. Swagger (`springdoc-openapi-starter-webmvc-ui:2.8.5`), Dockerfile multi-stage (Maven â†’ JRE 25, usuario no-root uid 10001), skaffold + build.sh (Podman), k8s con 6 manifiestos.
+ 
+ ## Commands
+ 
+@@ -46,50 +46,50 @@
+ 
+ ```
+ com.elrosado.integration/
+-├── domain/
+-│   ├── exception/          DevolutionAlreadyProcessedException, DevolutionValidationException,
+-│   │                       CreditNoteNotEligibleException
+-│   ├── model/              Devolution, DevolutionItem, DevolutionTotals, DevolutionStatus,
+-│   │                       ReturnMode (enum 14 modos), DvFile, StoreData, TransactionData,
+-│   │                       TaxRates, ConsumerFinalData, GiftCardData, DocumentType
+-│   └── port/
+-│       ├── in/             ExecuteDevolutionUseCase, GetDevolutionStatusUseCase
+-│       └── out/            DevolutionReadPort, DevolutionWritePort, TransactionQueryPort,
+-│                           TaxRateQueryPort, StoreQueryPort, DevolutionSequencePort,
+-│                           DevolutionAuditPort, DvFileStoragePort, DevolutionEventPort,
+-│                           CreditNoteEligibilityPort, DevolutionStatusPort
+-│
+-├── application/
+-│   ├── command/            ExecuteDevolutionCommand (devolutionId, operatorCode)
+-│   ├── result/             DevolutionResult
+-│   └── service/            ExecuteDevolutionService, GetDevolutionStatusService
+-│
+-└── infrastructure/
+-    ├── adapter/
+-    │   ├── in/
+-    │   │   ├── pubsub/     DevolutionPubSubSubscriber ← ENTRADA PRINCIPAL
+-    │   │   │               DevolutionTriggerMessage (topic: retail.local.devolucion.request.v1)
+-    │   │   └── web/
+-    │   │       ├── controller/  DevolutionController (POST + GET /api/v1/devolution)
+-    │   │       └── dto/         ExecuteDevolutionRequest, DevolutionResultResponse
+-    │   └── out/
+-    │       ├── db/
+-    │       │   ├── entity/
+-    │       │   │   ├── devsec/  DvTicketEntity, DvArtsEntity, DvTmpItmEntity,
+-    │       │   │   │            DvTmpTrnEntity, DvGfcdEntity, DvErrorSecuencialEntity
+-    │       │   │   ├── artsec/  TrTrnEntity, TrRtlEntity, AsWsEntity, PaOprEntity,
+-    │       │   │   │            PaStrRtlEntity, AsItmEntity, CoMrhrcGpEntity,
+-    │       │   │   │            TrTyTaxEntity, TrInvcEntity, TrRtnEntity
+-    │       │   │   └── saadmin/ MnTiendaEntity, PmParamEntity, PmParvalEntity
+-    │       │   ├── repository/  (un repo por entidad, separados por datasource)
+-    │       │   └── adapter/     DevolutionReadAdapter, DevolutionWriteAdapter,
+-    │       │                    TransactionQueryAdapter, TaxRateQueryAdapter,
+-    │       │                    StoreQueryAdapter, DevolutionSequenceAdapter,
+-    │       │                    DevolutionAuditAdapter, DevolutionStatusAdapter,
+-    │       │                    CreditNoteEligibilityAdapter
+-    │       ├── storage/    DvFileBuilder (ancho fijo ISO-8859-1), GcsDvFileAdapter
+-    │       └── pubsub/     DevolutionEventAdapter, DevolutionProcessedEvent
+-    └── config/
++â”œâ”€â”€ domain/
++â”‚   â”œâ”€â”€ exception/          DevolutionAlreadyProcessedException, DevolutionValidationException,
++â”‚   â”‚                       CreditNoteNotEligibleException
++â”‚   â”œâ”€â”€ model/              Devolution, DevolutionItem, DevolutionTotals, DevolutionStatus,
++â”‚   â”‚                       ReturnMode (enum 14 modos), DvFile, StoreData, TransactionData,
++â”‚   â”‚                       TaxRates, ConsumerFinalData, GiftCardData, DocumentType
++â”‚   â””â”€â”€ port/
++â”‚       â”œâ”€â”€ in/             ExecuteDevolutionUseCase, GetDevolutionStatusUseCase
++â”‚       â””â”€â”€ out/            DevolutionReadPort, DevolutionWritePort, TransactionQueryPort,
++â”‚                           TaxRateQueryPort, StoreQueryPort, DevolutionSequencePort,
++â”‚                           DevolutionAuditPort, DvFileStoragePort, DevolutionEventPort,
++â”‚                           CreditNoteEligibilityPort, DevolutionStatusPort
++â”‚
++â”œâ”€â”€ application/
++â”‚   â”œâ”€â”€ command/            ExecuteDevolutionCommand (devolutionId, operatorCode)
++â”‚   â”œâ”€â”€ result/             DevolutionResult
++â”‚   â””â”€â”€ service/            ExecuteDevolutionService, GetDevolutionStatusService
++â”‚
++â””â”€â”€ infrastructure/
++    â”œâ”€â”€ adapter/
++    â”‚   â”œâ”€â”€ in/
++    â”‚   â”‚   â”œâ”€â”€ pubsub/     DevolutionPubSubSubscriber â† ENTRADA PRINCIPAL
++    â”‚   â”‚   â”‚               DevolutionTriggerMessage (topic: retail.local.devolucion.request.v1)
++    â”‚   â”‚   â””â”€â”€ web/
++    â”‚   â”‚       â”œâ”€â”€ controller/  DevolutionController (POST + GET /api/v1/devolution)
++    â”‚   â”‚       â””â”€â”€ dto/         ExecuteDevolutionRequest, DevolutionResultResponse
++    â”‚   â””â”€â”€ out/
++    â”‚       â”œâ”€â”€ db/
++    â”‚       â”‚   â”œâ”€â”€ entity/
++    â”‚       â”‚   â”‚   â”œâ”€â”€ devsec/  DvTicketEntity, DvArtsEntity, DvTmpItmEntity,
++    â”‚       â”‚   â”‚   â”‚            DvTmpTrnEntity, DvGfcdEntity, DvErrorSecuencialEntity
++    â”‚       â”‚   â”‚   â”œâ”€â”€ artsec/  TrTrnEntity, TrRtlEntity, AsWsEntity, PaOprEntity,
++    â”‚       â”‚   â”‚   â”‚            PaStrRtlEntity, AsItmEntity, CoMrhrcGpEntity,
++    â”‚       â”‚   â”‚   â”‚            TrTyTaxEntity, TrInvcEntity, TrRtnEntity
++    â”‚       â”‚   â”‚   â””â”€â”€ saadmin/ MnTiendaEntity, PmParamEntity, PmParvalEntity
++    â”‚       â”‚   â”œâ”€â”€ repository/  (un repo por entidad, separados por datasource)
++    â”‚       â”‚   â””â”€â”€ adapter/     DevolutionReadAdapter, DevolutionWriteAdapter,
++    â”‚       â”‚                    TransactionQueryAdapter, TaxRateQueryAdapter,
++    â”‚       â”‚                    StoreQueryAdapter, DevolutionSequenceAdapter,
++    â”‚       â”‚                    DevolutionAuditAdapter, DevolutionStatusAdapter,
++    â”‚       â”‚                    CreditNoteEligibilityAdapter
++    â”‚       â”œâ”€â”€ storage/    DvFileBuilder (ancho fijo ISO-8859-1), GcsDvFileAdapter
++    â”‚       â””â”€â”€ pubsub/     DevolutionEventAdapter, DevolutionProcessedEvent
++    â””â”€â”€ config/
+         DevsEcDataSourceConfig (@Primary), ArtsEcDataSourceConfig,
+         SaadminDataSourceConfig, MultiSqlSharedConfig
+ ```
+@@ -98,21 +98,21 @@
+ 
+ ```
+ Portal Angular
+-  └─► Pub/Sub topic: retail.local.devolucion.request.v1
+-           │  { devolutionId: 12345, operatorCode: "001234567" }
+-           ▼
+-  DevolutionPubSubSubscriber  ← adapter IN
+-           │  Ack/Nack según tipo de excepción (ver tabla en init-project.md)
+-           ▼
++  â””â”€â–º Pub/Sub topic: retail.local.devolucion.request.v1
++           â”‚  { devolutionId: 12345, operatorCode: "001234567" }
++           â–¼
++  DevolutionPubSubSubscriber  â† adapter IN
++           â”‚  Ack/Nack segÃºn tipo de excepciÃ³n (ver tabla en init-project.md)
++           â–¼
+   ExecuteDevolutionService
+-           │  1. loadSession(idDev) → DV_TICKET + DV_ARTS + AS_ITM
+-           │  2. ReturnMode.fromCode(devolution.tyDev())  ← de BD
+-           │  3. validateTotals / validateCreditNoteEligibility
+-           │  4. TransactionData + TaxRates + StoreData
+-           │  5. generateSequence → NUM_NC (si no es MODO 80)
+-           │  6. DvFileBuilder.build() → byte[] ancho fijo
+-           │  7. GCS upload → gs://suite-devoluciones/{storeId}/{fileName}
+-           └─► Pub/Sub publish → retail.local.sincronizador.request.v1
++           â”‚  1. loadSession(idDev) â†’ DV_TICKET + DV_ARTS + AS_ITM
++           â”‚  2. ReturnMode.fromCode(devolution.tyDev())  â† de BD
++           â”‚  3. validateTotals / validateCreditNoteEligibility
++           â”‚  4. TransactionData + TaxRates + StoreData
++           â”‚  5. generateSequence â†’ NUM_NC (si no es MODO 80)
++           â”‚  6. DvFileBuilder.build() â†’ byte[] ancho fijo
++           â”‚  7. GCS upload â†’ gs://suite-devoluciones/{storeId}/{fileName}
++           â””â”€â–º Pub/Sub publish â†’ retail.local.synchro.controller.v1
+ ```
+ 
+ ## Hard Rules
+@@ -125,29 +125,29 @@
+ | `System.out.println` | SLF4J via `@Slf4j` |
+ | Hardcoded credentials or business values | Spring Profiles + Secret Manager / constants |
+ | Mutable POJOs in domain layer | Java Records (immutable) |
+-| Crear topics/subscriptions desde código | Definir en Terraform/IaC |
++| Crear topics/subscriptions desde cÃ³digo | Definir en Terraform/IaC |
+ 
+ ## Multi-Datasource (jlib-multisql)
+ 
+-Tres datasources configurados vía `multi-sql.datasources.*`:
++Tres datasources configurados vÃ­a `multi-sql.datasources.*`:
+ 
+ | Key | BD | Paquete entidades | Rol |
+ |---|---|---|---|
+-| `devs-ec` | DEVS_EC | `db.entity.devsec` | Primary — DV_TICKET, DV_ARTS, etc. |
++| `devs-ec` | DEVS_EC | `db.entity.devsec` | Primary â€” DV_TICKET, DV_ARTS, etc. |
+ | `arts-ec` | ARTS_EC | `db.entity.artsec` | Transacciones origen y maestros retail |
+-| `saadmin` | SAADMIN | `db.entity.saadmin` | Parámetros, tiendas, Frecuento |
++| `saadmin` | SAADMIN | `db.entity.saadmin` | ParÃ¡metros, tiendas, Frecuento |
+ 
+ Cada adaptador que usa `arts-ec` o `saadmin` debe anotar `@Transactional` con el `transactionManagerRef` correspondiente.
+ 
+ ## Spring Profiles
+ 
+-- `application.yaml` — shared: virtual threads, multi-sql, pubsub subscription
+-- `application-local.yaml` — local dev: logs coloreados, BD localhost, subscription default
+-- `application-prod.yaml` — GKE: JSON structured logs (`logging.structured.format.console=gcp`), env vars K8s
++- `application.yaml` â€” shared: virtual threads, multi-sql, pubsub subscription
++- `application-local.yaml` â€” local dev: logs coloreados, BD localhost, subscription default
++- `application-prod.yaml` â€” GKE: JSON structured logs (`logging.structured.format.console=gcp`), env vars K8s
+ 
+ ## Variables de entorno
+ 
+-| Variable | Descripción | Default local |
++| Variable | DescripciÃ³n | Default local |
+ |---|---|---|
+ | `GOOGLE_CLOUD_PROJECT` | Project ID de GCP | `modern-suite-cloud-local` |
+ | `DB_DEVS_EC_URL` | JDBC URL DEVS_EC | `localhost:1433` |
+@@ -157,8 +157,9 @@
+ | `DB_SAADMIN_URL` | JDBC URL SAADMIN | `localhost:1433` |
+ | `DB_SAADMIN_USER` / `DB_SAADMIN_PASSWORD` | Credenciales SAADMIN | `sa` |
+ | `GCS_BUCKET_DEVS` | Bucket GCS archivos DV | `cer-devs-local` |
+-| `PUBSUB_TOPIC_DEVOLUTION` | Topic evento procesado → sincronizador | `devolution-processed-local` |
++| `PUBSUB_TOPIC_SYNCHRO_CONTROLLER` | Topic evento procesado â†’ sincronizador | `retail.local.synchro.controller.v1` |
+ | `PUBSUB_SUBSCRIPTION_DEVOLUCION` | Subscription entrada portal | `retail.local.devolucion.request.v1-sub` |
++| `SYNCHRO_CONTROLLER_TARGET_DIR` | Directorio POS enviado en el evento generico | `f:/ALLC_DAT/IN/devs` |
+ 
+ ## Code Conventions
+ 
+@@ -171,7 +172,7 @@
+ 
+ ### Naming & Package Conventions (aligned to template-microservice)
+ 
+-| Elemento | Convención | Ejemplo |
++| Elemento | ConvenciÃ³n | Ejemplo |
+ |---|---|---|
+ | Repositorios JPA | Prefijo `Jpa` | `JpaDvTicketRepository`, `JpaTrTrnRepository` |
+ | Subscriber Pub/Sub | Paquete `adapter/in/event/` | `DevolutionPubSubSubscriber` |
+@@ -181,22 +182,22 @@
+ | DTOs web | `adapter/in/web/dto/` | `ExecuteDevolutionRequest` |
+ | Controladores REST | `adapter/in/web/controller/` | `DevolutionController` |
+ 
+-> **Nota**: `jlib-logging` provee `MdcLoggingFilter` equivalente al `LoggingEnrichmentFilter` del template — no duplicar.
++> **Nota**: `jlib-logging` provee `MdcLoggingFilter` equivalente al `LoggingEnrichmentFilter` del template â€” no duplicar.
+ 
+ ### Infraestructura de despliegue
+ 
+-| Archivo | Descripción |
++| Archivo | DescripciÃ³n |
+ |---|---|
+-| `Dockerfile` | Multi-stage: Maven 3+JDK25 build → JRE25 runtime, usuario `appuser:appgroup` uid 10001 |
++| `Dockerfile` | Multi-stage: Maven 3+JDK25 build â†’ JRE25 runtime, usuario `appuser:appgroup` uid 10001 |
+ | `docker/dev/Dockerfile` | Igual al root con `SPRING_PROFILES_ACTIVE=local` |
+ | `build.sh` | Extrae artifactId/version de Maven, construye y publica con Podman |
+ | `skaffold.yaml` | `apiVersion: skaffold/v4beta11`, custom build via `build.sh`, deploys `k8s/*.yaml` |
+ | `k8s/namespace.yaml` | `ns-cer-suite-dev` |
+ | `k8s/configmap.yaml` | SPRING_PROFILES_ACTIVE, GCS_BUCKET_DEVS, PUBSUB_SUBSCRIPTION_DEVOLUCION |
+-| `k8s/secret.yaml` | Credenciales DB (stringData — completar en prod con Secret Manager) |
++| `k8s/secret.yaml` | Credenciales DB (stringData â€” completar en prod con Secret Manager) |
+ | `k8s/deployment.yaml` | Probes liveness/readiness, securityContext runAsUser:10001, limits cpu:1/mem:512Mi |
+-| `k8s/service.yaml` | NodePort 30052 → 8080 |
+-| `k8s/hpa.yaml` | CPU 75% + memory 80%, min:1 max:5 réplicas |
++| `k8s/service.yaml` | NodePort 30052 â†’ 8080 |
++| `k8s/hpa.yaml` | CPU 75% + memory 80%, min:1 max:5 rÃ©plicas |
+ 
+ ## Logging
+ 
+@@ -205,7 +206,7 @@
+ Multi-attribute business events (mandatory pattern):
+ ```java
+ log.atInfo()
+-   .setMessage("Descripción del evento en español")
++   .setMessage("DescripciÃ³n del evento en espaÃ±ol")
+    .addKeyValue("entidad.id", id)
+    .addKeyValue("atributo", valor)
+    .log();
+@@ -217,29 +218,30 @@
+ 
+ ## Testing
+ 
+-- **Unit tests** (sin carpeta `unit/` — directamente en el paquete del componente bajo `test/`): JUnit 5 + Mockito. `@ExtendWith(MockitoExtension.class)`. Los tests de `ExecuteDevolutionService` usan fakes manuales (no Mockito) para evitar warning de agente dinámico en Java 25.
++- **Unit tests** (sin carpeta `unit/` â€” directamente en el paquete del componente bajo `test/`): JUnit 5 + Mockito. `@ExtendWith(MockitoExtension.class)`. Los tests de `ExecuteDevolutionService` usan fakes manuales (no Mockito) para evitar warning de agente dinÃ¡mico en Java 25.
+ - **Integration tests**: anotados con `@Disabled`, requieren emuladores o infraestructura local.
+ - Cada puerto de dominio necesita al menos un test happy-path y uno de error.
+-- Mínimo 80% cobertura de código (estándar SonarQube).
++- MÃ­nimo 80% cobertura de cÃ³digo (estÃ¡ndar SonarQube).
+ 
+ ## Shared Libraries activas en este microservicio
+ 
+-| Librería | Versión | Rol |
++| LibrerÃ­a | VersiÃ³n | Rol |
+ |---|---|---|
+ | `jlib-logging` | 1.0.0 | MDC filter HTTP + logback base GCP |
+ | `jlib-health` | 1.0.0 | Actuator liveness/readiness para GKE |
+ | `jlib-multisql` | 1.0.1 | Multi-datasource JPA (DEVS_EC + ARTS_EC + SAADMIN) |
+-| `jlib-storage` | 1.0.1 | `IGoogleCloudStorageService` → GCS |
++| `jlib-storage` | 1.0.1 | `IGoogleCloudStorageService` â†’ GCS |
+ | `jlib-pubsub-logging` | 1.0.0 | `IMessagePublisher` + `IMessageSubscriber` con MDC |
+ 
+-`jlib-pubsub-logging` incluye transitivamente `jlib-pubsub`. El bean `IMessageSubscriber` que se inyecta en `DevolutionPubSubSubscriber` es el `MdcMessageSubscriber` (decorador con MDC automático).
++`jlib-pubsub-logging` incluye transitivamente `jlib-pubsub`. El bean `IMessageSubscriber` que se inyecta en `DevolutionPubSubSubscriber` es el `MdcMessageSubscriber` (decorador con MDC automÃ¡tico).
+ 
+ ## GKE Deployment Requirements
+ 
+ - GCP authentication via **Workload Identity** (no JSON key files on disk)
+-- Kubernetes health probes → `/actuator/health/liveness` and `/actuator/health/readiness`
++- Kubernetes health probes â†’ `/actuator/health/liveness` and `/actuator/health/readiness`
+ - HPA based on CPU (75%) or Pub/Sub pending message count (`retail.local.devolucion.request.v1-sub`)
+ - Multi-stage Dockerfile (Java 25, non-root user, minimal runtime image)
+ - K8s manifests under `k8s/` directory (Deployment, Service, HPA, ConfigMap, Secret)
+ - Required prod env var: `GOOGLE_CLOUD_PROJECT`
+-- Topic y subscription de Pub/Sub se crean vía Terraform — no desde código
++- Topic y subscription de Pub/Sub se crean vÃ­a Terraform â€” no desde cÃ³digo
++
+
+
+--- Diff for /asyncapi.yaml ---
+--- a//asyncapi.yaml
++++ b//asyncapi.yaml
+@@ -2,192 +2,98 @@
+ 
+ info:
+   title: cer-suite-cl-local-integration
+-  version: 0.0.1-SNAPSHOT
++  version: 1.0.0
+   description: |
+-    Microservicio de integración local CER Suite Cloud.
+-    Responsabilidad: generar el archivo DV del proceso de devoluciones del POS retail CER/El Rosado,
+-    escribirlo en GCS y transferirlo al POS mediante la API de sincronización.
++    Microservicio de integracion local CER Suite Cloud.
++    Responsabilidad: generar el archivo DV del proceso de devoluciones, escribirlo en GCS
++    y publicar un evento generico para que cer-suite-cl-local-synchro-srv lo entregue al POS.
+ 
+-    **Flujo principal:**
+-    1. Recibe solicitud de devolución desde el portal Angular via `retail.local.devolucion.request.v1`
+-    2. Ejecuta el caso de uso `ExecuteDevolutionUseCase` (consulta BD, genera DV, escribe en GCS)
+-    3. Publica resultado en `retail.local.devolution.processed.v1` para el SincronizadorService
+-    4. Recibe el evento publicado via `retail.local.devolution.processed.v1` y transfiere el archivo al POS
+-
+-    **Política de Ack/Nack:**
+-    - `Ack` (true): procesamiento exitoso, error permanente de negocio, mensaje inválido o duplicado
+-    - `Nack` (false): error transitorio (BD no disponible, API de transferencia caída) — reintento automático
+-
+-  contact:
+-    name: CER Suite Cloud — SIPECOM
+-  license:
+-    name: Privado — uso interno SIPECOM
++    Flujo principal:
++    1. Recibe solicitud desde `retail.local.devolucion.request.v1`.
++    2. Ejecuta `ExecuteDevolutionUseCase`, genera el archivo DV y lo sube a GCS.
++    3. Publica `SynchroControllerEvent` en `retail.local.synchro.controller.v1`.
+ 
+ servers:
+   gcp-local:
+     host: pubsub.googleapis.com
+     protocol: googlepubsub
+-    description: GCP Pub/Sub — proyecto modern-suite-cloud-inf (entorno local)
+-    tags:
+-      - name: env:local
++    description: GCP Pub/Sub local
+   gcp-prod:
+     host: pubsub.googleapis.com
+     protocol: googlepubsub
+-    description: GCP Pub/Sub — proyecto GKE producción (Workload Identity)
+-    tags:
+-      - name: env:prod
++    description: GCP Pub/Sub produccion
+ 
+ channels:
+-
+   devolutionRequest:
+     address: retail.local.devolucion.request.v1
+-    description: |
+-      Topic de entrada. El backend del portal Angular publica aquí cuando el operador
+-      confirma una devolución en el POS. Este microservicio consume la subscription
+-      `retail.local.devolution.request.v1-sub`.
++    description: Solicitud de devolucion publicada por el backend del portal.
+     messages:
+       DevolutionTriggerMessage:
+         $ref: '#/components/messages/DevolutionTriggerMessage'
+-    bindings:
+-      googlepubsub:
+-        topic: retail.local.devolucion.request.v1
+-        subscription: retail.local.devolution.request.v1-sub
+ 
+-  devolutionProcessed:
+-    address: retail.local.devolution.processed.v1
+-    description: |
+-      Topic de salida y de entrada.
+-      - **Publicación (OUT):** este microservicio publica aquí el evento `DevolutionProcessedEvent`
+-        tras generar el archivo DV y escribirlo en GCS. El SincronizadorService lo consume para
+-        entregar el archivo al POS.
+-      - **Suscripción (IN):** este mismo microservicio también consume la subscription
+-        `retail.local.devolution.processed.v1-sub` para ejecutar la transferencia HTTP del archivo DV
+-        a la API del sincronizador local.
++  synchroController:
++    address: retail.local.synchro.controller.v1
++    description: Evento generico para transferir archivos desde GCS al controlador POS.
+     messages:
+-      DevolutionProcessedEvent:
+-        $ref: '#/components/messages/DevolutionProcessedEvent'
+-    bindings:
+-      googlepubsub:
+-        topic: retail.local.devolution.processed.v1
+-        subscription: retail.local.devolution.processed.v1-sub
++      SynchroControllerEvent:
++        $ref: '#/components/messages/SynchroControllerEvent'
+ 
+ operations:
+-
+   receiveDevolutionRequest:
+     action: receive
+     channel:
+       $ref: '#/channels/devolutionRequest'
+-    title: Recibir solicitud de devolución desde el portal
+-    summary: |
+-      Desencadena la ejecución de `ExecuteDevolutionUseCase`: consulta BD (DEVS_EC, ARTS_EC, SAADMIN),
+-      genera el archivo DV en formato de ancho fijo ISO-8859-1, lo escribe en GCS y publica el evento
+-      de resultado en `retail.local.devolution.processed.v1`.
+-    description: |
+-      **Handler:** `DevolutionCreationMessageHandler`
+-
+-      **Política de Ack/Nack:**
+-      | Situación | Resultado |
+-      |-----------|-----------|
+-      | Procesamiento exitoso | Ack |
+-      | JSON inválido o payload nulo | Ack (descarte) |
+-      | `devolutionId` ausente | Ack (descarte) |
+-      | `DevolutionAlreadyProcessedException` | Ack (duplicado) |
+-      | `DevolutionValidationException` | Ack (regla de negocio) |
+-      | `CreditNoteNotEligibleException` | Ack (regla de negocio) |
+-      | `NoSuchElementException` (sesión no encontrada) | Nack → reintento |
+-      | Error inesperado | Nack → reintento |
++    title: Recibir solicitud de devolucion
++    summary: Genera el archivo DV, lo sube a GCS y publica el evento de sincronizacion.
+     messages:
+       - $ref: '#/channels/devolutionRequest/messages/DevolutionTriggerMessage'
+     bindings:
+       googlepubsub:
+         clientId: DevolutionPubSubSubscriber
+ 
+-  publishDevolutionProcessed:
++  publishSynchroControllerEvent:
+     action: send
+     channel:
+-      $ref: '#/channels/devolutionProcessed'
+-    title: Publicar evento de devolución procesada
+-    summary: |
+-      Se publica tras confirmar la escritura del archivo DV en GCS. El SincronizadorService
+-      lo consume para descargar el archivo de GCS y entregarlo al POS.
+-    description: |
+-      **Publisher:** `DevolutionEventAdapter` → `IMessagePublisher.publishAsync()`
+-
+-      El mensaje se serializa a JSON con Jackson. El campo `gcsPath` contiene la ruta completa
+-      en formato `gs://{bucket}/{storeId}/{fileName}`.
++      $ref: '#/channels/synchroController'
++    title: Publicar evento generico de sincronizacion al controlador
++    summary: Publica la ubicacion GCS y el destino POS que consumira synchro-srv.
+     messages:
+-      - $ref: '#/channels/devolutionProcessed/messages/DevolutionProcessedEvent'
+-
+-  receiveDevolutionProcessed:
+-    action: receive
+-    channel:
+-      $ref: '#/channels/devolutionProcessed'
+-    title: Recibir evento de devolución procesada para transferencia HTTP
+-    summary: |
+-      Descarga el archivo DV desde GCS y lo transfiere mediante HTTP a la API del sincronizador
+-      local (`SecureFileTransferAdapter`). La autenticación usa un Bearer token obtenido desde
+-      GCP Secret Manager con caché TTL configurable.
+-    description: |
+-      **Handler:** `DevolutionTransferMessageHandler`
+-
+-      **Política de Ack/Nack:**
+-      | Situación | Resultado |
+-      |-----------|-----------|
+-      | Transferencia exitosa | Ack |
+-      | JSON inválido o payload nulo | Ack (descarte) |
+-      | `devolutionId` o `gcsPath` ausente | Ack (descarte) |
+-      | Transferencia deshabilitada (`FILE_TRANSFER_ENABLED=false`) | Ack (skip) |
+-      | `FileTransferPermanentException` (400, 401, 403, 404) | Ack + auditoría |
+-      | `FileTransferTransientException` (500, timeout, red) | Nack → reintento |
+-      | Error inesperado | Nack → reintento |
+-    messages:
+-      - $ref: '#/channels/devolutionProcessed/messages/DevolutionProcessedEvent'
+-    bindings:
+-      googlepubsub:
+-        clientId: DevolutionPubSubSubscriber
++      - $ref: '#/channels/synchroController/messages/SynchroControllerEvent'
+ 
+ components:
+-
+   messages:
+-
+     DevolutionTriggerMessage:
+       name: DevolutionTriggerMessage
+-      title: Solicitud de ejecución de devolución
+-      summary: Publicado por el backend del portal Angular cuando el operador confirma la devolución.
++      title: Solicitud de ejecucion de devolucion
+       contentType: application/json
+       payload:
+         $ref: '#/components/schemas/DevolutionTriggerMessagePayload'
+       examples:
+-        - name: Devolución estándar con código de operador
++        - name: Devolucion estandar con codigo de operador
+           payload:
+             devolutionId: 12345
+             operatorCode: "001234567"
+-        - name: Devolución sin operador (operatorCode opcional)
+-          payload:
+-            devolutionId: 99001
+-            operatorCode: null
+ 
+-    DevolutionProcessedEvent:
+-      name: DevolutionProcessedEvent
+-      title: Evento de devolución procesada
+-      summary: |
+-        Publicado por este microservicio tras generar el archivo DV y escribirlo en GCS.
+-        Consumido por el SincronizadorService y también por este mismo microservicio
+-        para ejecutar la transferencia HTTP al POS.
++    SynchroControllerEvent:
++      name: SynchroControllerEvent
++      title: Evento generico de sincronizacion al controlador POS
+       contentType: application/json
+       payload:
+-        $ref: '#/components/schemas/DevolutionProcessedEventPayload'
++        $ref: '#/components/schemas/SynchroControllerEventPayload'
+       examples:
+-        - name: Devolución con nota de crédito generada
++        - name: Archivo DV listo para transferir
+           payload:
+-            devolutionId: 12345
+-            numNc: 87
+-            creditNoteNumber: "NC-2026-0087"
+-            gcsPath: "gs://gcs-cer-syncrhonization-files-dev/001/DV_20260612_12345.txt"
+-            processedAt: "2026-06-12T14:35:22.123Z"
++            eventId: "12345"
++            eventType: "file.ready"
++            source: "cer-suite-cl-local-integration"
++            codStore: 5
++            gcsBucket: "gcs-cer-suite-core-files/dev"
++            gcsPath: "005/DV000123.005"
++            fileName: "DV000123.005"
++            targetDir: "f:/ALLC_DAT/IN/devs"
++            createdAt: "2026-06-24T15:30:00Z"
+ 
+   schemas:
+-
+     DevolutionTriggerMessagePayload:
+       type: object
+       required:
+@@ -196,57 +102,58 @@
+         devolutionId:
+           type: integer
+           format: int32
+-          description: |
+-            Identificador de la sesión de devolución en DEVS_EC.DV_TICKET.
+-            Corresponde al campo ID_DEV de la tabla.
+           minimum: 1
+-          example: 12345
++          description: Identificador de la sesion de devolucion en DEVS_EC.DV_TICKET.
+         operatorCode:
+-          type: string
+-          description: |
+-            Código del operador que ejecuta la devolución. Formato: 9 dígitos numéricos.
+-            Corresponde a PaOprEntity.codOpr. Puede ser null si la devolución no requiere operador.
++          type:
++            - string
++            - "null"
+           pattern: '^\d{9}$'
+-          nullable: true
+-          example: "001234567"
++          description: Codigo de operador. Puede ser null si no aplica.
+ 
+-    DevolutionProcessedEventPayload:
++    SynchroControllerEventPayload:
+       type: object
+       required:
+-        - devolutionId
++        - codStore
++        - gcsBucket
+         - gcsPath
+-        - processedAt
++        - fileName
++        - targetDir
+       properties:
+-        devolutionId:
++        eventId:
++          type: string
++          description: Identificador trazable del proceso origen.
++          example: "12345"
++        eventType:
++          type: string
++          description: Tipo funcional del archivo publicado.
++          example: "file.ready"
++        source:
++          type: string
++          description: Servicio productor del evento.
++          example: "cer-suite-cl-local-integration"
++        codStore:
+           type: integer
+           format: int32
+-          description: Identificador de la sesión de devolución. Mismo valor que en `DevolutionTriggerMessage`.
+-          minimum: 1
+-          example: 12345
+-        numNc:
+-          type: integer
+-          format: int32
+-          description: |
+-            Número de secuencia de la nota de crédito generada por el POS (campo NUM_NC).
+-            Null para devoluciones en modo 80 (devolución sin nota de crédito).
+-          nullable: true
+-          example: 87
+-        creditNoteNumber:
++          description: Codigo de tienda usado por synchro-srv para buscar el controlador POS.
++          example: 5
++        gcsBucket:
+           type: string
+-          description: |
+-            Número de nota de crédito formateado para visualización.
+-            Null para modo 80.
+-          nullable: true
+-          example: "NC-2026-0087"
++          description: Bucket o bucket/prefijo donde se encuentra el archivo.
++          example: "gcs-cer-suite-core-files/dev"
+         gcsPath:
+           type: string
+-          description: |
+-            Ruta completa del archivo DV en Google Cloud Storage.
+-            Formato: `gs://{bucket}/{storeId}/{fileName}`.
+-            El SincronizadorService descarga el archivo desde esta ruta para entregarlo al POS.
+-          example: "gs://gcs-cer-syncrhonization-files-dev/001/DV_20260612_12345.txt"
+-        processedAt:
++          description: Ruta relativa del objeto dentro de `gcsBucket`.
++          example: "005/DV000123.005"
++        fileName:
++          type: string
++          description: Nombre final del archivo en TCx Sky.
++          example: "DV000123.005"
++        targetDir:
++          type: string
++          description: Directorio destino del controlador POS.
++          example: "f:/ALLC_DAT/IN/devs"
++        createdAt:
+           type: string
+           format: date-time
+-          description: Timestamp UTC del momento en que el archivo DV fue generado y escrito en GCS.
+-          example: "2026-06-12T14:35:22.123Z"
++          description: Timestamp UTC de publicacion del evento.
+
+
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -4,21 +4,14 @@
+   name: cer-suite-cl-local-integration-config
+   namespace: ns-cer-suite-dev
+ data:
+-  SPRING_PROFILES_ACTIVE: "dev"
++  SPRING_PROFILES_ACTIVE: "prod"
+   SERVER_PORT: "8080"
+   GOOGLE_CLOUD_PROJECT: "modern-suite-cloud-inf"
+-  GCS_BUCKET_DEVS: "gcs-cer-syncrhonization-files-dev"
+-  PUBSUB_TOPIC_DEVOLUTION: "retail.local.devolution.request.v1"
+-  PUBSUB_SUBSCRIPTION_DEVOLUTION: "retail.local.devolution.request.v1-sub"
+-  PUBSUB_TOPIC_PROCESSED_DEVOLUTION: "retail.local.devolution.processed.v1"
+-  PUBSUB_SUBSCRIPTION_DEVOLUTION_PROCESSED: "retail.local.devolution.processed.v1-sub"
+-  FILE_TRANSFER_ENABLED: "true"
+-  FILE_TRANSFER_BASE_URL: "https://10.1.4.57:8033/api/v1"
+-  FILE_TRANSFER_FILES_PATH: "/files"
+-  FILE_TRANSFER_TARGET_DIR: "f:/ALLC_DAT/IN/devs"
+-  FILE_TRANSFER_TIMEOUT_SECONDS: "30"
+-  FILE_TRANSFER_BEARER_TOKEN_SECRET_ID: "integration-file-transfer-bearer-token"
+-  FILE_TRANSFER_BEARER_TOKEN_SECRET_VERSION: "latest"
+-  FILE_TRANSFER_BEARER_TOKEN_CACHE_TTL_SECONDS: "300"
++  GCS_BUCKET_DEVS: "gcs-cer-suite-core-files"
++  GCS_PATH_DEV: "ALLC_DAT/IN/{storeCode}/DEVS"
++  PUBSUB_TOPIC_SYNCHRO_CONTROLLER: "retail.local.synchro.controller.v1"
++  PUBSUB_SUBSCRIPTION_DEVOLUCION: "retail.local.devolution.request.v1-sub"
++  SYNCHRO_CONTROLLER_TARGET_DIR: "f:/ALLC_DAT/IN/devs"
+   PARAM_NUM_POS_DEVOL: "NUMPOSDEVOL"
+   PARAM_REGION_FRECUENTO: "COD_REGION_FRECUENTO"
++
+
+
+--- Diff for /pom.xml ---
+--- a//pom.xml
++++ b//pom.xml
+@@ -20,7 +20,6 @@
+         <spring-cloud-gcp.version>8.0.2</spring-cloud-gcp.version>
+         <jlib.version>1.0.0</jlib.version>
+         <jlib.infrastructure.version>1.0.1</jlib.infrastructure.version>
+-        <jlib.secretmanager.version>1.0.3</jlib.secretmanager.version>
+         <springdoc.version>2.8.5</springdoc.version>
+     </properties>
+ 
+@@ -67,20 +66,6 @@
+             <groupId>com.elrosado</groupId>
+             <artifactId>jlib-storage</artifactId>
+             <version>${jlib.infrastructure.version}</version>
+-        </dependency>
+-
+-        <dependency>
+-            <groupId>com.elrosado</groupId>
+-            <artifactId>jlib-secretmanager</artifactId>
+-            <version>${jlib.secretmanager.version}</version>
+-            <exclusions>
+-                <!-- Este microservicio no cifra secretos con KMS; excluir evita que
+-                     KmsAutoConfiguration intente crear un cliente KMS sin credenciales ADC. -->
+-                <exclusion>
+-                    <groupId>com.elrosado</groupId>
+-                    <artifactId>jlib-kms</artifactId>
+-                </exclusion>
+-            </exclusions>
+         </dependency>
+ 
+         <dependency>
+
+
+--- Diff for /src/main/java/com/elrosado/integration/application/command/TransferDevolutionFileCommand.java ---
+--- a//src/main/java/com/elrosado/integration/application/command/TransferDevolutionFileCommand.java
++++ b//src/main/java/com/elrosado/integration/application/command/TransferDevolutionFileCommand.java
+@@ -1,11 +0,0 @@
+-package com.elrosado.integration.application.command;
+-
+-import java.time.Instant;
+-
+-public record TransferDevolutionFileCommand(
+-        Integer devolutionId,
+-        Integer numNc,
+-        String creditNoteNumber,
+-        String gcsPath,
+-        Instant processedAt
+-) {}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/application/service/ExecuteDevolutionService.java ---
+--- a//src/main/java/com/elrosado/integration/application/service/ExecuteDevolutionService.java
++++ b//src/main/java/com/elrosado/integration/application/service/ExecuteDevolutionService.java
+@@ -26,6 +26,7 @@
+ import com.elrosado.integration.infrastructure.adapter.out.storage.DvFileBuilder;
+ import lombok.RequiredArgsConstructor;
+ import lombok.extern.slf4j.Slf4j;
++import org.springframework.beans.factory.annotation.Value;
+ import org.springframework.stereotype.Service;
+ import org.springframework.transaction.annotation.Transactional;
+ 
+@@ -37,6 +38,13 @@
+ @RequiredArgsConstructor
+ @Slf4j
+ public class ExecuteDevolutionService implements ExecuteDevolutionUseCase {
++
++    @Value("${app.gcp.storage.bucket-name}")
++    private String gcsBucketName;
++    @Value("${app.gcp.storage.path-dev}")
++    private String pathDev;
++    @Value("${app.sync-controller.target-dir}")
++    private String syncControllerTargetDir;
+ 
+     private final DevolutionReadPort devolutionReadPort;
+     private final DevolutionWritePort devolutionWritePort;
+@@ -92,19 +100,31 @@
+         DvFile dvFile = DvFileBuilder.build(devolution, txData, storeData, taxRates, returnMode, numNc,
+                 command.operatorCode(), null, nota);
+ 
+-        String gcsPath = dvFileStoragePort.upload(dvFile);
++        String bucket = buildBucketPath(storeData.storeCode());
++        dvFileStoragePort.upload(dvFile, bucket);
++
+         String messageId = devolutionEventPort.publish(
+-                new DevolutionProcessedEvent(idDev, numNc, nota, gcsPath, Instant.now()));
++                new DevolutionProcessedEvent(
++                        String.valueOf(idDev),
++                        "file.ready",
++                        "cer-suite-cl-local-integration",
++                        storeData.storeCode(),
++                        bucket,
++                        dvFile.gcsPath(),
++                        dvFile.fileName(),
++                        syncControllerTargetDir,
++                        Instant.now()));
+ 
+         log.atInfo()
+                 .setMessage("Devolucion procesada exitosamente")
+                 .addKeyValue("devolutionId", idDev)
+                 .addKeyValue("creditNote", nota)
+                 .addKeyValue("dvFile", dvFile.fileName())
+-                .addKeyValue("gcsPath", gcsPath)
++                .addKeyValue("gcsBucket", bucket)
++                .addKeyValue("gcsPath", dvFile.gcsPath())
+                 .log();
+ 
+-        return new DevolutionResult(idDev, "PROCESSED", nota, dvFile.fileName(), gcsPath, Instant.now(), messageId);
++        return new DevolutionResult(idDev, "PROCESSED", nota, dvFile.fileName(), dvFile.gcsPath(), Instant.now(), messageId);
+     }
+ 
+     private void validateTotals(Devolution devolution, Integer idDev) {
+@@ -164,6 +184,19 @@
+         return leftPadZeros(codSri, 3) + leftPadZeros(pos, 3) + String.format("%09d", numNc);
+     }
+ 
++    private String buildBucketPath(Integer storeCode) {
++        String resolvedPath = pathDev.replace("{storeCode}", leftPadZeros(String.valueOf(storeCode), 3));
++        return trimTrailingSlash(gcsBucketName) + "/" + trimSlashes(resolvedPath);
++    }
++
++    private String trimTrailingSlash(String value) {
++        return value != null ? value.replaceAll("/+$", "") : "";
++    }
++
++    private String trimSlashes(String value) {
++        return value != null ? value.replaceAll("^/+|/+$", "") : "";
++    }
++
+     private String leftPadZeros(String value, int length) {
+         String normalized = value == null ? "" : value.trim();
+         if (normalized.length() >= length) {
+@@ -180,3 +213,4 @@
+         return value == null ? BigDecimal.ZERO : BigDecimal.valueOf(value);
+     }
+ }
++
+
+
+--- Diff for /src/main/java/com/elrosado/integration/application/service/TransferDevolutionFileService.java ---
+--- a//src/main/java/com/elrosado/integration/application/service/TransferDevolutionFileService.java
++++ b//src/main/java/com/elrosado/integration/application/service/TransferDevolutionFileService.java
+@@ -1,56 +0,0 @@
+-package com.elrosado.integration.application.service;
+-
+-import com.elrosado.integration.application.command.TransferDevolutionFileCommand;
+-import com.elrosado.integration.domain.model.FileTransferResult;
+-import com.elrosado.integration.domain.port.in.TransferDevolutionFileUseCase;
+-import com.elrosado.integration.domain.port.out.DvFileReaderPort;
+-import com.elrosado.integration.domain.port.out.FileTransferPort;
+-import lombok.RequiredArgsConstructor;
+-import lombok.extern.slf4j.Slf4j;
+-import org.springframework.stereotype.Service;
+-
+-import java.net.URI;
+-
+-@Service
+-@RequiredArgsConstructor
+-@Slf4j
+-public class TransferDevolutionFileService implements TransferDevolutionFileUseCase {
+-
+-    private final DvFileReaderPort dvFileReaderPort;
+-    private final FileTransferPort fileTransferPort;
+-
+-    @Override
+-    public FileTransferResult transfer(TransferDevolutionFileCommand command) {
+-        String fileName = extractFileName(command.gcsPath());
+-        byte[] content = dvFileReaderPort.read(command.gcsPath());
+-        FileTransferResult result = fileTransferPort.transfer(fileName, content);
+-
+-        log.atInfo()
+-                .setMessage("Archivo DV transferido exitosamente")
+-                .addKeyValue("devolutionId", command.devolutionId())
+-                .addKeyValue("fileName", result.fileName())
+-                .addKeyValue("endpoint", result.endpoint())
+-                .addKeyValue("statusCode", result.statusCode())
+-                .log();
+-
+-        return result;
+-    }
+-
+-    private String extractFileName(String gcsPath) {
+-        if (gcsPath == null || gcsPath.isBlank()) {
+-            throw new IllegalArgumentException("gcsPath es requerido para transferir el archivo DV");
+-        }
+-
+-        String normalized = gcsPath.strip();
+-        if (normalized.startsWith("gs://")) {
+-            normalized = URI.create(normalized).getPath();
+-        }
+-
+-        int index = normalized.lastIndexOf('/');
+-        String fileName = index >= 0 ? normalized.substring(index + 1) : normalized;
+-        if (fileName.isBlank()) {
+-            throw new IllegalArgumentException("No se pudo obtener el nombre del archivo desde gcsPath=" + gcsPath);
+-        }
+-        return fileName;
+-    }
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/domain/exception/FileTransferPermanentException.java ---
+--- a//src/main/java/com/elrosado/integration/domain/exception/FileTransferPermanentException.java
++++ b//src/main/java/com/elrosado/integration/domain/exception/FileTransferPermanentException.java
+@@ -1,12 +0,0 @@
+-package com.elrosado.integration.domain.exception;
+-
+-public class FileTransferPermanentException extends RuntimeException {
+-
+-    public FileTransferPermanentException(String message) {
+-        super(message);
+-    }
+-
+-    public FileTransferPermanentException(String message, Throwable cause) {
+-        super(message, cause);
+-    }
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/domain/exception/FileTransferTransientException.java ---
+--- a//src/main/java/com/elrosado/integration/domain/exception/FileTransferTransientException.java
++++ b//src/main/java/com/elrosado/integration/domain/exception/FileTransferTransientException.java
+@@ -1,12 +0,0 @@
+-package com.elrosado.integration.domain.exception;
+-
+-public class FileTransferTransientException extends RuntimeException {
+-
+-    public FileTransferTransientException(String message) {
+-        super(message);
+-    }
+-
+-    public FileTransferTransientException(String message, Throwable cause) {
+-        super(message, cause);
+-    }
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/domain/model/FileTransferResult.java ---
+--- a//src/main/java/com/elrosado/integration/domain/model/FileTransferResult.java
++++ b//src/main/java/com/elrosado/integration/domain/model/FileTransferResult.java
+@@ -1,10 +0,0 @@
+-package com.elrosado.integration.domain.model;
+-
+-import java.time.Instant;
+-
+-public record FileTransferResult(
+-        String fileName,
+-        String endpoint,
+-        int statusCode,
+-        Instant transferredAt
+-) {}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/domain/port/in/TransferDevolutionFileUseCase.java ---
+--- a//src/main/java/com/elrosado/integration/domain/port/in/TransferDevolutionFileUseCase.java
++++ b//src/main/java/com/elrosado/integration/domain/port/in/TransferDevolutionFileUseCase.java
+@@ -1,9 +0,0 @@
+-package com.elrosado.integration.domain.port.in;
+-
+-import com.elrosado.integration.application.command.TransferDevolutionFileCommand;
+-import com.elrosado.integration.domain.model.FileTransferResult;
+-
+-public interface TransferDevolutionFileUseCase {
+-
+-    FileTransferResult transfer(TransferDevolutionFileCommand command);
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/domain/port/out/DvFileReaderPort.java ---
+--- a//src/main/java/com/elrosado/integration/domain/port/out/DvFileReaderPort.java
++++ b//src/main/java/com/elrosado/integration/domain/port/out/DvFileReaderPort.java
+@@ -1,6 +0,0 @@
+-package com.elrosado.integration.domain.port.out;
+-
+-public interface DvFileReaderPort {
+-
+-    byte[] read(String gcsPath);
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/domain/port/out/DvFileStoragePort.java ---
+--- a//src/main/java/com/elrosado/integration/domain/port/out/DvFileStoragePort.java
++++ b//src/main/java/com/elrosado/integration/domain/port/out/DvFileStoragePort.java
+@@ -4,5 +4,5 @@
+ 
+ public interface DvFileStoragePort {
+ 
+-    String upload(DvFile dvFile);
++    String upload(DvFile dvFile, String bucketName);
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/integration/domain/port/out/FileTransferPort.java ---
+--- a//src/main/java/com/elrosado/integration/domain/port/out/FileTransferPort.java
++++ b//src/main/java/com/elrosado/integration/domain/port/out/FileTransferPort.java
+@@ -1,8 +0,0 @@
+-package com.elrosado.integration.domain.port.out;
+-
+-import com.elrosado.integration.domain.model.FileTransferResult;
+-
+-public interface FileTransferPort {
+-
+-    FileTransferResult transfer(String fileName, byte[] content);
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionPubSubSubscriber.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionPubSubSubscriber.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionPubSubSubscriber.java
+@@ -21,7 +21,6 @@
+ 
+     private final IMessageSubscriber messageSubscriber;
+     private final DevolutionCreationMessageHandler creationMessageHandler;
+-    private final DevolutionTransferMessageHandler transferMessageHandler;
+     private final PubSubRoutingProperties routingProperties;
+ 
+     @PostConstruct
+@@ -30,7 +29,6 @@
+         log.atInfo()
+                 .setMessage("Suscriptor Pub/Sub de devoluciones iniciado")
+                 .addKeyValue("requestSubscription", routingProperties.getSubscriptionDevolutionRequest())
+-                .addKeyValue("processedSubscription", routingProperties.getSubscriptionDevolutionProcessed())
+                 .log();
+     }
+ 
+@@ -46,10 +44,6 @@
+             return creationMessageHandler.handle(subscriptionId, body);
+         }
+ 
+-        if (routingProperties.isProcessedSubscription(subscriptionId)) {
+-            return transferMessageHandler.handle(subscriptionId, body);
+-        }
+-
+         log.atWarn()
+                 .setMessage("Mensaje Pub/Sub descartado: subscriptionId no configurado para este servicio")
+                 .addKeyValue("subscriptionId", subscriptionId)
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionTransferMessageHandler.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionTransferMessageHandler.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionTransferMessageHandler.java
+@@ -1,127 +0,0 @@
+-package com.elrosado.integration.infrastructure.adapter.in.pubsub;
+-
+-import com.elrosado.integration.application.command.TransferDevolutionFileCommand;
+-import com.elrosado.integration.domain.exception.FileTransferPermanentException;
+-import com.elrosado.integration.domain.exception.FileTransferTransientException;
+-import com.elrosado.integration.domain.port.in.TransferDevolutionFileUseCase;
+-import com.elrosado.integration.domain.port.out.DevolutionAuditPort;
+-import com.elrosado.integration.infrastructure.adapter.out.pubsub.DevolutionProcessedEvent;
+-import com.elrosado.integration.infrastructure.config.FileTransferProperties;
+-import lombok.RequiredArgsConstructor;
+-import lombok.extern.slf4j.Slf4j;
+-import org.slf4j.MDC;
+-import org.springframework.stereotype.Component;
+-import tools.jackson.databind.ObjectMapper;
+-
+-@Component
+-@RequiredArgsConstructor
+-@Slf4j
+-public class DevolutionTransferMessageHandler {
+-
+-    private final TransferDevolutionFileUseCase transferDevolutionFileUseCase;
+-    private final DevolutionAuditPort devolutionAuditPort;
+-    private final FileTransferProperties fileTransferProperties;
+-    private final ObjectMapper objectMapper;
+-
+-    public boolean handle(String subscriptionId, String body) {
+-        DevolutionProcessedEvent event;
+-        try {
+-            event = objectMapper.readValue(body, DevolutionProcessedEvent.class);
+-        } catch (Exception ex) {
+-            log.atWarn()
+-                    .setMessage("Evento de transferencia descartado: JSON invalido")
+-                    .addKeyValue("subscriptionId", subscriptionId)
+-                    .setCause(ex)
+-                    .log();
+-            return true;
+-        }
+-
+-        if (event == null) {
+-            log.atWarn()
+-                    .setMessage("Evento de transferencia descartado: payload nulo")
+-                    .addKeyValue("subscriptionId", subscriptionId)
+-                    .log();
+-            return true;
+-        }
+-
+-        try {
+-            if (event.devolutionId() == null || event.gcsPath() == null || event.gcsPath().isBlank()) {
+-                log.atWarn()
+-                        .setMessage("Evento de transferencia descartado por datos incompletos")
+-                        .addKeyValue("subscriptionId", subscriptionId)
+-                        .addKeyValue("devolutionId", event.devolutionId())
+-                        .log();
+-                return true;
+-            }
+-
+-            MDC.put("devolutionId", String.valueOf(event.devolutionId()));
+-
+-            if (!fileTransferProperties.isEnabled()) {
+-                log.atWarn()
+-                        .setMessage("Transferencia de archivo DV deshabilitada por configuracion")
+-                        .addKeyValue("subscriptionId", subscriptionId)
+-                        .addKeyValue("devolutionId", event.devolutionId())
+-                        .log();
+-                return true;
+-            }
+-
+-            transferDevolutionFileUseCase.transfer(new TransferDevolutionFileCommand(
+-                    event.devolutionId(),
+-                    event.numNc(),
+-                    event.creditNoteNumber(),
+-                    event.gcsPath(),
+-                    event.processedAt()
+-            ));
+-
+-            log.atInfo()
+-                    .setMessage("Transferencia de devolucion procesada exitosamente via Pub/Sub")
+-                    .addKeyValue("subscriptionId", subscriptionId)
+-                    .addKeyValue("devolutionId", event.devolutionId())
+-                    .log();
+-
+-            return true;
+-        } catch (FileTransferPermanentException | IllegalArgumentException ex) {
+-            audit(event, "file_transfer_permanent_error", ex.getMessage());
+-            log.atError()
+-                    .setMessage("Error permanente en transferencia de devolucion - descartando mensaje")
+-                    .addKeyValue("subscriptionId", subscriptionId)
+-                    .addKeyValue("devolutionId", event.devolutionId())
+-                    .setCause(ex)
+-                    .log();
+-            return true;
+-        } catch (FileTransferTransientException ex) {
+-            log.atError()
+-                    .setMessage("Error transitorio en transferencia de devolucion - reintentando via Nack")
+-                    .addKeyValue("subscriptionId", subscriptionId)
+-                    .addKeyValue("devolutionId", event.devolutionId())
+-                    .setCause(ex)
+-                    .log();
+-            return false;
+-        } catch (Exception ex) {
+-            log.atError()
+-                    .setMessage("Error inesperado procesando evento de transferencia - reintentando via Nack")
+-                    .addKeyValue("subscriptionId", subscriptionId)
+-                    .addKeyValue("devolutionId", event.devolutionId())
+-                    .setCause(ex)
+-                    .log();
+-            return false;
+-        } finally {
+-            MDC.remove("devolutionId");
+-        }
+-    }
+-
+-    private void audit(DevolutionProcessedEvent event, String reason, String message) {
+-        if (event == null || event.devolutionId() == null) {
+-            return;
+-        }
+-        try {
+-            devolutionAuditPort.log(event.devolutionId(), reason, message);
+-        } catch (Exception auditEx) {
+-            log.atWarn()
+-                    .setMessage("No se pudo auditar error de transferencia")
+-                    .addKeyValue("devolutionId", event.devolutionId())
+-                    .setCause(auditEx)
+-                    .log();
+-        }
+-    }
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/adapter/out/db/adapter/StoreQueryAdapter.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/adapter/out/db/adapter/StoreQueryAdapter.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/adapter/out/db/adapter/StoreQueryAdapter.java
+@@ -7,8 +7,8 @@
+ import com.elrosado.integration.infrastructure.adapter.out.db.repository.artsec.PaStrRtlJpaRepository;
+ import com.elrosado.integration.infrastructure.adapter.out.db.repository.saadmin.MnTiendaJpaRepository;
+ import com.elrosado.integration.infrastructure.adapter.out.db.repository.saadmin.PmParamJpaRepository;
+-import com.elrosado.integration.infrastructure.config.FileTransferProperties;
+ import lombok.RequiredArgsConstructor;
++import org.springframework.beans.factory.annotation.Value;
+ import org.springframework.stereotype.Component;
+ 
+ import java.util.NoSuchElementException;
+@@ -19,10 +19,15 @@
+ 
+     private static final int ACTIVE = 1;
+ 
++    @Value("${app.params.num-pos-devol:NUMPOSDEVOL}")
++    private String paramNumPosDevol;
++
++    @Value("${app.params.region-frecuento:COD_REGION_FRECUENTO}")
++    private String paramRegionFrecuento;
++
+     private final PaStrRtlJpaRepository paStrRtlRepository;
+     private final MnTiendaJpaRepository mnTiendaRepository;
+     private final PmParamJpaRepository pmParamRepository;
+-    private final FileTransferProperties properties;
+ 
+     @Override
+     public StoreData findByBusinessUnitId(Integer idBsnDev) {
+@@ -36,8 +41,8 @@
+                 .orElseThrow(() -> new NoSuchElementException("MN_TIENDA no encontrada para tienda=" + storeKey));
+ 
+         String posDevolution = pmParamRepository
+-                .findFirstActiveValueByVarParamAndStore(properties.getParamNumPosDevol(), storeCode)
+-                .or(() -> pmParamRepository.findFirstValueByVarParam(properties.getParamNumPosDevol()))
++                .findFirstActiveValueByVarParamAndStore(paramNumPosDevol, storeCode)
++                .or(() -> pmParamRepository.findFirstValueByVarParam(paramNumPosDevol))
+                 .orElseThrow(() -> new NoSuchElementException("Parametro NUMPOSDEVOL no configurado"));
+ 
+         return new StoreData(
+@@ -52,7 +57,7 @@
+     public boolean isFrecuentoStore(Integer storeCode) {
+         String storeKey = String.valueOf(storeCode);
+         return pmParamRepository
+-                .findFirstActiveValueByVarParamAndStore(properties.getParamRegionFrecuento(), storeCode)
++                .findFirstActiveValueByVarParamAndStore(paramRegionFrecuento, storeCode)
+                 .map(regionFrecuento -> mnTiendaRepository.findByDesClaveAndIndActivo(storeKey, ACTIVE)
+                         .map(store -> trim(regionFrecuento).equals(trim(store.getCodRegion())))
+                         .orElse(false))
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/adapter/out/pubsub/DevolutionEventAdapter.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/adapter/out/pubsub/DevolutionEventAdapter.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/adapter/out/pubsub/DevolutionEventAdapter.java
+@@ -2,11 +2,11 @@
+ 
+ import com.elrosado.integration.domain.port.out.DevolutionEventPort;
+ import com.elrosado.jlib_pubsub.interfaces.IMessagePublisher;
+-import tools.jackson.databind.ObjectMapper;
+ import lombok.RequiredArgsConstructor;
+ import lombok.extern.slf4j.Slf4j;
+ import org.springframework.beans.factory.annotation.Value;
+ import org.springframework.stereotype.Component;
++import tools.jackson.databind.ObjectMapper;
+ 
+ @Component
+ @RequiredArgsConstructor
+@@ -16,7 +16,7 @@
+     private final IMessagePublisher messagePublisher;
+     private final ObjectMapper objectMapper;
+ 
+-    @Value("${app.gcp.pubsub.topic-devolution}")
++    @Value("${app.gcp.pubsub.topic-synchro-controller}")
+     private String topic;
+ 
+     @Override
+@@ -26,8 +26,10 @@
+             String messageId = messagePublisher.publishAsync(topic, payload).get();
+ 
+             log.atInfo()
+-                    .setMessage("Evento de devolucion publicado en Pub/Sub")
+-                    .addKeyValue("devolutionId", event.devolutionId())
++                    .setMessage("Evento de sincronizacion al controlador publicado en Pub/Sub")
++                    .addKeyValue("eventId", event.eventId())
++                    .addKeyValue("eventType", event.eventType())
++                    .addKeyValue("codStore", event.codStore())
+                     .addKeyValue("topic", topic)
+                     .addKeyValue("messageId", messageId)
+                     .log();
+@@ -35,11 +37,11 @@
+             return messageId;
+         } catch (Exception ex) {
+             log.atError()
+-                    .setMessage("Error publicando evento de devolucion en Pub/Sub")
+-                    .addKeyValue("devolutionId", event.devolutionId())
++                    .setMessage("Error publicando evento de sincronizacion al controlador en Pub/Sub")
++                    .addKeyValue("eventId", event.eventId())
+                     .setCause(ex)
+                     .log();
+-            throw new IllegalStateException("Error publicando evento de devolucion", ex);
++            throw new IllegalStateException("Error publicando evento de sincronizacion al controlador", ex);
+         }
+     }
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/adapter/out/pubsub/DevolutionProcessedEvent.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/adapter/out/pubsub/DevolutionProcessedEvent.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/adapter/out/pubsub/DevolutionProcessedEvent.java
+@@ -3,9 +3,13 @@
+ import java.time.Instant;
+ 
+ public record DevolutionProcessedEvent(
+-        Integer devolutionId,
+-        Integer numNc,
+-        String creditNoteNumber,
+-        String gcsPath,
+-        Instant processedAt
++        String  eventId,
++        String  eventType,
++        String  source,
++        Integer codStore,
++        String  gcsBucket,
++        String  gcsPath,
++        String  fileName,
++        String  targetDir,
++        Instant createdAt
+ ) {}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/adapter/out/storage/GcsDvFileAdapter.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/adapter/out/storage/GcsDvFileAdapter.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/adapter/out/storage/GcsDvFileAdapter.java
+@@ -15,11 +15,9 @@
+ 
+     private final IGoogleCloudStorageService googleCloudStorageService;
+ 
+-    @Value("${app.gcp.storage.bucket-name}")
+-    private String bucketName;
+ 
+     @Override
+-    public String upload(DvFile dvFile) {
++    public String upload(DvFile dvFile, String bucketName) {
+         googleCloudStorageService.uploadFile(
+                 bucketName,
+                 dvFile.content(),
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/adapter/out/storage/GcsDvFileReaderAdapter.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/adapter/out/storage/GcsDvFileReaderAdapter.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/adapter/out/storage/GcsDvFileReaderAdapter.java
+@@ -1,65 +0,0 @@
+-package com.elrosado.integration.infrastructure.adapter.out.storage;
+-
+-import com.elrosado.integration.domain.port.out.DvFileReaderPort;
+-import com.elrosado.jlib_storage.interfaces.IGoogleCloudStorageService;
+-import lombok.RequiredArgsConstructor;
+-import lombok.extern.slf4j.Slf4j;
+-import org.springframework.beans.factory.annotation.Value;
+-import org.springframework.stereotype.Component;
+-
+-import java.net.URI;
+-
+-@Component
+-@RequiredArgsConstructor
+-@Slf4j
+-public class GcsDvFileReaderAdapter implements DvFileReaderPort {
+-
+-    private final IGoogleCloudStorageService googleCloudStorageService;
+-
+-    @Value("${app.gcp.storage.bucket-name}")
+-    private String defaultBucketName;
+-
+-    @Override
+-    public byte[] read(String gcsPath) {
+-        GcsObjectLocation location = resolveLocation(gcsPath);
+-        byte[] content = googleCloudStorageService.downloadFile(location.bucketName(), location.objectName());
+-
+-        log.atInfo()
+-                .setMessage("Archivo DV leido desde GCS")
+-                .addKeyValue("bucketName", location.bucketName())
+-                .addKeyValue("objectName", location.objectName())
+-                .addKeyValue("size", content.length)
+-                .log();
+-
+-        return content;
+-    }
+-
+-    private GcsObjectLocation resolveLocation(String gcsPath) {
+-        if (gcsPath == null || gcsPath.isBlank()) {
+-            throw new IllegalArgumentException("gcsPath es requerido para leer el archivo DV");
+-        }
+-
+-        String bucketName = defaultBucketName;
+-        String objectName = gcsPath.strip();
+-        if (objectName.startsWith("gs://")) {
+-            URI uri = URI.create(objectName);
+-            bucketName = uri.getHost();
+-            objectName = uri.getPath();
+-        }
+-
+-        while (objectName.startsWith("/")) {
+-            objectName = objectName.substring(1);
+-        }
+-
+-        if (bucketName == null || bucketName.isBlank()) {
+-            throw new IllegalArgumentException("bucketName es requerido para leer gcsPath=" + gcsPath);
+-        }
+-        if (objectName.isBlank()) {
+-            throw new IllegalArgumentException("objectName es requerido para leer gcsPath=" + gcsPath);
+-        }
+-
+-        return new GcsObjectLocation(bucketName, objectName);
+-    }
+-
+-    private record GcsObjectLocation(String bucketName, String objectName) {}
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/adapter/out/transfer/SecureFileTransferAdapter.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/adapter/out/transfer/SecureFileTransferAdapter.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/adapter/out/transfer/SecureFileTransferAdapter.java
+@@ -1,108 +0,0 @@
+-package com.elrosado.integration.infrastructure.adapter.out.transfer;
+-
+-import com.elrosado.integration.domain.exception.FileTransferPermanentException;
+-import com.elrosado.integration.domain.exception.FileTransferTransientException;
+-import com.elrosado.integration.domain.model.FileTransferResult;
+-import com.elrosado.integration.domain.port.out.FileTransferPort;
+-import com.elrosado.integration.infrastructure.config.FileTransferProperties;
+-import com.elrosado.integration.infrastructure.security.BearerTokenProvider;
+-import lombok.RequiredArgsConstructor;
+-import lombok.extern.slf4j.Slf4j;
+-import org.springframework.beans.factory.annotation.Qualifier;
+-import org.springframework.http.HttpHeaders;
+-import org.springframework.http.MediaType;
+-import org.springframework.http.ResponseEntity;
+-import org.springframework.http.client.SimpleClientHttpRequestFactory;
+-import org.springframework.stereotype.Component;
+-import org.springframework.web.client.*;
+-
+-import java.time.Duration;
+-import java.time.Instant;
+-import java.util.Base64;
+-
+-@Component
+-@Slf4j
+-@RequiredArgsConstructor
+-public class SecureFileTransferAdapter implements FileTransferPort {
+-
+-    @Qualifier("fileTransferRestClient")
+-    private final RestClient restClient;
+-    private final FileTransferProperties properties;
+-    private final BearerTokenProvider bearerTokenProvider;
+-
+-    @Override
+-    public FileTransferResult transfer(String fileName, byte[] content) {
+-        validateRequest(fileName, content);
+-
+-        FileTransferRequestBody body = new FileTransferRequestBody(
+-                fileName,
+-                normalizeTargetDir(properties.getTargetDir()),
+-                Base64.getEncoder().encodeToString(content)
+-        );
+-
+-        try {
+-            ResponseEntity<Void> response = restClient.post()
+-                    .uri(properties.normalizedFilesPath())
+-                    .header(HttpHeaders.AUTHORIZATION, bearerTokenProvider.authorizationHeader())
+-                    .contentType(MediaType.APPLICATION_JSON)
+-                    .body(body)
+-                    .retrieve()
+-                    .toBodilessEntity();
+-
+-            int statusCode = response.getStatusCode().value();
+-            if (statusCode != 201) {
+-                log.atWarn()
+-                        .setMessage("API de transferencia respondio con codigo 2xx distinto de 201")
+-                        .addKeyValue("fileName", fileName)
+-                        .addKeyValue("statusCode", statusCode)
+-                        .log();
+-            }
+-
+-            return new FileTransferResult(fileName, properties.endpoint(), statusCode, Instant.now());
+-        } catch (HttpClientErrorException ex) {
+-            throw new FileTransferPermanentException(
+-                    "Error permanente transfiriendo archivo DV. statusCode=" + ex.getStatusCode().value(),
+-                    ex
+-            );
+-        } catch (HttpServerErrorException | ResourceAccessException ex) {
+-            throw new FileTransferTransientException("Error transitorio transfiriendo archivo DV", ex);
+-        } catch (RestClientException ex) {
+-            throw new FileTransferTransientException("Error HTTP inesperado transfiriendo archivo DV", ex);
+-        }
+-    }
+-
+-    private void validateRequest(String fileName, byte[] content) {
+-        if (fileName == null || fileName.isBlank()) {
+-            throw new FileTransferPermanentException("fileName es requerido para transferir archivo DV");
+-        }
+-        if (content == null) {
+-            throw new FileTransferPermanentException("content es requerido para transferir archivo DV");
+-        }
+-    }
+-
+-    private String normalizeTargetDir(String targetDir) {
+-        if (targetDir == null || targetDir.isBlank()) {
+-            throw new FileTransferPermanentException("FILE_TRANSFER_TARGET_DIR no esta configurado");
+-        }
+-
+-        String normalized = targetDir.strip();
+-        while (normalized.endsWith("/") || normalized.endsWith("\\")) {
+-            normalized = normalized.substring(0, normalized.length() - 1);
+-        }
+-        if (normalized.isBlank()) {
+-            throw new FileTransferPermanentException("FILE_TRANSFER_TARGET_DIR no puede quedar vacio");
+-        }
+-        return normalized;
+-    }
+-
+-    private SimpleClientHttpRequestFactory requestFactory(FileTransferProperties properties) {
+-        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+-        Duration timeout = Duration.ofSeconds(Math.max(1, properties.getTimeoutSeconds()));
+-        requestFactory.setConnectTimeout(timeout);
+-        requestFactory.setReadTimeout(timeout);
+-        return requestFactory;
+-    }
+-
+-    private record FileTransferRequestBody(String file, String dir, String content) {
+-    }
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/config/FileTransferProperties.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/config/FileTransferProperties.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/config/FileTransferProperties.java
+@@ -1,37 +0,0 @@
+-package com.elrosado.integration.infrastructure.config;
+-
+-import lombok.Data;
+-import org.springframework.boot.context.properties.ConfigurationProperties;
+-import org.springframework.stereotype.Component;
+-
+-@Component
+-@ConfigurationProperties(prefix = "app.file-transfer")
+-@Data
+-public class FileTransferProperties {
+-
+-    private boolean enabled = true;
+-    private String baseUrl = "https://10.1.4.57:8033/api/v1";
+-    private String filesPath = "/files";
+-    private String targetDir = "f:/ALLC_DAT/IN/devs";
+-    private int timeoutSeconds = 30;
+-    private String bearerTokenSecretId;
+-    private String bearerTokenSecretVersion = "latest";
+-    private long bearerTokenCacheTtlSeconds = 300;
+-    private String paramNumPosDevol = "NUMPOSDEVOL";
+-    private String paramRegionFrecuento = "COD_REGION_FRECUENTO";
+-
+-    public String normalizedFilesPath() {
+-        if (filesPath == null || filesPath.isBlank()) {
+-            return "/files";
+-        }
+-        return filesPath.startsWith("/") ? filesPath : "/" + filesPath;
+-    }
+-
+-    public String endpoint() {
+-        String normalizedBaseUrl = baseUrl == null ? "" : baseUrl.strip();
+-        while (normalizedBaseUrl.endsWith("/")) {
+-            normalizedBaseUrl = normalizedBaseUrl.substring(0, normalizedBaseUrl.length() - 1);
+-        }
+-        return normalizedBaseUrl + normalizedFilesPath();
+-    }
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/config/HttpProperties.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/config/HttpProperties.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/config/HttpProperties.java
+@@ -1,14 +0,0 @@
+-package com.elrosado.integration.infrastructure.config;
+-
+-import lombok.Data;
+-import org.springframework.boot.context.properties.ConfigurationProperties;
+-import org.springframework.stereotype.Component;
+-
+-@Component
+-@ConfigurationProperties(prefix = "app.http")
+-@Data
+-public class HttpProperties {
+-
+-    private long connectTimeoutMs = 10000;
+-    private long readTimeoutMs = 30000;
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/config/PubSubRoutingProperties.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/config/PubSubRoutingProperties.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/config/PubSubRoutingProperties.java
+@@ -9,15 +9,10 @@
+ @Data
+ public class PubSubRoutingProperties {
+ 
+-    private String topicDevolution = "retail.local.devolution.processed.v1";
++    private String topicSynchroController = "retail.local.synchro.controller.v1";
+     private String subscriptionDevolutionRequest = "retail.local.devolution.request.v1-sub";
+-    private String subscriptionDevolutionProcessed = "retail.local.devolution.processed.v1-sub";
+ 
+     public boolean isRequestSubscription(String subscriptionId) {
+         return subscriptionDevolutionRequest != null && subscriptionDevolutionRequest.equals(subscriptionId);
+     }
+-
+-    public boolean isProcessedSubscription(String subscriptionId) {
+-        return subscriptionDevolutionProcessed != null && subscriptionDevolutionProcessed.equals(subscriptionId);
+-    }
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/config/ResTemplateConfig.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/config/ResTemplateConfig.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/config/ResTemplateConfig.java
+@@ -1,38 +0,0 @@
+-package com.elrosado.integration.infrastructure.config;
+-
+-import lombok.RequiredArgsConstructor;
+-import org.springframework.context.annotation.Bean;
+-import org.springframework.context.annotation.Configuration;
+-import org.springframework.http.client.ClientHttpRequestFactory;
+-import org.springframework.http.client.SimpleClientHttpRequestFactory;
+-import org.springframework.web.client.RestClient;
+-
+-import java.time.Duration;
+-
+-@Configuration
+-@RequiredArgsConstructor
+-public class ResTemplateConfig {
+-
+-    private final HttpProperties properties;
+-    private final FileTransferProperties fileProperties;
+-
+-    @Bean
+-    public ClientHttpRequestFactory clientHttpRequestFactory() {
+-        var factory = new SimpleClientHttpRequestFactory();
+-        factory.setConnectTimeout(
+-                Duration.ofMillis(properties.getConnectTimeoutMs()));
+-        factory.setReadTimeout(
+-                Duration.ofMillis(properties.getReadTimeoutMs()));
+-        return factory;
+-    }
+-
+-    @Bean("fileTransferRestClient")
+-    public RestClient sriAuthRestClient(ClientHttpRequestFactory factory) {
+-        return RestClient.builder()
+-                .requestFactory(factory)
+-                .baseUrl(fileProperties.getBaseUrl())
+-                .defaultHeader("Accept", "application/json")
+-                .build();
+-    }
+-
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/security/BearerTokenProvider.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/security/BearerTokenProvider.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/security/BearerTokenProvider.java
+@@ -1,6 +0,0 @@
+-package com.elrosado.integration.infrastructure.security;
+-
+-public interface BearerTokenProvider {
+-
+-    String authorizationHeader();
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/security/SecretManagerBearerTokenProvider.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/security/SecretManagerBearerTokenProvider.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/security/SecretManagerBearerTokenProvider.java
+@@ -1,117 +0,0 @@
+-package com.elrosado.integration.infrastructure.security;
+-
+-import com.elrosado.integration.domain.exception.FileTransferPermanentException;
+-import com.elrosado.integration.domain.exception.FileTransferTransientException;
+-import com.elrosado.integration.infrastructure.config.FileTransferProperties;
+-import com.google.api.gax.rpc.ApiException;
+-import com.google.api.gax.rpc.StatusCode;
+-import com.google.cloud.secretmanager.v1.AccessSecretVersionResponse;
+-import com.google.cloud.secretmanager.v1.SecretManagerServiceClient;
+-import com.google.cloud.secretmanager.v1.SecretVersionName;
+-import org.springframework.beans.factory.annotation.Value;
+-import org.springframework.stereotype.Component;
+-
+-import java.time.Duration;
+-
+-@Component
+-public class SecretManagerBearerTokenProvider implements BearerTokenProvider {
+-
+-    private final SecretManagerServiceClient secretManagerServiceClient;
+-    private final FileTransferProperties properties;
+-    private final String projectId;
+-
+-    private volatile CachedAuthorizationHeader cachedAuthorizationHeader;
+-
+-    public SecretManagerBearerTokenProvider(
+-            SecretManagerServiceClient secretManagerServiceClient,
+-            FileTransferProperties properties,
+-            @Value("${spring.cloud.gcp.project-id:}") String projectId
+-    ) {
+-        this.secretManagerServiceClient = secretManagerServiceClient;
+-        this.properties = properties;
+-        this.projectId = projectId;
+-    }
+-
+-    @Override
+-    public String authorizationHeader() {
+-        long nowNanos = System.nanoTime();
+-        CachedAuthorizationHeader header = cachedAuthorizationHeader;
+-        if (isCacheValid(header, nowNanos)) {
+-            return header.value();
+-        }
+-
+-        synchronized (this) {
+-            header = cachedAuthorizationHeader;
+-            if (!isCacheValid(header, nowNanos)) {
+-                header = new CachedAuthorizationHeader(buildAuthorizationHeader(), System.nanoTime());
+-                cachedAuthorizationHeader = header;
+-            }
+-            return header.value();
+-        }
+-    }
+-
+-    private String buildAuthorizationHeader() {
+-        String secretId = required(properties.getBearerTokenSecretId(), "FILE_TRANSFER_BEARER_TOKEN_SECRET_ID");
+-        String version = defaultIfBlank(properties.getBearerTokenSecretVersion(), "latest");
+-        String resolvedProjectId = required(projectId, "spring.cloud.gcp.project-id");
+-
+-        try {
+-            SecretVersionName secretVersionName = SecretVersionName.of(resolvedProjectId, secretId, version);
+-            AccessSecretVersionResponse response = secretManagerServiceClient.accessSecretVersion(secretVersionName);
+-            String token = response.getPayload().getData().toStringUtf8();
+-            if (token == null || token.isBlank()) {
+-                throw new FileTransferPermanentException("El bearer token obtenido desde Secret Manager esta vacio");
+-            }
+-            return token.regionMatches(true, 0, "Bearer ", 0, "Bearer ".length())
+-                    ? token.strip()
+-                    : "Bearer " + token.strip();
+-        } catch (FileTransferPermanentException ex) {
+-            throw ex;
+-        } catch (ApiException ex) {
+-            if (isPermanentSecretManagerError(ex)) {
+-                throw new FileTransferPermanentException(
+-                        "No se pudo leer bearer token desde Secret Manager. statusCode="
+-                                + ex.getStatusCode().getCode(),
+-                        ex
+-                );
+-            }
+-            throw new FileTransferTransientException("Error transitorio leyendo bearer token desde Secret Manager", ex);
+-        } catch (Exception ex) {
+-            throw new FileTransferTransientException("No se pudo leer bearer token desde Secret Manager", ex);
+-        }
+-    }
+-
+-    private boolean isCacheValid(CachedAuthorizationHeader header, long nowNanos) {
+-        if (header == null) {
+-            return false;
+-        }
+-        long ttlSeconds = properties.getBearerTokenCacheTtlSeconds();
+-        if (ttlSeconds <= 0) {
+-            return false;
+-        }
+-        long ttlNanos = Duration.ofSeconds(ttlSeconds).toNanos();
+-        return nowNanos - header.loadedAtNanos() < ttlNanos;
+-    }
+-
+-    private String required(String value, String propertyName) {
+-        if (value == null || value.isBlank()) {
+-            throw new FileTransferPermanentException(propertyName + " no esta configurado");
+-        }
+-        return value.strip();
+-    }
+-
+-    private String defaultIfBlank(String value, String defaultValue) {
+-        return value == null || value.isBlank() ? defaultValue : value.strip();
+-    }
+-
+-    private boolean isPermanentSecretManagerError(ApiException ex) {
+-        StatusCode.Code code = ex.getStatusCode().getCode();
+-        return code == StatusCode.Code.NOT_FOUND
+-                || code == StatusCode.Code.PERMISSION_DENIED
+-                || code == StatusCode.Code.UNAUTHENTICATED
+-                || code == StatusCode.Code.INVALID_ARGUMENT
+-                || code == StatusCode.Code.FAILED_PRECONDITION;
+-    }
+-
+-    private record CachedAuthorizationHeader(String value, long loadedAtNanos) {}
+-}
+
+
+--- Diff for /src/main/resources/application-dev.yaml ---
+--- a//src/main/resources/application-dev.yaml
++++ b//src/main/resources/application-dev.yaml
+@@ -49,30 +49,23 @@
+ 
+ pubsub:
+   subscriptions:
+-    - topic-id: ${PUBSUB_TOPIC_DEVOLUTION}
+-      subscription-id: ${PUBSUB_SUBSCRIPTION_DEVOLUTION}
+-    - topic-id: ${PUBSUB_TOPIC_PROCESSED_DEVOLUTION}
+-      subscription-id: ${PUBSUB_SUBSCRIPTION_DEVOLUTION_PROCESSED}
++    - topic-id: ${PUBSUB_TOPIC_DEVOLUCION_REQUEST:retail.local.devolucion.request.v1}
++      subscription-id: ${PUBSUB_SUBSCRIPTION_DEVOLUCION}
+ 
+ app:
+-  file-transfer:
+-    enabled: ${FILE_TRANSFER_ENABLED}
+-    base-url: ${FILE_TRANSFER_BASE_URL}
+-    files-path: ${FILE_TRANSFER_FILES_PATH}
+-    target-dir: ${FILE_TRANSFER_TARGET_DIR}
+-    timeout-seconds: ${FILE_TRANSFER_TIMEOUT_SECONDS}
+-    bearer-token-secret-id: ${FILE_TRANSFER_BEARER_TOKEN_SECRET_ID}
+-    bearer-token-secret-version: ${FILE_TRANSFER_BEARER_TOKEN_SECRET_VERSION}
+-    bearer-token-cache-ttl-seconds: ${FILE_TRANSFER_BEARER_TOKEN_CACHE_TTL_SECONDS}
+-    param-num-pos-devol: ${PARAM_NUM_POS_DEVOL}
+-    param-region-frecuento: ${PARAM_REGION_FRECUENTO}
++  params:
++    num-pos-devol: ${PARAM_NUM_POS_DEVOL}
++    region-frecuento: ${PARAM_REGION_FRECUENTO}
++  sync-controller:
++    target-dir: ${SYNCHRO_CONTROLLER_TARGET_DIR}
+   gcp:
+     storage:
+       bucket-name: ${GCS_BUCKET_DEVS}
++      path-dev: ${GCS_PATH_DEV:ALLC_DAT/IN/{storeCode}/DEVS}
+     pubsub:
+-      topic-devolution: ${PUBSUB_TOPIC_DEVOLUTION}
++      topic-synchro-controller: ${PUBSUB_TOPIC_SYNCHRO_CONTROLLER}
+       subscription-devolution-request: ${PUBSUB_SUBSCRIPTION_DEVOLUCION}
+-      subscription-devolution-processed: ${PUBSUB_SUBSCRIPTION_DEVOLUTION_PROCESSED}
+   http:
+     connect-timeout-ms: 10000
+-    read-timeout-ms: 30000+    read-timeout-ms: 30000
++
+
+
+--- Diff for /src/main/resources/application-local.yaml ---
+--- a//src/main/resources/application-local.yaml
++++ b//src/main/resources/application-local.yaml
+@@ -51,28 +51,17 @@
+   subscriptions:
+     - topic-id: retail.local.devolucion.request.v1
+       subscription-id: ${PUBSUB_SUBSCRIPTION_DEVOLUCION:retail.local.devolution.request.v1-sub}
+-    - topic-id: retail.local.devolution.processed.v1
+-      subscription-id: ${PUBSUB_SUBSCRIPTION_DEVOLUTION_PROCESSED:retail.local.devolution.processed.v1-sub}
+ 
+ app:
+-  file-transfer:
+-    enabled: ${FILE_TRANSFER_ENABLED:true}
+-    base-url: ${FILE_TRANSFER_BASE_URL:https://10.1.4.57:8033/api/v1}
+-    files-path: ${FILE_TRANSFER_FILES_PATH:/files}
+-    target-dir: ${FILE_TRANSFER_TARGET_DIR:f:/ALLC_DAT/IN/devs}
+-    timeout-seconds: ${FILE_TRANSFER_TIMEOUT_SECONDS:30}
+-    bearer-token-secret-id: ${FILE_TRANSFER_BEARER_TOKEN_SECRET_ID:integration-file-transfer-bearer-token}
+-    bearer-token-secret-version: ${FILE_TRANSFER_BEARER_TOKEN_SECRET_VERSION:latest}
+-    bearer-token-cache-ttl-seconds: ${FILE_TRANSFER_BEARER_TOKEN_CACHE_TTL_SECONDS:300}
+-    param-num-pos-devol: ${PARAM_NUM_POS_DEVOL:NUMPOSDEVOL}
+-    param-region-frecuento: ${PARAM_REGION_FRECUENTO:COD_REGION_FRECUENTO}
++  params:
++    num-pos-devol: ${PARAM_NUM_POS_DEVOL:NUMPOSDEVOL}
++    region-frecuento: ${PARAM_REGION_FRECUENTO:COD_REGION_FRECUENTO}
++  sync-controller:
++    target-dir: ${SYNCHRO_CONTROLLER_TARGET_DIR:f:/ALLC_DAT/IN/devs}
+   gcp:
+     storage:
+-      bucket-name: ${GCS_BUCKET_DEVS:gcs-cer-syncrhonization-files-dev}
++      bucket-name: ${GCS_BUCKET_DEVS:gcs-cer-suite-core-files}
++      path-dev: ${GCS_PATH_DEV:ALLC_DAT/IN/{storeCode}/DEVS}
+     pubsub:
+-      topic-devolution: ${PUBSUB_TOPIC_DEVOLUTION:retail.local.devolution.processed.v1}
++      topic-synchro-controller: ${PUBSUB_TOPIC_SYNCHRO_CONTROLLER:retail.local.synchro.controller.v1}
+       subscription-devolution-request: ${PUBSUB_SUBSCRIPTION_DEVOLUCION:retail.local.devolution.request.v1-sub}
+-      subscription-devolution-processed: ${PUBSUB_SUBSCRIPTION_DEVOLUTION_PROCESSED:retail.local.devolution.processed.v1-sub}
+-  http:
+-    connect-timeout-ms: 10000
+-    read-timeout-ms: 30000
+
+--- Diff for /src/main/resources/application-prod.yaml ---
+--- a//src/main/resources/application-prod.yaml
++++ b//src/main/resources/application-prod.yaml
+@@ -47,26 +47,18 @@
+   subscriptions:
+     - topic-id: retail.local.devolucion.request.v1
+       subscription-id: ${PUBSUB_SUBSCRIPTION_DEVOLUCION}
+-    - topic-id: retail.local.devolution.processed.v1
+-      subscription-id: ${PUBSUB_SUBSCRIPTION_DEVOLUTION_PROCESSED}
+ 
+ app:
+-  file-transfer:
+-    enabled: ${FILE_TRANSFER_ENABLED:true}
+-    base-url: ${FILE_TRANSFER_BASE_URL}
+-    files-path: ${FILE_TRANSFER_FILES_PATH:/files}
+-    target-dir: ${FILE_TRANSFER_TARGET_DIR}
+-    timeout-seconds: ${FILE_TRANSFER_TIMEOUT_SECONDS:30}
+-    bearer-token-secret-id: ${FILE_TRANSFER_BEARER_TOKEN_SECRET_ID}
+-    bearer-token-secret-version: ${FILE_TRANSFER_BEARER_TOKEN_SECRET_VERSION:latest}
+-    bearer-token-cache-ttl-seconds: ${FILE_TRANSFER_BEARER_TOKEN_CACHE_TTL_SECONDS:300}
++  params:
++    num-pos-devol: ${PARAM_NUM_POS_DEVOL}
++    region-frecuento: ${PARAM_REGION_FRECUENTO}
++  sync-controller:
++    target-dir: ${SYNCHRO_CONTROLLER_TARGET_DIR}
+   gcp:
+     storage:
+       bucket-name: ${GCS_BUCKET_DEVS}
++      path-dev: ${GCS_PATH_DEV:ALLC_DAT/IN/{storeCode}/DEVS}
+     pubsub:
+-      topic-devolution: ${PUBSUB_TOPIC_DEVOLUTION}
++      topic-synchro-controller: ${PUBSUB_TOPIC_SYNCHRO_CONTROLLER}
+       subscription-devolution-request: ${PUBSUB_SUBSCRIPTION_DEVOLUCION}
+-      subscription-devolution-processed: ${PUBSUB_SUBSCRIPTION_DEVOLUTION_PROCESSED}
+-  http:
+-    connect-timeout-ms: 10000
+-    read-timeout-ms: 30000+
+
+
+--- Diff for /src/test/java/com/elrosado/integration/application/service/ExecuteDevolutionServiceTest.java ---
+--- a//src/test/java/com/elrosado/integration/application/service/ExecuteDevolutionServiceTest.java
++++ b//src/test/java/com/elrosado/integration/application/service/ExecuteDevolutionServiceTest.java
+@@ -24,6 +24,7 @@
+ import org.junit.jupiter.api.Test;
+ 
+ import java.time.LocalDate;
++import java.lang.reflect.Field;
+ import java.time.LocalDateTime;
+ import java.util.List;
+ 
+@@ -69,6 +70,9 @@
+         assertThat(fakes.devolutionSequencePort.returnMode).isEqualTo(ReturnMode.CASH);
+         assertThat(fakes.devolutionSequencePort.codSri).isEqualTo("12");
+         assertThat(fakes.devolutionSequencePort.pos).isEqualTo("7");
++        assertThat(fakes.dvFileStoragePort.bucketName).isEqualTo("gcs-cer-suite-core-files/ALLC_DAT/IN/005/DEVS");
++        assertThat(fakes.devolutionEventPort.event.targetDir()).isEqualTo("f:/ALLC_DAT/IN/devs");
++        assertThat(fakes.devolutionEventPort.event.gcsBucket()).isEqualTo("gcs-cer-suite-core-files/ALLC_DAT/IN/005/DEVS");
+     }
+ 
+     @Test
+@@ -138,7 +142,7 @@
+         private final FakeCreditNoteEligibilityPort creditNoteEligibilityPort = new FakeCreditNoteEligibilityPort();
+ 
+         private ExecuteDevolutionService service() {
+-            return new ExecuteDevolutionService(
++            ExecuteDevolutionService service = new ExecuteDevolutionService(
+                     devolutionReadPort,
+                     devolutionWritePort,
+                     transactionQueryPort,
+@@ -150,6 +154,20 @@
+                     devolutionEventPort,
+                     creditNoteEligibilityPort
+             );
++            setField(service, "gcsBucketName", "gcs-cer-suite-core-files");
++            setField(service, "pathDev", "ALLC_DAT/IN/{storeCode}/DEVS");
++            setField(service, "syncControllerTargetDir", "f:/ALLC_DAT/IN/devs");
++            return service;
++        }
++
++        private void setField(Object target, String fieldName, Object value) {
++            try {
++                Field field = target.getClass().getDeclaredField(fieldName);
++                field.setAccessible(true);
++                field.set(target, value);
++            } catch (ReflectiveOperationException ex) {
++                throw new IllegalStateException(ex);
++            }
+         }
+     }
+ 
+@@ -244,10 +262,12 @@
+     private static class FakeDvFileStoragePort implements DvFileStoragePort {
+         private boolean called;
+         private String response;
+-
+-        @Override
+-        public String upload(DvFile dvFile) {
+-            called = true;
++        private String bucketName;
++
++        @Override
++        public String upload(DvFile dvFile, String bucketName) {
++            called = true;
++            this.bucketName = bucketName;
+             return response;
+         }
+     }
+@@ -255,10 +275,12 @@
+     private static class FakeDevolutionEventPort implements DevolutionEventPort {
+         private boolean called;
+         private String response;
++        private com.elrosado.integration.infrastructure.adapter.out.pubsub.DevolutionProcessedEvent event;
+ 
+         @Override
+         public String publish(com.elrosado.integration.infrastructure.adapter.out.pubsub.DevolutionProcessedEvent event) {
+             called = true;
++            this.event = event;
+             return response;
+         }
+     }
+
+
+--- Diff for /src/test/java/com/elrosado/integration/application/service/TransferDevolutionFileServiceTest.java ---
+--- a//src/test/java/com/elrosado/integration/application/service/TransferDevolutionFileServiceTest.java
++++ b//src/test/java/com/elrosado/integration/application/service/TransferDevolutionFileServiceTest.java
+@@ -1,52 +0,0 @@
+-package com.elrosado.integration.application.service;
+-
+-import com.elrosado.integration.application.command.TransferDevolutionFileCommand;
+-import com.elrosado.integration.domain.model.FileTransferResult;
+-import com.elrosado.integration.domain.port.out.DvFileReaderPort;
+-import com.elrosado.integration.domain.port.out.FileTransferPort;
+-import org.junit.jupiter.api.BeforeEach;
+-import org.junit.jupiter.api.Test;
+-import org.junit.jupiter.api.extension.ExtendWith;
+-import org.mockito.Mock;
+-import org.mockito.junit.jupiter.MockitoExtension;
+-
+-import java.time.Instant;
+-
+-import static org.assertj.core.api.Assertions.assertThat;
+-import static org.mockito.Mockito.verify;
+-import static org.mockito.Mockito.when;
+-
+-@ExtendWith(MockitoExtension.class)
+-class TransferDevolutionFileServiceTest {
+-
+-    @Mock
+-    private DvFileReaderPort dvFileReaderPort;
+-
+-    @Mock
+-    private FileTransferPort fileTransferPort;
+-
+-    private TransferDevolutionFileService service;
+-
+-    @BeforeEach
+-    void setUp() {
+-        service = new TransferDevolutionFileService(dvFileReaderPort, fileTransferPort);
+-    }
+-
+-    @Test
+-    void readsFileFromGcsAndTransfersItUsingFileNameFromPath() {
+-        String gcsPath = "gs://bucket/devs/005/DV000123.005";
+-        byte[] content = "demo".getBytes();
+-        FileTransferResult expected = new FileTransferResult(
+-                "DV000123.005", "https://host/api/v1/files", 201, Instant.now());
+-
+-        when(dvFileReaderPort.read(gcsPath)).thenReturn(content);
+-        when(fileTransferPort.transfer("DV000123.005", content)).thenReturn(expected);
+-
+-        FileTransferResult result = service.transfer(new TransferDevolutionFileCommand(
+-                123, 1, "012007000000001", gcsPath, Instant.now()));
+-
+-        assertThat(result).isEqualTo(expected);
+-        verify(dvFileReaderPort).read(gcsPath);
+-        verify(fileTransferPort).transfer("DV000123.005", content);
+-    }
+-}
+
+
+--- Diff for /src/test/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionPubSubSubscriberTest.java ---
+--- a//src/test/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionPubSubSubscriberTest.java
++++ b//src/test/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionPubSubSubscriberTest.java
+@@ -22,7 +22,6 @@
+ class DevolutionPubSubSubscriberTest {
+ 
+     private static final String REQUEST_SUBSCRIPTION = "retail.local.devolution.request.v1-sub";
+-    private static final String PROCESSED_SUBSCRIPTION = "retail.local.devolution.processed.v1-sub";
+     private static final String BODY = "{}";
+ 
+     @Mock
+@@ -31,21 +30,16 @@
+     @Mock
+     private DevolutionCreationMessageHandler creationMessageHandler;
+ 
+-    @Mock
+-    private DevolutionTransferMessageHandler transferMessageHandler;
+-
+     private DevolutionPubSubSubscriber subscriber;
+ 
+     @BeforeEach
+     void setUp() {
+         PubSubRoutingProperties routingProperties = new PubSubRoutingProperties();
+         routingProperties.setSubscriptionDevolutionRequest(REQUEST_SUBSCRIPTION);
+-        routingProperties.setSubscriptionDevolutionProcessed(PROCESSED_SUBSCRIPTION);
+ 
+         subscriber = new DevolutionPubSubSubscriber(
+                 messageSubscriber,
+                 creationMessageHandler,
+-                transferMessageHandler,
+                 routingProperties
+         );
+     }
+@@ -69,20 +63,6 @@
+ 
+         assertThat(result).isTrue();
+         verify(creationMessageHandler).handle(REQUEST_SUBSCRIPTION, BODY);
+-        verifyNoInteractions(transferMessageHandler);
+-    }
+-
+-    @Test
+-    void routesProcessedSubscriptionToTransferHandler() throws Exception {
+-        when(transferMessageHandler.handle(PROCESSED_SUBSCRIPTION, BODY)).thenReturn(false);
+-
+-        boolean result = captureHandler()
+-                .apply(PROCESSED_SUBSCRIPTION, BODY)
+-                .get(5, TimeUnit.SECONDS);
+-
+-        assertThat(result).isFalse();
+-        verify(transferMessageHandler).handle(PROCESSED_SUBSCRIPTION, BODY);
+-        verifyNoInteractions(creationMessageHandler);
+     }
+ 
+     @Test
+@@ -92,6 +72,6 @@
+                 .get(5, TimeUnit.SECONDS);
+ 
+         assertThat(result).isTrue();
+-        verifyNoInteractions(creationMessageHandler, transferMessageHandler);
++        verifyNoInteractions(creationMessageHandler);
+     }
+ }
+
+
+--- Diff for /src/test/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionTransferMessageHandlerTest.java ---
+--- a//src/test/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionTransferMessageHandlerTest.java
++++ b//src/test/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionTransferMessageHandlerTest.java
+@@ -1,121 +0,0 @@
+-package com.elrosado.integration.infrastructure.adapter.in.pubsub;
+-
+-import com.elrosado.integration.application.command.TransferDevolutionFileCommand;
+-import com.elrosado.integration.domain.exception.FileTransferPermanentException;
+-import com.elrosado.integration.domain.exception.FileTransferTransientException;
+-import com.elrosado.integration.domain.model.FileTransferResult;
+-import com.elrosado.integration.domain.port.in.TransferDevolutionFileUseCase;
+-import com.elrosado.integration.domain.port.out.DevolutionAuditPort;
+-import com.elrosado.integration.infrastructure.config.FileTransferProperties;
+-import org.junit.jupiter.api.BeforeEach;
+-import org.junit.jupiter.api.Test;
+-import org.junit.jupiter.api.extension.ExtendWith;
+-import org.mockito.ArgumentCaptor;
+-import org.mockito.Mock;
+-import org.mockito.junit.jupiter.MockitoExtension;
+-import tools.jackson.databind.ObjectMapper;
+-
+-import java.time.Instant;
+-
+-import static org.assertj.core.api.Assertions.assertThat;
+-import static org.mockito.ArgumentMatchers.any;
+-import static org.mockito.Mockito.doThrow;
+-import static org.mockito.Mockito.verify;
+-import static org.mockito.Mockito.verifyNoInteractions;
+-import static org.mockito.Mockito.when;
+-
+-@ExtendWith(MockitoExtension.class)
+-class DevolutionTransferMessageHandlerTest {
+-
+-    private static final String SUBSCRIPTION_ID = "retail.local.devolution.processed.v1-sub";
+-    private static final String VALID_BODY = """
+-            {"devolutionId":123,"numNc":1,"creditNoteNumber":"012007000000001","gcsPath":"gs://bucket/devs/005/DV000123.005"}
+-            """;
+-    private static final String NULL_ID_BODY = """
+-            {"devolutionId":null,"numNc":1,"creditNoteNumber":"012007000000001","gcsPath":"gs://bucket/devs/005/DV000123.005"}
+-            """;
+-    private static final String INVALID_JSON = "not-json";
+-
+-    @Mock
+-    private TransferDevolutionFileUseCase transferDevolutionFileUseCase;
+-
+-    @Mock
+-    private DevolutionAuditPort devolutionAuditPort;
+-
+-    private FileTransferProperties properties;
+-    private DevolutionTransferMessageHandler handler;
+-
+-    @BeforeEach
+-    void setUp() {
+-        properties = new FileTransferProperties();
+-        handler = new DevolutionTransferMessageHandler(
+-                transferDevolutionFileUseCase,
+-                devolutionAuditPort,
+-                properties,
+-                new ObjectMapper()
+-        );
+-    }
+-
+-    @Test
+-    void returnsAckWhenTransferSucceeds() {
+-        when(transferDevolutionFileUseCase.transfer(any())).thenReturn(
+-                new FileTransferResult("DV000123.005", "https://host/api/v1/files", 201, Instant.now())
+-        );
+-
+-        boolean result = handler.handle(SUBSCRIPTION_ID, VALID_BODY);
+-
+-        assertThat(result).isTrue();
+-        ArgumentCaptor<TransferDevolutionFileCommand> captor =
+-                ArgumentCaptor.forClass(TransferDevolutionFileCommand.class);
+-        verify(transferDevolutionFileUseCase).transfer(captor.capture());
+-        assertThat(captor.getValue().devolutionId()).isEqualTo(123);
+-        assertThat(captor.getValue().gcsPath()).isEqualTo("gs://bucket/devs/005/DV000123.005");
+-    }
+-
+-    @Test
+-    void returnsAckAndAuditsWhenPermanentErrorOccurs() {
+-        doThrow(new FileTransferPermanentException("payload invalido"))
+-                .when(transferDevolutionFileUseCase).transfer(any());
+-
+-        boolean result = handler.handle(SUBSCRIPTION_ID, VALID_BODY);
+-
+-        assertThat(result).isTrue();
+-        verify(devolutionAuditPort).log(123, "file_transfer_permanent_error", "payload invalido");
+-    }
+-
+-    @Test
+-    void returnsNackWhenTransientErrorOccurs() {
+-        doThrow(new FileTransferTransientException("timeout"))
+-                .when(transferDevolutionFileUseCase).transfer(any());
+-
+-        boolean result = handler.handle(SUBSCRIPTION_ID, VALID_BODY);
+-
+-        assertThat(result).isFalse();
+-    }
+-
+-    @Test
+-    void returnsAckWhenTransferIsDisabled() {
+-        properties.setEnabled(false);
+-
+-        boolean result = handler.handle(SUBSCRIPTION_ID, VALID_BODY);
+-
+-        assertThat(result).isTrue();
+-        verifyNoInteractions(transferDevolutionFileUseCase, devolutionAuditPort);
+-    }
+-
+-    @Test
+-    void returnsAckWhenJsonIsInvalid() {
+-        boolean result = handler.handle(SUBSCRIPTION_ID, INVALID_JSON);
+-
+-        assertThat(result).isTrue();
+-        verifyNoInteractions(transferDevolutionFileUseCase, devolutionAuditPort);
+-    }
+-
+-    @Test
+-    void returnsAckWhenDevolutionIdIsNull() {
+-        boolean result = handler.handle(SUBSCRIPTION_ID, NULL_ID_BODY);
+-
+-        assertThat(result).isTrue();
+-        verifyNoInteractions(transferDevolutionFileUseCase, devolutionAuditPort);
+-    }
+-}
+
+
+--- Diff for /src/test/java/com/elrosado/integration/infrastructure/security/SecretManagerBearerTokenProviderTest.java ---
+--- a//src/test/java/com/elrosado/integration/infrastructure/security/SecretManagerBearerTokenProviderTest.java
++++ b//src/test/java/com/elrosado/integration/infrastructure/security/SecretManagerBearerTokenProviderTest.java
+@@ -1,117 +0,0 @@
+-package com.elrosado.integration.infrastructure.security;
+-
+-import com.elrosado.integration.domain.exception.FileTransferPermanentException;
+-import com.elrosado.integration.domain.exception.FileTransferTransientException;
+-import com.elrosado.integration.infrastructure.config.FileTransferProperties;
+-import com.google.cloud.secretmanager.v1.AccessSecretVersionResponse;
+-import com.google.cloud.secretmanager.v1.SecretManagerServiceClient;
+-import com.google.cloud.secretmanager.v1.SecretPayload;
+-import com.google.cloud.secretmanager.v1.SecretVersionName;
+-import com.google.protobuf.ByteString;
+-import org.junit.jupiter.api.BeforeEach;
+-import org.junit.jupiter.api.Test;
+-import org.junit.jupiter.api.extension.ExtendWith;
+-import org.mockito.ArgumentCaptor;
+-import org.mockito.Mock;
+-import org.mockito.junit.jupiter.MockitoExtension;
+-
+-import static org.assertj.core.api.Assertions.assertThat;
+-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+-import static org.mockito.ArgumentMatchers.any;
+-import static org.mockito.Mockito.verify;
+-import static org.mockito.Mockito.verifyNoInteractions;
+-import static org.mockito.Mockito.verifyNoMoreInteractions;
+-import static org.mockito.Mockito.when;
+-
+-@ExtendWith(MockitoExtension.class)
+-class SecretManagerBearerTokenProviderTest {
+-
+-    @Mock
+-    private SecretManagerServiceClient secretManagerServiceClient;
+-
+-    private FileTransferProperties properties;
+-    private SecretManagerBearerTokenProvider provider;
+-
+-    @BeforeEach
+-    void setUp() {
+-        properties = new FileTransferProperties();
+-        properties.setBearerTokenSecretId("integration-file-transfer-bearer-token");
+-        properties.setBearerTokenSecretVersion("latest");
+-        properties.setBearerTokenCacheTtlSeconds(300);
+-        provider = new SecretManagerBearerTokenProvider(secretManagerServiceClient, properties, "test-project");
+-    }
+-
+-    @Test
+-    void readsSecretAndBuildsBearerHeader() {
+-        when(secretManagerServiceClient.accessSecretVersion(any(SecretVersionName.class)))
+-                .thenReturn(secretResponse("token-value"));
+-
+-        String header = provider.authorizationHeader();
+-
+-        assertThat(header).isEqualTo("Bearer token-value");
+-        ArgumentCaptor<SecretVersionName> captor = ArgumentCaptor.forClass(SecretVersionName.class);
+-        verify(secretManagerServiceClient).accessSecretVersion(captor.capture());
+-        assertThat(captor.getValue().toString())
+-                .isEqualTo("projects/test-project/secrets/integration-file-transfer-bearer-token/versions/latest");
+-    }
+-
+-    @Test
+-    void preservesBearerPrefixWhenSecretAlreadyContainsIt() {
+-        when(secretManagerServiceClient.accessSecretVersion(any(SecretVersionName.class)))
+-                .thenReturn(secretResponse("Bearer token-value"));
+-
+-        String header = provider.authorizationHeader();
+-
+-        assertThat(header).isEqualTo("Bearer token-value");
+-    }
+-
+-    @Test
+-    void cachesHeaderWithinConfiguredTtl() {
+-        when(secretManagerServiceClient.accessSecretVersion(any(SecretVersionName.class)))
+-                .thenReturn(secretResponse("token-value"));
+-
+-        assertThat(provider.authorizationHeader()).isEqualTo("Bearer token-value");
+-        assertThat(provider.authorizationHeader()).isEqualTo("Bearer token-value");
+-
+-        verify(secretManagerServiceClient).accessSecretVersion(any(SecretVersionName.class));
+-        verifyNoMoreInteractions(secretManagerServiceClient);
+-    }
+-
+-    @Test
+-    void throwsPermanentExceptionWhenSecretIdIsMissing() {
+-        properties.setBearerTokenSecretId(" ");
+-
+-        assertThatThrownBy(() -> provider.authorizationHeader())
+-                .isInstanceOf(FileTransferPermanentException.class)
+-                .hasMessageContaining("FILE_TRANSFER_BEARER_TOKEN_SECRET_ID");
+-        verifyNoInteractions(secretManagerServiceClient);
+-    }
+-
+-    @Test
+-    void throwsPermanentExceptionWhenSecretPayloadIsBlank() {
+-        when(secretManagerServiceClient.accessSecretVersion(any(SecretVersionName.class)))
+-                .thenReturn(secretResponse(" "));
+-
+-        assertThatThrownBy(() -> provider.authorizationHeader())
+-                .isInstanceOf(FileTransferPermanentException.class)
+-                .hasMessageContaining("esta vacio");
+-    }
+-
+-    @Test
+-    void wrapsUnexpectedSecretManagerErrorsAsTransient() {
+-        when(secretManagerServiceClient.accessSecretVersion(any(SecretVersionName.class)))
+-                .thenThrow(new RuntimeException("secret manager unavailable"));
+-
+-        assertThatThrownBy(() -> provider.authorizationHeader())
+-                .isInstanceOf(FileTransferTransientException.class)
+-                .hasMessageContaining("Secret Manager");
+-    }
+-
+-    private AccessSecretVersionResponse secretResponse(String value) {
+-        return AccessSecretVersionResponse.newBuilder()
+-                .setPayload(SecretPayload.newBuilder()
+-                        .setData(ByteString.copyFromUtf8(value))
+-                        .build())
+-                .build();
+-    }
+-}
+
+

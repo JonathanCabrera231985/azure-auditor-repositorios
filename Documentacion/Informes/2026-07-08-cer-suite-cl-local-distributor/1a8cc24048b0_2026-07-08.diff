@@ -1,0 +1,275 @@
+--- Diff for /CLAUDE.md ---
+--- a//CLAUDE.md
++++ b//CLAUDE.md
+@@ -13,7 +13,7 @@
+ **No** genera archivos de conciliación (Datafast, Medianet, Banco Pacífico, etc.) ni expone endpoints REST. **No accede al sistema de archivos** del pod — toda la entrada viene de Pub/Sub + Firestore.
+ 
+ **Flujo de entrada:**
+-1. ARMS Server escribe el XML del TLOG en un documento Firestore (colección `tlog-retail`) en el campo `xmlGenerated` y publica el ID del documento en el topic `retail.local.distributor.request.v1`
++1. ARMS Server escribe el XML del TLOG en un documento Firestore (colección `tlog-retail`) en el campo `xmlGenerated` y publica un mensaje JSON en el topic `retail.local.distributor.request.v1`. El ID del documento Firestore viaja en el campo `transactionId` del JSON (también incluye `status`, `publishedAt`, `storeId`)
+ 2. Este servicio recibe el mensaje via la suscripción `retail.local.distributor.request.v1-sub`
+ 3. Lee el XML desde Firestore, lo parsea y persiste en SQL Server
+ 4. Actualiza el campo `status` del documento Firestore: `"saved"` (éxito), `"duplicated"` (ya procesado), `"error"` (fallo) — en error también escribe el detalle en `errorMessage`
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/in/pubsub/TlogMessageHandler.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/in/pubsub/TlogMessageHandler.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/in/pubsub/TlogMessageHandler.java
+@@ -4,6 +4,7 @@
+ import com.elrosado.distributor_cloud.domain.model.xml.Transaction;
+ import com.elrosado.distributor_cloud.domain.port.out.TlogDocumentPort;
+ import com.elrosado.distributor_cloud.infrastructure.adapter.out.tlog.TlogXmlParser;
++import com.elrosado.distributor_cloud.infrastructure.config.properties.PubSubPublisherProperties;
+ import com.elrosado.jlib_pubsub.interfaces.IMessagePublisher;
+ import com.fasterxml.jackson.databind.ObjectMapper;
+ import lombok.RequiredArgsConstructor;
+@@ -26,14 +27,13 @@
+ @Slf4j
+ public class TlogMessageHandler {
+ 
+-    private static final String TOPIC_PROCESSED = "retail.local.distributor.processed.v1";
+-    private static final String TOPIC_INVOICE   = "retail.local.invoice.frame.v1";
+     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+ 
+     private final TlogDocumentPort           tlogDocumentPort;
+     private final TlogXmlParser              tlogXmlParser;
+     private final TransactionProcessingService transactionProcessingService;
+     private final IMessagePublisher          messagePublisher;
++    private final PubSubPublisherProperties  pubSubPublisherProperties;
+ 
+     public CompletableFuture<Boolean> handle(String subscriptionId, String body) {
+         String documentId;
+@@ -97,7 +97,7 @@
+             // Ambas publicaciones son no-fatales: el TLOG ya estÃ¡ guardado en Multi-Local, asÃ­ que
+             // un fallo al publicar se registra pero igual se ACK (reintentar reprocesarÃ­a/duplicarÃ­a).
+             return publicarFrameFactura(idTrn, documentId)
+-                    .thenCompose(ignored -> messagePublisher.publishAsync(TOPIC_PROCESSED, documentId)
++                    .thenCompose(ignored -> messagePublisher.publishAsync(pubSubPublisherProperties.processedTopic(), documentId)
+                             .thenApply(msgId -> true)
+                             .exceptionally(ex -> {
+                                 log.atWarn()
+@@ -148,7 +148,7 @@
+                .log();
+             return CompletableFuture.completedFuture(null);
+         }
+-        return messagePublisher.publishAsync(TOPIC_INVOICE, payload)
++        return messagePublisher.publishAsync(pubSubPublisherProperties.invoiceFrameTopic(), payload)
+                 .<Void>thenApply(msgId -> null)
+                 .exceptionally(ex -> {
+                     log.atWarn()
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/config/properties/PubSubPublisherProperties.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/config/properties/PubSubPublisherProperties.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/config/properties/PubSubPublisherProperties.java
+@@ -0,0 +1,21 @@
++package com.elrosado.distributor_cloud.infrastructure.config.properties;
++
++import jakarta.validation.constraints.NotBlank;
++import org.springframework.boot.context.properties.ConfigurationProperties;
++import org.springframework.validation.annotation.Validated;
++
++/**
++ * Topics Pub/Sub donde este servicio <b>publica</b> tras persistir un TLOG.
++ * Se separan de {@code pubsub.subscriptions} (topics que el servicio consume).
++ *
++ * <ul>
++ *   <li>{@code invoiceFrameTopic} â frame de facturaciÃ³n electrÃ³nica ({@code { "idTrn": ... }})</li>
++ *   <li>{@code processedTopic} â disparo de la replicaciÃ³n a la BD Central (documentId)</li>
++ * </ul>
++ */
++@ConfigurationProperties(prefix = "distributor.pubsub")
++@Validated
++public record PubSubPublisherProperties(
++        @NotBlank String invoiceFrameTopic,
++        @NotBlank String processedTopic
++) {}
+
+
+--- Diff for /src/main/resources/application-dev.yaml ---
+--- a//src/main/resources/application-dev.yaml
++++ b//src/main/resources/application-dev.yaml
+@@ -12,8 +12,25 @@
+       firestore:
+         enabled: true
+         database-id: ${FIRESTORE_DATABASE_ID}
++      # Flow-control del suscriptor Pub/Sub. jlib-pubsub suscribe vía PubSubTemplate, que usa el
++      # DefaultSubscriberFactory de spring-cloud-gcp: estas propiedades sí se respetan.
++      # El handler arma y persiste el grafo de forma SÍNCRONA en el hilo de entrega del subscriber,
++      # así que la concurrencia real de armado la fija executor-threads (no los virtual threads).
++      # Cada mensaje en proceso retiene 1 conexión de arts-ec durante todo su armado:
++      # parallel-pull-count × executor-threads ≤ DB_ARTS_POOL_MAX, y max-outstanding ≈ 2× pool.
++      pubsub:
++        subscriber:
++          parallel-pull-count: ${PUBSUB_PARALLEL_PULL:1}
++          executor-threads: ${PUBSUB_EXECUTOR_THREADS:8}
++          flow-control:
++            max-outstanding-element-count: ${PUBSUB_MAX_OUTSTANDING:40}
++            max-outstanding-request-bytes: ${PUBSUB_MAX_OUTSTANDING_BYTES:104857600}
+ 
+ distributor:
++  # Topics donde el servicio PUBLICA tras persistir el TLOG (≠ pubsub.subscriptions, que consume).
++  pubsub:
++    invoice-frame-topic: ${GCP_PUBSUB_TOPIC_INVOICE_FRAME:retail.local.invoice.frame.v1}
++    processed-topic: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR_PROCESSED:retail.local.distributor.processed.v1}
+   secret-manager:
+     enabled: true
+     db-username-secret: ${SM_DB_USERNAME_SECRET:suite-cloud-dev-db-user}
+@@ -35,6 +52,10 @@
+         - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.artsec.entity
+       primary: true
+       batch-size: 300
++      # Datasource caliente: retiene 1 conexión por mensaje durante todo el armado del grafo.
++      # Debe cubrir parallel-pull-count × executor-threads del subscriber, con holgura para
++      # las consultas a los demás datasources dentro del mismo flujo.
++      maximum-pool-size: ${DB_ARTS_POOL_MAX:20}
+     devs-ec:
+       entity-packages:
+         - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.devsec.entity
+
+
+--- Diff for /src/main/resources/application-local.yaml ---
+--- a//src/main/resources/application-local.yaml
++++ b//src/main/resources/application-local.yaml
+@@ -7,11 +7,25 @@
+       firestore:
+         enabled: true
+         database-id: ${FIRESTORE_DATABASE_ID:cer-suite-multilocal}
++      # Flow-control del suscriptor Pub/Sub. jlib-pubsub suscribe vía PubSubTemplate (DefaultSubscriberFactory
++      # de spring-cloud-gcp): estas propiedades se respetan. Concurrencia de armado = executor-threads;
++      # parallel-pull-count × executor-threads ≤ maximum-pool-size de arts-ec.
++      pubsub:
++        subscriber:
++          parallel-pull-count: ${PUBSUB_PARALLEL_PULL:1}
++          executor-threads: ${PUBSUB_EXECUTOR_THREADS:8}
++          flow-control:
++            max-outstanding-element-count: ${PUBSUB_MAX_OUTSTANDING:40}
++            max-outstanding-request-bytes: ${PUBSUB_MAX_OUTSTANDING_BYTES:104857600}
+ 
+ # Credenciales de BD desde GCP Secret Manager (jlib-secretmanager).
+ # url/username/password de multi-sql.datasources.* se resuelven en SecretManagerDatasourceEnvironmentPostProcessor
+ # y sobrescriben los valores de abajo. Los IDs de secreto usan los defaults del post-procesador.
+ distributor:
++  # Topics donde el servicio PUBLICA tras persistir el TLOG (≠ pubsub.subscriptions, que consume).
++  pubsub:
++    invoice-frame-topic: retail.local.invoice.frame.v1
++    processed-topic: retail.local.distributor.processed.v1
+   secret-manager:
+     enabled: true
+ 
+@@ -25,6 +39,8 @@
+         - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.artsec.entity
+       primary: true
+       batch-size: 300
++      # Datasource caliente: debe cubrir parallel-pull-count × executor-threads del subscriber.
++      maximum-pool-size: ${DB_ARTS_POOL_MAX:20}
+     devs-ec:
+       url: jdbc:sqlserver://CS3DWSARML1CORO:1433;databaseName=DEVS_EC;trustServerCertificate=true
+       username: alliances
+
+
+--- Diff for /src/main/resources/application-prod.yaml ---
+--- a//src/main/resources/application-prod.yaml
++++ b//src/main/resources/application-prod.yaml
+@@ -6,11 +6,30 @@
+       firestore:
+         enabled: true
+         database-id: ${FIRESTORE_DATABASE_ID}
++      # Flow-control del suscriptor Pub/Sub. jlib-pubsub suscribe vía PubSubTemplate, que usa el
++      # DefaultSubscriberFactory de spring-cloud-gcp: estas propiedades sí se respetan.
++      # El handler (TlogMessageHandler) arma y persiste el grafo de forma SÍNCRONA en el hilo de
++      # entrega del subscriber, así que la concurrencia real de armado la fija executor-threads
++      # (no los virtual threads). Cada mensaje en proceso retiene 1 conexión de arts-ec durante
++      # todo su armado, por lo que: parallel-pull-count × executor-threads ≤ DB_ARTS_POOL_MAX.
++      # Regla práctica: max-outstanding-element-count ≈ 2× DB_ARTS_POOL_MAX para acotar los
++      # mensajes arrendados y evitar que expire el ack-deadline en un backlog.
++      pubsub:
++        subscriber:
++          parallel-pull-count: ${PUBSUB_PARALLEL_PULL:1}
++          executor-threads: ${PUBSUB_EXECUTOR_THREADS:8}
++          flow-control:
++            max-outstanding-element-count: ${PUBSUB_MAX_OUTSTANDING:40}
++            max-outstanding-request-bytes: ${PUBSUB_MAX_OUTSTANDING_BYTES:104857600}
+ 
+ # Credenciales de BD desde GCP Secret Manager (jlib-secretmanager).
+ # url/username/password de multi-sql.datasources.* los resuelve
+ # SecretManagerDatasourceEnvironmentPostProcessor y sobrescriben lo que haya en este YAML.
+ distributor:
++  # Topics donde el servicio PUBLICA tras persistir el TLOG (≠ pubsub.subscriptions, que consume).
++  pubsub:
++    invoice-frame-topic: ${GCP_PUBSUB_TOPIC_INVOICE_FRAME:retail.local.invoice.frame.v1}
++    processed-topic: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR_PROCESSED:retail.local.distributor.processed.v1}
+   secret-manager:
+     enabled: true
+     db-username-secret: ${SM_DB_USERNAME_SECRET:suite-cloud-prod-db-user}
+@@ -32,6 +51,10 @@
+         - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.artsec.entity
+       primary: true
+       batch-size: 300
++      # Datasource caliente: retiene 1 conexión por mensaje durante todo el armado del grafo.
++      # Debe cubrir parallel-pull-count × executor-threads del subscriber, con holgura para
++      # las consultas a los demás datasources dentro del mismo flujo.
++      maximum-pool-size: ${DB_ARTS_POOL_MAX:20}
+     devs-ec:
+       entity-packages:
+         - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.devsec.entity
+
+
+--- Diff for /src/main/resources/application-qa.yaml ---
+--- a//src/main/resources/application-qa.yaml
++++ b//src/main/resources/application-qa.yaml
+@@ -8,8 +8,25 @@
+       firestore:
+         enabled: true
+         database-id: ${FIRESTORE_DATABASE_ID}
++      # Flow-control del suscriptor Pub/Sub. jlib-pubsub suscribe vía PubSubTemplate, que usa el
++      # DefaultSubscriberFactory de spring-cloud-gcp: estas propiedades sí se respetan.
++      # El handler arma y persiste el grafo de forma SÍNCRONA en el hilo de entrega del subscriber,
++      # así que la concurrencia real de armado la fija executor-threads (no los virtual threads).
++      # Cada mensaje en proceso retiene 1 conexión de arts-ec durante todo su armado:
++      # parallel-pull-count × executor-threads ≤ DB_ARTS_POOL_MAX, y max-outstanding ≈ 2× pool.
++      pubsub:
++        subscriber:
++          parallel-pull-count: ${PUBSUB_PARALLEL_PULL:1}
++          executor-threads: ${PUBSUB_EXECUTOR_THREADS:8}
++          flow-control:
++            max-outstanding-element-count: ${PUBSUB_MAX_OUTSTANDING:40}
++            max-outstanding-request-bytes: ${PUBSUB_MAX_OUTSTANDING_BYTES:104857600}
+ 
+ distributor:
++  # Topics donde el servicio PUBLICA tras persistir el TLOG (≠ pubsub.subscriptions, que consume).
++  pubsub:
++    invoice-frame-topic: ${GCP_PUBSUB_TOPIC_INVOICE_FRAME:retail.local.invoice.frame.v1}
++    processed-topic: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR_PROCESSED:retail.local.distributor.processed.v1}
+   secret-manager:
+     enabled: true
+     db-username-secret: ${SM_DB_USERNAME_SECRET:suite-cloud-qa-db-user}
+@@ -31,6 +48,10 @@
+         - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.artsec.entity
+       primary: true
+       batch-size: 300
++      # Datasource caliente: retiene 1 conexión por mensaje durante todo el armado del grafo.
++      # Debe cubrir parallel-pull-count × executor-threads del subscriber, con holgura para
++      # las consultas a los demás datasources dentro del mismo flujo.
++      maximum-pool-size: ${DB_ARTS_POOL_MAX:20}
+     devs-ec:
+       entity-packages:
+         - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.devsec.entity
+
+
+--- Diff for /src/main/resources/application.yaml ---
+--- a//src/main/resources/application.yaml
++++ b//src/main/resources/application.yaml
+@@ -36,6 +36,10 @@
+       subscription-id: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR_PROCESSED_SUB:retail.local.distributor.processed.v1-sub}
+ 
+ distributor:
++  # Topics donde el servicio PUBLICA tras persistir el TLOG (≠ pubsub.subscriptions, que consume).
++  pubsub:
++    invoice-frame-topic: ${GCP_PUBSUB_TOPIC_INVOICE_FRAME:retail.local.invoice.frame.v1}
++    processed-topic: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR_PROCESSED:retail.local.distributor.processed.v1}
+   secret-manager:
+     enabled: false
+     db-username-secret: suite-cloud-local-db-user
+
+

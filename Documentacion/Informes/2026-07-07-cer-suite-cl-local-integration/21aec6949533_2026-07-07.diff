@@ -1,0 +1,13 @@
+--- Diff for /.gitignore ---
+--- a//.gitignore
++++ b//.gitignore
+@@ -17,6 +17,7 @@
+ ### IntelliJ IDEA ###
+ .idea
+ .claude_analytics
++.analytics
+ *.iws
+ *.iml
+ *.ipr
+
+

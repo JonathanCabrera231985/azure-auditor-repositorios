@@ -1,0 +1,129 @@
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/application/service/TransactionProcessingService.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/application/service/TransactionProcessingService.java
++++ b//src/main/java/com/elrosado/distributor_cloud/application/service/TransactionProcessingService.java
+@@ -45,6 +45,15 @@
+                 .addKeyValue("tipoTransaccion", transaction.getTransactionTypeCode())
+                 .log();
+ 
++        if (!tieneTipoTransaccionReconocido(transaction)) {
++            log.atWarn()
++                    .setMessage("Transaccion sin tipo reconocido")
++                    .addKeyValue("tienda", transaction.getRetailStoreCode())
++                    .addKeyValue("secuencia", transaction.getSequenceNumber())
++                    .log();
++            return;
++        }
++
+         if (transactionPersistencePort.existsInDatabase(transaction)) {
+             log.atWarn()
+                     .setMessage("TransacciÃ³n duplicada en TR_TRN â ya existe con misma tienda, terminal, secuencia y hora fin")
+@@ -61,13 +70,13 @@
+             procesarTenderControlTransaction(transaction);
+         } else if (transaction.getControlTransaction() != null) {
+             procesarControlTransaction(transaction);
+-        } else {
+-            log.atWarn()
+-                    .setMessage("Transaccion sin tipo reconocido")
+-                    .addKeyValue("tienda", transaction.getRetailStoreCode())
+-                    .addKeyValue("secuencia", transaction.getSequenceNumber())
+-                    .log();
+-        }
++        }
++    }
++
++    private boolean tieneTipoTransaccionReconocido(Transaction transaction) {
++        return transaction.getRetailTransaction() != null
++                || transaction.getTenderControlTransaction() != null
++                || transaction.getControlTransaction() != null;
+     }
+ 
+     /** Orquesta la retail: enriquece consumidor final de NC, resuelve efectos colaterales, persiste y ejecuta post-efectos. */
+
+
+--- Diff for /src/main/resources/application-local.yaml ---
+--- a//src/main/resources/application-local.yaml
++++ b//src/main/resources/application-local.yaml
+@@ -34,7 +34,7 @@
+       entity-packages:
+         - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.saadmin.entity
+     arts-ec-central:
+-      url: jdbc:sqlserver://SERVIDOR_CENTRAL:1433;databaseName=ARTS_EC;trustServerCertificate=true
++      url: jdbc:sqlserver://10.2.7.21:1433;databaseName=ARTS_EC;trustServerCertificate=true
+       username: alliances
+       password: ALLC_0180
+       entity-packages:
+
+
+--- Diff for /src/test/java/com/elrosado/distributor_cloud/unit/TlogMessageHandlerTest.java ---
+--- a//src/test/java/com/elrosado/distributor_cloud/unit/TlogMessageHandlerTest.java
++++ b//src/test/java/com/elrosado/distributor_cloud/unit/TlogMessageHandlerTest.java
+@@ -45,7 +45,7 @@
+     void handle_tlogNuevoExitoso_procesaPublicaYRetornaAck() throws Exception {
+         Transaction tx = mock(Transaction.class);
+         when(tx.getRetailStoreCode()).thenReturn("0005");
+-        when(tx.getSequenceNumber()).thenReturn("12345");
++        when(tx.getSequenceNumber()).thenReturn(12345);
+         when(tlogDocumentPort.isDuplicated(DOC_ID)).thenReturn(false);
+         when(tlogDocumentPort.readXml(DOC_ID)).thenReturn(XML_CONTENT);
+         when(tlogXmlParser.parse(XML_CONTENT)).thenReturn(tx);
+@@ -120,7 +120,7 @@
+     void handle_publishAsyncFalla_retornaAckIgualmente() throws Exception {
+         Transaction tx = mock(Transaction.class);
+         when(tx.getRetailStoreCode()).thenReturn("0005");
+-        when(tx.getSequenceNumber()).thenReturn("12345");
++        when(tx.getSequenceNumber()).thenReturn(12345);
+         when(tlogDocumentPort.isDuplicated(DOC_ID)).thenReturn(false);
+         when(tlogDocumentPort.readXml(DOC_ID)).thenReturn(XML_CONTENT);
+         when(tlogXmlParser.parse(XML_CONTENT)).thenReturn(tx);
+
+
+--- Diff for /src/test/java/com/elrosado/distributor_cloud/unit/TransactionProcessingServiceTest.java ---
+--- a//src/test/java/com/elrosado/distributor_cloud/unit/TransactionProcessingServiceTest.java
++++ b//src/test/java/com/elrosado/distributor_cloud/unit/TransactionProcessingServiceTest.java
+@@ -99,7 +99,7 @@
+         rtl.setLineItems(List.of(li));
+ 
+         Transaction trx = buildTransaction();
+-        trx.setWorkstationCode(5);
++        trx.setWorkstationCode("5");
+         trx.setRetailTransaction(rtl);
+         when(transactionPersistencePort.save(trx)).thenReturn(10);
+ 
+@@ -117,7 +117,7 @@
+         rtl.setFacturaElec(fe);
+ 
+         Transaction trx = buildTransaction();
+-        trx.setWorkstationCode(5);
++        trx.setWorkstationCode("5");
+         trx.setRetailTransaction(rtl);
+         when(transactionPersistencePort.save(trx)).thenReturn(10);
+ 
+@@ -399,7 +399,7 @@
+         ct.setCarryForward(new CarryForwardData());
+ 
+         Transaction trx = buildTransaction();
+-        trx.setWorkstationCode(3);
++        trx.setWorkstationCode("3");
+         trx.setControlTransaction(ct);
+         when(transactionPersistencePort.save(trx)).thenReturn(11);
+ 
+@@ -416,7 +416,7 @@
+         ct.setCarryForward(new CarryForwardData());
+ 
+         Transaction trx = buildTransaction();
+-        trx.setWorkstationCode(3);
++        trx.setWorkstationCode("3");
+         trx.setControlTransaction(ct);
+         when(transactionPersistencePort.save(trx)).thenReturn(12);
+ 
+@@ -476,7 +476,7 @@
+     private Transaction buildTransaction() {
+         Transaction trx = new Transaction();
+         trx.setRetailStoreCode("100");
+-        trx.setWorkstationCode(1);
++        trx.setWorkstationCode("1");
+         trx.setSequenceNumber(1001);
+         trx.setTransactionTypeCode("SALE");
+         return trx;
+
+

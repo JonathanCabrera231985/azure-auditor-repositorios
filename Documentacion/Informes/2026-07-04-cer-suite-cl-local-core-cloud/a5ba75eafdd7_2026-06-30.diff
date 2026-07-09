@@ -1,0 +1,3889 @@
+--- Diff for /.claude_rules/GCS_ROUTES_INVENTORY.md ---
+--- a//.claude_rules/GCS_ROUTES_INVENTORY.md
++++ b//.claude_rules/GCS_ROUTES_INVENTORY.md
+@@ -15,10 +15,32 @@
+ | `sendCartaMoto.out.folder.path` | `gs://gcs-cer-suite-core-files/eyes/xmlcvm/bkp` | `gcs-cer-suite-core-files` | `eyes/xmlcvm/bkp` | Defined | User confirmation, 2026-06-23 |
+ | `updateSecSubSec.in.folder.path` | `gs://gcs-cer-suite-core-files/EYES/ARSAP/IN` | `gcs-cer-suite-core-files` | `EYES/ARSAP/IN` | Defined | User confirmation, 2026-06-24 |
+ | `updateSecSubSec.bkp.folder.path` | `gs://gcs-cer-suite-core-files/EYES/ARSAP/BKP` | `gcs-cer-suite-core-files` | `EYES/ARSAP/BKP` | Defined | User confirmation, 2026-06-24 |
++| `updateMoto.in.folder.path` | `gs://gcs-cer-suite-core-files/EYES/ARSAP/PRC` | `gcs-cer-suite-core-files` | `EYES/ARSAP/PRC` | Defined | User confirmation, 2026-06-24. Shared with UpdateReservaProcess (RSVLOTE* filter) |
++| `updateMoto.out.folder.path` | `gs://gcs-cer-suite-core-files/EYES/ARSAP/BKP` | `gcs-cer-suite-core-files` | `EYES/ARSAP/BKP` | Defined | User confirmation, 2026-06-24. Shared with UpdateReservaProcess backup |
++| `update.error.folder.path` (moto + reserva) | `gs://gcs-cer-suite-core-files/EYES/ARSAP/ERROR` | `gcs-cer-suite-core-files` | `EYES/ARSAP/ERROR` | Defined | User confirmation, 2026-06-24. Storesubfolder `/{storeCode}` appended by adapter |
++| `reversarConsumo.in.folder.path` | `gs://gcs-cer-suite-core-files/EYES/RVSCER/IN` | `gcs-cer-suite-core-files` | `EYES/RVSCER/IN` | Defined | User confirmation, 2026-06-29. Hardcoded en legacy `inicializar()` — no en ArmsServerConf.properties |
++| `reversarConsumo.out.folder.path` | `gs://gcs-cer-suite-core-files/EYES/RVSCER/BKP` | `gcs-cer-suite-core-files` | `EYES/RVSCER/BKP` | Defined | User confirmation, 2026-06-29. Archivos exitosos movidos aquí tras intercambio ISO8583 |
++| `reversarConsumo.error.folder.path` | `gs://gcs-cer-suite-core-files/EYES/RVSCER/ERROR` | `gcs-cer-suite-core-files` | `EYES/RVSCER/ERROR` | Defined | User confirmation, 2026-06-29. Errores de formato/parse: movimiento inmediato. Errores de socket: mover tras 3 reintentos |
++| `reversarPago.in.folder.path` | `gs://gcs-cer-suite-core-files/EYES/PAGCER/IN` | `gcs-cer-suite-core-files` | `EYES/PAGCER/IN` | Defined | User confirmation, 2026-06-29. Hardcoded en legacy `inicializar()` — ruta GCS coincide con nombre legacy |
++| `reversarPago.out.folder.path` | `gs://gcs-cer-suite-core-files/EYES/PAGCER/BKP` | `gcs-cer-suite-core-files` | `EYES/PAGCER/BKP` | Defined | User confirmation, 2026-06-29. Archivos exitosos movidos aquí tras intercambio ISO8583 y escritura en BD |
++| `reversarPago.error.folder.path` | `gs://gcs-cer-suite-core-files/EYES/PAGCER/ERROR` | `gcs-cer-suite-core-files` | `EYES/PAGCER/ERROR` | Defined | User confirmation, 2026-06-29. Mismo criterio de error que RVSCER: inmediato para parse, 3 reintentos para socket |
++| `reversarRedencion.in.folder.path` | `gs://gcs-cer-suite-core-files/EYES/RVSRED/IN` | `gcs-cer-suite-core-files` | `EYES/RVSRED/IN` | Defined | User confirmation, 2026-06-29. Hardcoded en legacy `inicializar()` como `RVSRED/IN` |
++| `reversarRedencion.out.folder.path` | `gs://gcs-cer-suite-core-files/EYES/RVSRED/BKP` | `gcs-cer-suite-core-files` | `EYES/RVSRED/BKP` | Defined | User confirmation, 2026-06-29. Archivos exitosos movidos aquí tras intercambio ISO8583 |
++| `reversarRedencion.error.folder.path` | `gs://gcs-cer-suite-core-files/EYES/RVSRED/ERROR` | `gcs-cer-suite-core-files` | `EYES/RVSRED/ERROR` | Defined | User confirmation, 2026-06-29. Mismo criterio de error que familia RVSCER/PAGCER: inmediato para parse, 3 reintentos para socket |
++
++## Shared Route Contracts
++
++Los siguientes prefijos son compartidos entre múltiples procesos. Cada proceso filtra por patrón de nombre de archivo:
++
++| Prefix GCS | Procesos que usan este prefix | Filtro de archivo |
++|---|---|---|
++| `EYES/ARSAP/PRC` | `UpdateMotoProcess` (in), `UpdateReservaProcess` (in) | `MOLOTE{seq}.{storeCode}` / `RSVLOTE*` |
++| `EYES/ARSAP/BKP` | `UpdateMotoProcess` (backup), `UpdateReservaProcess` (backup), `UpdateSecSubSecProcess` (backup) | Todos los archivos procesados |
++| `EYES/ARSAP/ERROR` | `UpdateMotoProcess` (error), `UpdateReservaProcess` (error) | Archivos fallidos; subfolder `/{storeCode}` agregado por adaptador |
+ 
+ ## Pending Routes
+ 
+-No pending GCS routes as of 2026-06-24.
++No pending GCS routes as of 2026-06-29.
+ 
+ ## Rules
+ 
+
+
+--- Diff for /AGENTS.md ---
+--- a//AGENTS.md
++++ b//AGENTS.md
+@@ -1,6 +1,8 @@
+-# AGENTS.md — SuiteCloud Ventas
++# AGENTS.md — SuiteCloud Local Core
+ 
+ Quick-reference for agents working in this repo. See `CLAUDE.md` for full domain docs.
++
++> **Scope reminder:** This project migrates **all** `Process` and `Operation` classes from `cer-suite-local-serv-arms-server` (ArmsServerLocal). The sales operation was migrated first but is not the only one. Do not assume this is a sales-only service.
+ 
+ ## Build & Test
+ 
+@@ -21,16 +23,20 @@
+ - **Hexagonal layers**: `domain/` has zero framework deps; `infrastructure/` holds all adapters.
+ - **Virtual threads**: `spring.threads.virtual.enabled=true` — never use `synchronized`. Use `ReentrantLock`/`Semaphore`.
+ - **Domain models**: immutable Java `record`s — mutations return `with*()` copies. Collections wrapped in `List.copyOf()`.
+-- **Two datasources**: primary `ARTS_EC` (`datasource`), secondary `DEVS_EC` (`datasource-devs`).
+-- **JPA `ddl-auto: none`** — DevTicketEntity cross-database ref (`DEVS_EC.dbo.DV_TICKET`) can't be validated by Hibernate.
++- **Multiple datasources** (via `jlib-multisql`): `arts-ec` (ARTS_EC — primary POS data), `saadmin` (SAADMIN — store registry), `cvmt` (CVMT_EC — moto/CVMT data), `central` (Central DB). Each migrated process uses only the datasources it needs; check the migration analysis for the process before assuming which one applies.
++- **JPA `ddl-auto: none`** — never let Hibernate auto-create or validate tables; all DDL is owned by the legacy DB.
++- **StoreRegistry** — active stores are pre-loaded at startup via `@PostConstruct` from SAADMIN; Phase-1 processes query `StoreRegistry` in memory instead of hitting the DB on every execution cycle.
++- **GcsStorageHelper** — shared stateless `@Component` in `infrastructure/adapter/out/storage/`; use it for GCS open/move/upload/stream instead of duplicating logic in each GCS adapter.
+ 
+ ## Migration phases
+ 
+ - **Migration Phase 1**: `ArmsServerConf.properties` values go in `k8s/properties.yaml`, never in the main ConfigMap.
+-- **GCS routes**: check `.claude_rules/GCS_ROUTES_INVENTORY.md`; if a route is missing, stop and request the exact value.
++- **GCS routes**: check `.claude_rules/GCS_ROUTES_INVENTORY.md`; if a route is missing, stop and request the exact value. From 2026-06-24, new GCS prefixes use UPPER_CASE.
+ - **DDL gate**: do not add Entity/Repository/DTO/Projection/Query/Mapper for legacy tables without exact DDL.
+-- **Schedulers**: migrated polling processes use `@Scheduled`; no Pub/Sub, `@Async`, `ExecutorService`, manual threads, or infinite loops in Phase 1.
++- **Schedulers**: migrated Phase-1 processes use `@Scheduled`; no Pub/Sub, `@Async`, `ExecutorService`, manual threads, or infinite loops in Phase 1.
++- **process_error collection**: Phase-1 error tracking writes to Firestore collection `process_error` (configured via `app.gcp.firestore.collection-process-error`).
+ - **Future phases**: Redis parameter flow is Central DB -> Redis -> application; DB secrets stay in Kubernetes Secrets until the future Secret Manager phase.
++- **Adding a new process**: read `.claude_analytics/PROMPT_BASE_MIGRACION_PROCESOS_LEGACY.md` first. Every migration follows the same pattern: analysis → ports → service → adapters → scheduler → tests.
+ 
+ ## Code style (will be flagged by review)
+ 
+@@ -63,8 +69,6 @@
+ ## Key gotchas
+ 
+ - `--enable-preview` required at compile, test, AND runtime.
+-- Amounts are raw cents — **never divide by 100** (ISSUE-01).
+-- `99|06|41` UserData applies tax via FIFO queue per `itemCode` (ISSUE-V3-06).
+-- XML amounts formatted as `"171.0"` (long + `.0`) — no decimal arithmetic.
+-- `<IsPromo>` emitted only when `promoFlag` is non-null (`true`/`false`). Normal items omit the tag entirely.
++- **Sales operation only**: Amounts are raw cents — **never divide by 100** (ISSUE-01). `99|06|41` UserData applies tax via FIFO queue per `itemCode` (ISSUE-V3-06). XML amounts formatted as `"171.0"` (long + `.0`) — no decimal arithmetic. `<IsPromo>` emitted only when `promoFlag` is non-null (`true`/`false`); normal items omit the tag entirely.
++- **Phase-1 processes**: GCS adapters share `GcsStorageHelper` — do not re-implement open/move/upload/stream. Properties from `ArmsServerConf.properties` are bound via `@ConfigurationProperties` and sourced from `k8s/properties.yaml`.
+ - README.md is a template stub — ignore it. Reference `CLAUDE.md` instead.
+
+
+--- Diff for /CLAUDE.md ---
+--- a//CLAUDE.md
++++ b//CLAUDE.md
+@@ -13,7 +13,11 @@
+ 
+ ## Project Overview
+ 
+-**SuiteCloud – Ventas** (artifact: `cer-suite-cloud-local-core`) — asynchronous component of the SuiteCloud ecosystem. Migrates Java 8 legacy retail POS backend (ArmsServerLocal) to Java 25 + Spring Boot 4.0.6 on GCP Cloud Run. Receives TSL (Terminal Sales Log) transaction frames from Point-of-Sale terminals via Pub/Sub, parses them, generates XML, and distributes to downstream systems (Firestore, Pub/Sub, Cloud SQL).
++**SuiteCloud – Local Core** (artifact: `cer-suite-cloud-local-core`) — asynchronous component of the SuiteCloud ecosystem. Migrates **all** `Process` and `Operation` classes from the Java 8 legacy backend `D:\SIPECOM\repository-git\cer-suite\cer-suite-local-serv-arms-server` (ArmsServerLocal) to Java 25 + Spring Boot 4.0.6 on GCP Cloud Run.
++
++This service is the cloud home for every legacy process and operation that ran on ArmsServerLocal. The **sales operation** (type-10 TSL frame processing → XML generation via Pub/Sub) was the first to be migrated and is fully operational. Additional `Process` and `Operation` classes from ArmsServerLocal continue to be migrated into this same component in subsequent phases.
++
++**Do not assume this service is only for sales.** The sales operation is the first and most visible migrated component, but the scope is the full ArmsServerLocal surface.
+ 
+ ## Template Base
+ 
+@@ -39,7 +43,7 @@
+ | `LoggingEnrichmentFilter` (MDC `correlation_id`) | No inbound HTTP requests; correlation is tracked via Pub/Sub message attributes |
+ | `GcpConfig` placeholder | GCP beans auto-configure via `jlib-pubsub-logging`, `jlib-firestore`, `jlib-kms` |
+ | OpenAPI / Swagger (`springdoc-openapi`) | No REST API to document |
+-| `ScheduledTaskAdapter` | No scheduled jobs in this service |
++| `ScheduledTaskAdapter` (template single-class pattern) | This project has multiple `@Scheduled` adapter classes (one per migrated Phase-1 process); the template's single shared adapter does not apply |
+ | `EncryptionUtils` (Base64) | Encryption via Cloud KMS (`KmsDecryptionAdapter` / `NoOpKmsDecryptionAdapter`) |
+ | `application/service/` package | Services are large domain-specific engines (parser, generator); `service/` is sufficient |
+ 
+@@ -69,20 +73,28 @@
+ Hexagonal (Ports & Adapters) layered as:
+ 
+ ```
+-infrastructure/adapter/in/event/   ← PubSubSalesAdapter (inbound trigger)
+-infrastructure/adapter/out/        ← DB, Firestore, KMS, Pub/Sub adapters
+-service/                           ← Business logic (implements domain ports)
+-domain/port/in/                    ← UseCase interfaces
+-domain/port/out/                   ← Repository/publisher interfaces
+-domain/model/                      ← Immutable Java records + enums
+-```
+-
+-### Data flow
+-
++infrastructure/adapter/in/event/     ← PubSubSalesAdapter (inbound Pub/Sub trigger for sales)
++infrastructure/adapter/in/scheduler/ ← @Scheduled adapters for each migrated Phase-1 process
++infrastructure/adapter/out/          ← DB, Firestore, KMS, Pub/Sub, GCS adapters
++service/                             ← Business logic (implements domain ports)
++domain/port/in/                      ← UseCase interfaces
++domain/port/out/                     ← Repository/publisher interfaces
++domain/model/                        ← Immutable Java records + enums
++```
++
++### Data flows
++
++**Sales operation (Pub/Sub-driven, async):**
+ 1. **PubSubSalesAdapter** receives a `transactionId` and dispatches to a virtual thread.
+ 2. **ProcessSaleService** orchestrates: reads Firestore payload → parses → fetches store from SQL → builds transaction → generates XML → updates Firestore → publishes to Pub/Sub.
+ 3. **TslFrameParserService** does all TSL parsing (see below).
+ 4. **XmlGeneratorService** serializes the domain model to XML using JDK DOM API (no XStream/JAXB).
++
++**Phase-1 legacy processes (`@Scheduled`, GCS-driven):**
++Each migrated process has its own scheduler adapter, service, ports, and GCS/DB adapters. Currently migrated:
++- `UpdateCedPadRucProcess` — reads identity files from GCS, updates SQL, writes errors to Firestore.
++- `SendCartaMotoProcess` — reads MOTO files from GCS, updates SQL (CVMT_EC datasource), publishes to Pub/Sub.
++- `UpdateSecSubSecProcess` — reads SEC/SUBSEC department files from GCS, updates ARTS_EC, generates controller files, publishes per-store Pub/Sub events.
+ 
+ ### Key classes
+ 
+@@ -223,23 +235,25 @@
+ 
+ ## SuiteCloud Ecosystem
+ 
+-SuiteCloud is composed of five services communicating via GCP Pub/Sub and Firestore. This repository implements **SuiteCloud – Ventas** only.
++SuiteCloud is composed of five services communicating via GCP Pub/Sub and Firestore. This repository (`cer-suite-cloud-local-core`) implements the **SuiteCloud – Local Core** service.
++
++**Important:** This is not a single-purpose sales service. It is the cloud migration target for **all** `Process` and `Operation` classes from `cer-suite-local-serv-arms-server`. The sales operation (type-10 TCP frames) was migrated first; other ArmsServerLocal processes and operations are migrated here in ongoing phases.
+ 
+ | Service | Mode | Responsibility |
+ |---------|------|----------------|
+ | **Generador** | Sync | Entry point: receives TCP frames from POS terminals, stores in Firestore, sends ACK, publishes to Pub/Sub. |
+-| **SuiteCloud – Ventas** *(this service)* | Async | Processes TSL frame, applies business logic, generates XML, persists in Firestore, notifies Distributor Cloud. |
++| **SuiteCloud – Local Core** *(this repository)* | Async | Cloud migration target for all ArmsServerLocal `Process`/`Operation` classes. Currently includes: sales operation (TSL parsing → XML → Firestore → Pub/Sub), plus Phase-1 processes (`UpdateCedPadRuc`, `SendCartaMoto`, `UpdateSecSubSec`). Additional processes are added here as migration continues. |
+ | **SuiteCloud – Consultas** | Sync | Answers real-time queries (prices, stock, customers) from Cloud SQL Multi Local. |
+ | **Distributor Cloud** | Async | Persists XML to Cloud SQL Multi Local, updates Firestore state to `PROCESSED`, inserts XML into `TBL_XML_GENERATOR` in Central DB, updates Firestore state to `PROCESSED_CENTRAL`. |
+ | **Transaction Cloud** | Async | Transfers XML to Central DB, manages day-close, journal, customer replica, and old-return recovery. |
+ 
+-### Transaction Lifecycle (Firestore states)
++### Transaction Lifecycle (Firestore states — for the sales operation)
+ 
+ | Step | State | Meaning |
+ |------|-------|---------|
+ | 1 | `PENDING` | Received and queued. |
+-| 2 | `IN_PROCESS` | SuiteCloud – Ventas is processing. |
+-| 3 | `XML_GENERATED` | SuiteCloud – Ventas finished; XML created. |
++| 2 | `IN_PROCESS` | SuiteCloud – Local Core is processing the sales transaction. |
++| 3 | `XML_GENERATED` | SuiteCloud – Local Core finished; XML created. |
+ | 4 | `DISTRIBUTING` | Distributor Cloud persisting to Cloud SQL Multi Local. |
+ | 5 | `PROCESSED` | Persisted in Cloud SQL Multi Local. |
+ | 6 | `PROCESSED_CENTRAL` | Distributor Cloud inserted XML into `TBL_XML_GENERATOR` in Central DB. |
+@@ -248,9 +262,11 @@
+ 
+ ---
+ 
+-## SuiteCloud – Ventas: Scope
+-
+-### What this service DOES
++## SuiteCloud – Local Core: Migrated Components
++
++This service is the GCP cloud home for **all** `Process` and `Operation` classes from `cer-suite-local-serv-arms-server`. Each migrated component appears below.
++
++### Sales Operation (fully migrated — Pub/Sub-driven)
+ 1. Subscribes to the Pub/Sub sales topic published by Generador.
+ 2. Downloads the encrypted frame from Firestore using the received `transactionId`.
+ 3. Determines the operation type (sale, return, close, etc.) from the frame code.
+@@ -260,12 +276,20 @@
+ 7. Updates the transaction state in Firestore to `XML_GENERATED`.
+ 8. Publishes a Pub/Sub event notifying Distributor Cloud that the XML is available.
+ 
+-### What this service does NOT do
+-- Does NOT persist to Cloud SQL Server (Multi Local) — that is Distributor Cloud's responsibility.
++### Phase-1 Processes (migrated — `@Scheduled`, GCS-driven)
++
++| Process | Legacy class | What it does |
++|---------|-------------|--------------|
++| `UpdateCedPadRucProcess` | `UpdateCedPadRucProcess` | Reads identity (CED/PAD/RUC) files from GCS, upserts records in ARTS_EC SQL. Errors tracked in Firestore. |
++| `SendCartaMotoProcess` | `SendCartaMotoProcess` | Reads MOTO XML files from GCS, upserts records in CVMT_EC SQL, publishes events via Pub/Sub. |
++| `UpdateSecSubSecProcess` | `UpdateSecSubSecProcess` | Reads SEC/SUBSEC department files from GCS, upserts departments and MHG families in ARTS_EC, generates controller DAT/CMD files, publishes per-store Pub/Sub events to `retail.local.synchro.controller.v1`. |
++
++### What this service does NOT do (boundaries with the ecosystem)
++- Does NOT persist sales transactions to Cloud SQL Server (Multi Local) — that is Distributor Cloud's responsibility.
+ - Does NOT communicate directly with POS terminals or controllers (no TCP).
+ - Does NOT transfer data to the Central El Rosado database (Transaction Cloud's responsibility).
+ - Does NOT answer real-time queries (SuiteCloud – Consultas handles that).
+-- Does NOT handle the ACK to the Controller/POS (Generador already sent it before this process starts).
++- Does NOT handle the ACK to the Controller/POS (Generador already sent it before the sales process starts).
+ 
+ ---
+ 
+
+
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -37,6 +37,12 @@
+   # SendCartaMotoProcess — envío SFTP de cartas moto a servidor remoto
+   SEND_CARTA_MOTO_ENABLED: "true"
+ 
++  # Procesos Reversar — reversión de consumos, redenciones y pagos de tarjeta
++  REVERSAR_CONSUMO_ENABLED: "true"
++  REVERSAR_REDENCION_ENABLED: "true"
++  REVERSAR_PAGO_ENABLED: "true"
++  SPRING_DATASOURCE_DEVS_URL: "jdbc:sqlserver://$(SPRING_DATASOURCE_HOST):1433;databaseName=DEVS_EC;encrypt=true;trustServerCertificate=true"
++
+   # SAADMIN datasource credentials must be injected via Kubernetes Secret:
+   # SAADMIN_DB_URL, SAADMIN_DB_USERNAME, SAADMIN_DB_PASSWORD
+ 
+
+
+--- Diff for /k8s/properties.yaml ---
+--- a//k8s/properties.yaml
++++ b//k8s/properties.yaml
+@@ -30,3 +30,17 @@
+     updateSecSubSec.pctEmpDefault=0
+     updateSecSubSec.pctSolDefault=0
+     updateSecSubSec.guiName=SECLIST
++    reversarConsumo.in.folder.path=gs://gcs-cer-suite-core-files/EYES/RVSCER/IN
++    reversarConsumo.out.folder.path=gs://gcs-cer-suite-core-files/EYES/RVSCER/BKP
++    reversarConsumo.sleeptime=30000
++    reversarRedencion.in.folder.path=gs://gcs-cer-suite-core-files/EYES/RVSRED/IN
++    reversarRedencion.out.folder.path=gs://gcs-cer-suite-core-files/EYES/RVSRED/BKP
++    reversarRedencion.sleeptime=30000
++    reversarPago.in.folder.path=gs://gcs-cer-suite-core-files/EYES/PAGCE/IN
++    reversarPago.out.folder.path=gs://gcs-cer-suite-core-files/EYES/PAGCE/BKP
++    reversarPago.sleeptime=30000
++    activateGiftcard.server.ip=10.22.14.201
++    activateGiftcard.server.port=4001
++    activateGiftcard.server.retries=3
++    activateGiftcard.server.timeOut=120000
++    activateGiftcard.server.timeSleep=600
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/ConsumptionReversal.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/ConsumptionReversal.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/ConsumptionReversal.java
+@@ -0,0 +1,28 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++/**
++ * Datos de reversa de consumo de tarjeta parseados desde el archivo GCS (CON*.storeCode).
++ *
++ * @param storeCode            CÃ³digo de tienda extraÃ­do del nombre de archivo.
++ * @param primaryAccountNumber PAN del titular (16 dÃ­gitos).
++ * @param transactionAmount    Monto de la transacciÃ³n, 12 caracteres numÃ©ricos.
++ * @param stan                 NÃºmero de rastreo STAN, 6 dÃ­gitos.
++ * @param authorizationNumber  NÃºmero de autorizaciÃ³n, 6 caracteres.
++ * @param terminalId           Identificador del terminal, 8 caracteres.
++ * @param merchantId           Identificador del comercio, 15 caracteres.
++ * @param rfpu                 Campo RFPU ya construido de 54 caracteres (campo 124).
++ * @param cuponesData          Campo 122 ya formateado: cant(2)+datos, o {@code null} si no hay lÃ­nea 2.
++ * @param puntosData           Campo 125 ya formateado: cantBlocks(2)+datos, o {@code null} si no hay lÃ­nea 3.
++ */
++public record ConsumptionReversal(
++        String storeCode,
++        String primaryAccountNumber,
++        String transactionAmount,
++        String stan,
++        String authorizationNumber,
++        String terminalId,
++        String merchantId,
++        String rfpu,
++        String cuponesData,
++        String puntosData
++) {}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/GiftcardReversal.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/GiftcardReversal.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/GiftcardReversal.java
+@@ -0,0 +1,24 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++/**
++ * Datos de reversa de redenciÃ³n de tarjeta/giftcard parseados desde el archivo GCS (RED*.storeCode).
++ *
++ * @param storeCode            CÃ³digo de tienda extraÃ­do del nombre de archivo.
++ * @param primaryAccountNumber PAN del titular (16 dÃ­gitos).
++ * @param transactionAmount    Monto de la transacciÃ³n, 12 caracteres numÃ©ricos.
++ * @param stan                 NÃºmero de rastreo STAN, 6 dÃ­gitos.
++ * @param authorizationNumber  NÃºmero de autorizaciÃ³n, 6 caracteres.
++ * @param terminalId           Identificador del terminal, 8 caracteres.
++ * @param merchantId           Identificador del comercio, 15 caracteres.
++ * @param rfpu                 Campo RFPU ya construido de 54 caracteres (campo 124).
++ */
++public record GiftcardReversal(
++        String storeCode,
++        String primaryAccountNumber,
++        String transactionAmount,
++        String stan,
++        String authorizationNumber,
++        String terminalId,
++        String merchantId,
++        String rfpu
++) {}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/Iso8583ReversalRequest.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/Iso8583ReversalRequest.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/Iso8583ReversalRequest.java
+@@ -0,0 +1,30 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++/**
++ * ParÃ¡metros necesarios para construir un mensaje ISO8583 de reversa de tarjeta.
++ *
++ * @param processingCode         CÃ³digo de procesamiento: "284000" (consumo/pago) o "944000" (redenciÃ³n).
++ * @param primaryAccountNumber   PAN del titular (16 dÃ­gitos).
++ * @param transactionAmount      Monto de la transacciÃ³n, 12 caracteres numÃ©ricos.
++ * @param stan                   NÃºmero de rastreo del sistema (STAN), 6 dÃ­gitos.
++ * @param authorizationNumber    NÃºmero de autorizaciÃ³n, 6 caracteres.
++ * @param terminalId             Identificador del terminal, 8 caracteres.
++ * @param merchantId             Identificador del comercio, 15 caracteres.
++ * @param rfpu                   Datos reservados para uso privado, exactamente 54 caracteres.
++ * @param includeExpirationDate  {@code true} activa el campo 14 (EXPIRATION_DATE = "9912").
++ * @param cuponesData            Campo 122 ya formateado (cant(2) + datos), o {@code null} si no aplica.
++ * @param puntosData             Campo 125 ya formateado (cantBlocks(2) + datos), o {@code null} si no aplica.
++ */
++public record Iso8583ReversalRequest(
++        String processingCode,
++        String primaryAccountNumber,
++        String transactionAmount,
++        String stan,
++        String authorizationNumber,
++        String terminalId,
++        String merchantId,
++        String rfpu,
++        boolean includeExpirationDate,
++        String cuponesData,
++        String puntosData
++) {}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/Iso8583ReversalResponse.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/Iso8583ReversalResponse.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/Iso8583ReversalResponse.java
+@@ -0,0 +1,19 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++import java.util.Set;
++
++/**
++ * Respuesta recibida del gateway de pago para un mensaje ISO8583 de reversa.
++ *
++ * @param responseCode CÃ³digo de respuesta de 2 caracteres extraÃ­do del campo 39.
++ * @param affirmative  {@code true} cuando el RC pertenece al conjunto de respuestas aprobadas.
++ */
++public record Iso8583ReversalResponse(String responseCode, boolean affirmative) {
++
++    /** CÃ³digos de respuesta que indican transacciÃ³n aprobada por el gateway. */
++    private static final Set<String> AFFIRMATIVE_CODES = Set.of("00", "08", "11");
++
++    public static Iso8583ReversalResponse of(String responseCode) {
++        return new Iso8583ReversalResponse(responseCode, AFFIRMATIVE_CODES.contains(responseCode));
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/PaymentReversal.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/PaymentReversal.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/PaymentReversal.java
+@@ -0,0 +1,34 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++import java.math.BigDecimal;
++
++/**
++ * Datos de reversa de pago parseados desde una lÃ­nea del archivo GCS (PAG*.storeCode).
++ *
++ * @param fileId               NÃºmero de archivo extraÃ­do del nombre (dÃ­gitos tras "PAG", sin extensiÃ³n).
++ * @param sequenceNumber       NÃºmero de secuencia de la lÃ­nea dentro del archivo (1-indexed).
++ * @param storeCode            CÃ³digo de tienda extraÃ­do del nombre de archivo.
++ * @param primaryAccountNumber PAN del titular (16 dÃ­gitos).
++ * @param transactionAmount    Monto de la transacciÃ³n, 12 caracteres numÃ©ricos.
++ * @param amountValue          Monto parseado como BigDecimal para consultas en BD.
++ * @param stan                 NÃºmero de rastreo STAN, 6 dÃ­gitos.
++ * @param authorizationNumber  NÃºmero de autorizaciÃ³n, 6 caracteres.
++ * @param terminalId           Identificador del terminal, 8 caracteres.
++ * @param merchantId           Identificador del comercio, 15 caracteres.
++ * @param rfpu                 Campo RFPU ya construido de 54 caracteres (campo 124).
++ * @param invoiceNumber        NÃºmero de factura, 15 caracteres, extraÃ­do de line[73:88].
++ */
++public record PaymentReversal(
++        int fileId,
++        int sequenceNumber,
++        String storeCode,
++        String primaryAccountNumber,
++        String transactionAmount,
++        BigDecimal amountValue,
++        String stan,
++        String authorizationNumber,
++        String terminalId,
++        String merchantId,
++        String rfpu,
++        String invoiceNumber
++) {}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/PaymentReversalResult.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/PaymentReversalResult.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/PaymentReversalResult.java
+@@ -0,0 +1,16 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++/**
++ * Resultado de procesamiento de una reversa de pago, persisted en DV_PCER.
++ *
++ * @param fileId         Identificador del archivo (PK1 de DV_PCER).
++ * @param sequenceNumber NÃºmero de secuencia de la lÃ­nea (PK2 de DV_PCER).
++ * @param status         Estado del resultado: APPROVED, REJECTED o NO_RESPONSE.
++ * @param responseCode   CÃ³digo de respuesta RC del gateway, o {@code null} si no hubo respuesta.
++ */
++public record PaymentReversalResult(
++        int fileId,
++        int sequenceNumber,
++        ReversalStatus status,
++        String responseCode
++) {}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/ReversalStatus.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/ReversalStatus.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/ReversalStatus.java
+@@ -0,0 +1,21 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++/**
++ * Estado de resultado de un proceso de reversa de pago, mapeado al valor numÃ©rico de la BD.
++ */
++public enum ReversalStatus {
++
++    APPROVED(1),
++    REJECTED(2),
++    NO_RESPONSE(3);
++
++    private final int dbValue;
++
++    ReversalStatus(int dbValue) {
++        this.dbValue = dbValue;
++    }
++
++    public int dbValue() {
++        return dbValue;
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/ProcessConsumptionReversalUseCase.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/ProcessConsumptionReversalUseCase.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/ProcessConsumptionReversalUseCase.java
+@@ -0,0 +1,10 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.in;
++
++/**
++ * Caso de uso de reversiÃ³n de consumos de tarjeta (archivos CON*.storeCode en GCS).
++ */
++public interface ProcessConsumptionReversalUseCase {
++
++    /** Procesa todos los archivos de reversa de consumo pendientes en el bucket de entrada. */
++    void processNextCycle();
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/ProcessGiftcardReversalUseCase.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/ProcessGiftcardReversalUseCase.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/ProcessGiftcardReversalUseCase.java
+@@ -0,0 +1,10 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.in;
++
++/**
++ * Caso de uso de reversiÃ³n de redenciones de giftcard (archivos RED*.storeCode en GCS).
++ */
++public interface ProcessGiftcardReversalUseCase {
++
++    /** Procesa todos los archivos de reversa de redenciÃ³n pendientes en el bucket de entrada. */
++    void processNextCycle();
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/ProcessPaymentReversalUseCase.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/ProcessPaymentReversalUseCase.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/ProcessPaymentReversalUseCase.java
+@@ -0,0 +1,10 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.in;
++
++/**
++ * Caso de uso de reversiÃ³n de pagos de tarjeta (archivos PAG*.storeCode en GCS).
++ */
++public interface ProcessPaymentReversalUseCase {
++
++    /** Procesa todos los archivos de reversa de pago pendientes en el bucket de entrada. */
++    void processNextCycle();
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/CardCreditStatusPort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/CardCreditStatusPort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/CardCreditStatusPort.java
+@@ -0,0 +1,28 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import java.math.BigDecimal;
++import java.util.Optional;
++
++/**
++ * Puerto de salida para consultar y actualizar el estado de crÃ©dito de tarjeta en CO_CRD_DT.
++ */
++public interface CardCreditStatusPort {
++
++    /**
++     * Busca el identificador compuesto (ID_TRN, SQ_NBR) por nÃºmero de factura, tarjeta y monto.
++     *
++     * @param invoiceNbr NÃºmero de factura (INVC_NMB en TR_INVC).
++     * @param cardNbr    NÃºmero de tarjeta (CRD_NBR en CO_CRD_DT).
++     * @param amount     Monto de la transacciÃ³n (AMNT en CO_CRD_DT).
++     * @return Array de dos enteros [ID_TRN, SQ_NBR], o {@code Optional.empty()} si no se encuentra.
++     */
++    Optional<int[]> findByInvoiceAndCard(String invoiceNbr, String cardNbr, BigDecimal amount);
++
++    /**
++     * Actualiza STS_CRD = '2' en CO_CRD_DT para la combinaciÃ³n dada (reversa exitosa).
++     *
++     * @param idTrn Identificador de transacciÃ³n (PK1).
++     * @param sqNbr NÃºmero de secuencia (PK2).
++     */
++    void markReversed(int idTrn, int sqNbr);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/ConsumptionReversalFilePort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/ConsumptionReversalFilePort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/ConsumptionReversalFilePort.java
+@@ -0,0 +1,44 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.ConsumptionReversal;
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++
++import java.util.List;
++
++/**
++ * Puerto de acceso a archivos GCS de reversa de consumo (CON*.storeCode).
++ */
++public interface ConsumptionReversalFilePort {
++
++    /**
++     * Lista los archivos CON* pendientes en el bucket de entrada, ordenados por nÃºmero de secuencia.
++     *
++     * @return Referencias GCS a los archivos pendientes.
++     */
++    List<GcsObjectReference> listPendingFiles();
++
++    /**
++     * Lee y parsea un archivo de reversa de consumo desde GCS.
++     *
++     * @param file Referencia al objeto GCS.
++     * @return Datos de la reversa parseados.
++     * @throws IllegalArgumentException si la longitud de lÃ­nea no corresponde al formato esperado.
++     */
++    ConsumptionReversal parseFile(GcsObjectReference file);
++
++    /**
++     * Mueve el archivo procesado al bucket de backup.
++     *
++     * @param file Referencia al archivo a mover.
++     * @return Referencia al objeto en el destino.
++     */
++    GcsObjectReference moveToBackup(GcsObjectReference file);
++
++    /**
++     * Mueve el archivo con error al bucket de errores.
++     *
++     * @param file Referencia al archivo a mover.
++     * @return Referencia al objeto en el destino.
++     */
++    GcsObjectReference moveToError(GcsObjectReference file);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/GiftcardReversalFilePort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/GiftcardReversalFilePort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/GiftcardReversalFilePort.java
+@@ -0,0 +1,44 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.GiftcardReversal;
++
++import java.util.List;
++
++/**
++ * Puerto de acceso a archivos GCS de reversa de redenciÃ³n (RED*.storeCode).
++ */
++public interface GiftcardReversalFilePort {
++
++    /**
++     * Lista los archivos RED* pendientes en el bucket de entrada, ordenados por nÃºmero de secuencia.
++     *
++     * @return Referencias GCS a los archivos pendientes.
++     */
++    List<GcsObjectReference> listPendingFiles();
++
++    /**
++     * Lee y parsea un archivo de reversa de redenciÃ³n desde GCS.
++     *
++     * @param file Referencia al objeto GCS.
++     * @return Datos de la reversa parseados.
++     * @throws IllegalArgumentException si la longitud de lÃ­nea no corresponde al formato esperado.
++     */
++    GiftcardReversal parseFile(GcsObjectReference file);
++
++    /**
++     * Mueve el archivo procesado al bucket de backup.
++     *
++     * @param file Referencia al archivo a mover.
++     * @return Referencia al objeto en el destino.
++     */
++    GcsObjectReference moveToBackup(GcsObjectReference file);
++
++    /**
++     * Mueve el archivo con error al bucket de errores.
++     *
++     * @param file Referencia al archivo a mover.
++     * @return Referencia al objeto en el destino.
++     */
++    GcsObjectReference moveToError(GcsObjectReference file);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/PaymentGatewayPort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/PaymentGatewayPort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/PaymentGatewayPort.java
+@@ -0,0 +1,20 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.Iso8583ReversalRequest;
++import com.elrosado.cersuitecloudlocalcore.domain.model.Iso8583ReversalResponse;
++
++import java.util.Optional;
++
++/**
++ * Puerto de salida hacia el gateway de pagos mediante protocolo ISO8583.
++ */
++public interface PaymentGatewayPort {
++
++    /**
++     * EnvÃ­a un mensaje ISO8583 de reversa y espera la respuesta.
++     *
++     * @param request Datos del mensaje a construir y enviar.
++     * @return La respuesta del gateway, o {@code Optional.empty()} si no hubo conexiÃ³n despuÃ©s de reintentos.
++     */
++    Optional<Iso8583ReversalResponse> send(Iso8583ReversalRequest request);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/PaymentReversalFilePort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/PaymentReversalFilePort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/PaymentReversalFilePort.java
+@@ -0,0 +1,44 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.PaymentReversal;
++
++import java.util.List;
++
++/**
++ * Puerto de acceso a archivos GCS de reversa de pago (PAG*.storeCode).
++ */
++public interface PaymentReversalFilePort {
++
++    /**
++     * Lista los archivos PAG* pendientes en el bucket de entrada, ordenados por nÃºmero de secuencia.
++     *
++     * @return Referencias GCS a los archivos pendientes.
++     */
++    List<GcsObjectReference> listPendingFiles();
++
++    /**
++     * Lee y parsea todas las lÃ­neas de un archivo de reversa de pago desde GCS.
++     *
++     * @param file Referencia al objeto GCS.
++     * @return Lista de reversas, una por lÃ­nea del archivo.
++     * @throws IllegalArgumentException si alguna lÃ­nea no tiene la longitud esperada.
++     */
++    List<PaymentReversal> parseAllLines(GcsObjectReference file);
++
++    /**
++     * Mueve el archivo procesado al bucket de backup.
++     *
++     * @param file Referencia al archivo a mover.
++     * @return Referencia al objeto en el destino.
++     */
++    GcsObjectReference moveToBackup(GcsObjectReference file);
++
++    /**
++     * Mueve el archivo con error al bucket de errores.
++     *
++     * @param file Referencia al archivo a mover.
++     * @return Referencia al objeto en el destino.
++     */
++    GcsObjectReference moveToError(GcsObjectReference file);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/PaymentReversalResultPort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/PaymentReversalResultPort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/PaymentReversalResultPort.java
+@@ -0,0 +1,16 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.PaymentReversalResult;
++
++/**
++ * Puerto de salida para persistir el resultado de una reversa de pago en DV_PCER.
++ */
++public interface PaymentReversalResultPort {
++
++    /**
++     * Persiste el resultado de la reversa de pago.
++     *
++     * @param result Resultado a guardar.
++     */
++    void save(PaymentReversalResult result);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/ReversarConsumoSchedulerAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/ReversarConsumoSchedulerAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/ReversarConsumoSchedulerAdapter.java
+@@ -0,0 +1,34 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.scheduler;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.ProcessConsumptionReversalUseCase;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.scheduling.annotation.Scheduled;
++import org.springframework.stereotype.Component;
++
++/**
++ * Scheduler que dispara el proceso de reversiÃ³n de consumos de tarjeta (archivos CON*).
++ */
++@Component
++public class ReversarConsumoSchedulerAdapter {
++
++    private static final Logger log = LoggerFactory.getLogger(ReversarConsumoSchedulerAdapter.class);
++
++    private final ProcessConsumptionReversalUseCase useCase;
++
++    public ReversarConsumoSchedulerAdapter(ProcessConsumptionReversalUseCase useCase) {
++        this.useCase = useCase;
++    }
++
++    @Scheduled(fixedDelayString = "${reversarConsumo.sleeptime:30000}")
++    public void poll() {
++        try {
++            useCase.processNextCycle();
++        } catch (Exception e) {
++            log.atError()
++                    .setMessage("Error no controlado en scheduler ReversarConsumo")
++                    .setCause(e)
++                    .log();
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/ReversarPagoSchedulerAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/ReversarPagoSchedulerAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/ReversarPagoSchedulerAdapter.java
+@@ -0,0 +1,34 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.scheduler;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.ProcessPaymentReversalUseCase;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.scheduling.annotation.Scheduled;
++import org.springframework.stereotype.Component;
++
++/**
++ * Scheduler que dispara el proceso de reversiÃ³n de pagos de tarjeta (archivos PAG*).
++ */
++@Component
++public class ReversarPagoSchedulerAdapter {
++
++    private static final Logger log = LoggerFactory.getLogger(ReversarPagoSchedulerAdapter.class);
++
++    private final ProcessPaymentReversalUseCase useCase;
++
++    public ReversarPagoSchedulerAdapter(ProcessPaymentReversalUseCase useCase) {
++        this.useCase = useCase;
++    }
++
++    @Scheduled(fixedDelayString = "${reversarPago.sleeptime:30000}")
++    public void poll() {
++        try {
++            useCase.processNextCycle();
++        } catch (Exception e) {
++            log.atError()
++                    .setMessage("Error no controlado en scheduler ReversarPago")
++                    .setCause(e)
++                    .log();
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/ReversarRedencionSchedulerAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/ReversarRedencionSchedulerAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/ReversarRedencionSchedulerAdapter.java
+@@ -0,0 +1,34 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.scheduler;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.ProcessGiftcardReversalUseCase;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.scheduling.annotation.Scheduled;
++import org.springframework.stereotype.Component;
++
++/**
++ * Scheduler que dispara el proceso de reversiÃ³n de redenciones de giftcard (archivos RED*).
++ */
++@Component
++public class ReversarRedencionSchedulerAdapter {
++
++    private static final Logger log = LoggerFactory.getLogger(ReversarRedencionSchedulerAdapter.class);
++
++    private final ProcessGiftcardReversalUseCase useCase;
++
++    public ReversarRedencionSchedulerAdapter(ProcessGiftcardReversalUseCase useCase) {
++        this.useCase = useCase;
++    }
++
++    @Scheduled(fixedDelayString = "${reversarRedencion.sleeptime:30000}")
++    public void poll() {
++        try {
++            useCase.processNextCycle();
++        } catch (Exception e) {
++            log.atError()
++                    .setMessage("Error no controlado en scheduler ReversarRedencion")
++                    .setCause(e)
++                    .log();
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbReversarPagoArtsAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbReversarPagoArtsAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbReversarPagoArtsAdapter.java
+@@ -0,0 +1,62 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.CardCreditStatusPort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.CoCardDataEntity;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository.JpaCoCardDataRepository;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Component;
++import org.springframework.transaction.annotation.Transactional;
++
++import java.math.BigDecimal;
++import java.util.List;
++import java.util.Optional;
++
++/**
++ * Adaptador que accede a las tablas CO_CRD_DT y TR_INVC en ARTS_EC para el proceso de reversa de pagos.
++ */
++@Component
++public class DbReversarPagoArtsAdapter implements CardCreditStatusPort {
++
++    private static final Logger log = LoggerFactory.getLogger(DbReversarPagoArtsAdapter.class);
++
++    private final JpaCoCardDataRepository cardDataRepository;
++
++    public DbReversarPagoArtsAdapter(JpaCoCardDataRepository cardDataRepository) {
++        this.cardDataRepository = cardDataRepository;
++    }
++
++    @Override
++    @Transactional(transactionManager = "artsEcTransactionManager", readOnly = true)
++    public Optional<int[]> findByInvoiceAndCard(String invoiceNumber, String cardNumber, BigDecimal amount) {
++        List<CoCardDataEntity> matches = cardDataRepository.findMatchingCard(invoiceNumber, cardNumber, amount);
++        if (matches.isEmpty()) {
++            log.atDebug()
++                    .setMessage("No se encontrÃ³ registro en CO_CRD_DT")
++                    .addKeyValue("invoice", invoiceNumber)
++                    .addKeyValue("card", maskCard(cardNumber))
++                    .log();
++            return Optional.empty();
++        }
++        CoCardDataEntity first = matches.getFirst();
++        return Optional.of(new int[]{first.getId().getIdTrn(), first.getId().getSqNbr()});
++    }
++
++    @Override
++    @Transactional(transactionManager = "artsEcTransactionManager")
++    public void markReversed(int idTrn, int sqNbr) {
++        cardDataRepository.markReversed(idTrn, sqNbr);
++        log.atDebug()
++                .setMessage("STS_CRD marcado como '2' en CO_CRD_DT")
++                .addKeyValue("idTrn", idTrn)
++                .addKeyValue("sqNbr", sqNbr)
++                .log();
++    }
++
++    private static String maskCard(String cardNumber) {
++        if (cardNumber == null || cardNumber.length() < 4) {
++            return "****";
++        }
++        return "*".repeat(cardNumber.length() - 4) + cardNumber.substring(cardNumber.length() - 4);
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/devs/DbReversarPagoDevsAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/devs/DbReversarPagoDevsAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/devs/DbReversarPagoDevsAdapter.java
+@@ -0,0 +1,42 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.devs;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.PaymentReversalResult;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.PaymentReversalResultPort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.devs.entity.DvPcerEntity;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.devs.entity.DvPcerEntityId;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.devs.repository.JpaDvPcerRepository;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Component;
++import org.springframework.transaction.annotation.Transactional;
++
++/**
++ * Adaptador que persiste el resultado de cada reversa de pago en la tabla DV_PCER de DEVS_EC.
++ */
++@Component
++public class DbReversarPagoDevsAdapter implements PaymentReversalResultPort {
++
++    private static final Logger log = LoggerFactory.getLogger(DbReversarPagoDevsAdapter.class);
++
++    private final JpaDvPcerRepository repository;
++
++    public DbReversarPagoDevsAdapter(JpaDvPcerRepository repository) {
++        this.repository = repository;
++    }
++
++    @Override
++    @Transactional(transactionManager = "devsEcTransactionManager")
++    public void save(PaymentReversalResult result) {
++        DvPcerEntityId id = new DvPcerEntityId(result.fileId(), result.sequenceNumber());
++        DvPcerEntity entity = new DvPcerEntity(id, result.status().dbValue(), result.responseCode());
++        repository.save(entity);
++
++        log.atDebug()
++                .setMessage("Resultado de reversa de pago persistido en DV_PCER")
++                .addKeyValue("fileId", result.fileId())
++                .addKeyValue("seqNum", result.sequenceNumber())
++                .addKeyValue("estado", result.status())
++                .addKeyValue("respCode", result.responseCode())
++                .log();
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/devs/entity/DvPcerEntity.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/devs/entity/DvPcerEntity.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/devs/entity/DvPcerEntity.java
+@@ -0,0 +1,57 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.devs.entity;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.EmbeddedId;
++import jakarta.persistence.Entity;
++import jakarta.persistence.Table;
++
++import java.io.Serial;
++import java.io.Serializable;
++
++/**
++ * Entidad JPA que representa la tabla DV_PCER (resultados de reversiÃ³n de pago) en DEVS_EC.
++ * Registra el estado y cÃ³digo de respuesta de cada reversa procesada.
++ */
++@Entity
++@Table(name = "DV_PCER")
++public class DvPcerEntity implements Serializable {
++
++    @Serial
++    private static final long serialVersionUID = 1L;
++
++    @EmbeddedId
++    private DvPcerEntityId id;
++
++    /**
++     * Estado de la reversa: 1=Aprobado, 2=Rechazado, 3=Sin respuesta.
++     */
++    @Column(name = "ESTADO", nullable = false)
++    private Integer estado;
++
++    /**
++     * CÃ³digo de respuesta ISO8583 del gateway, o null si no hubo respuesta.
++     */
++    @Column(name = "RESP_CODE", length = 2)
++    private String respCode;
++
++    protected DvPcerEntity() {
++    }
++
++    public DvPcerEntity(DvPcerEntityId id, Integer estado, String respCode) {
++        this.id = id;
++        this.estado = estado;
++        this.respCode = respCode;
++    }
++
++    public DvPcerEntityId getId() {
++        return id;
++    }
++
++    public Integer getEstado() {
++        return estado;
++    }
++
++    public String getRespCode() {
++        return respCode;
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/devs/entity/DvPcerEntityId.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/devs/entity/DvPcerEntityId.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/devs/entity/DvPcerEntityId.java
+@@ -0,0 +1,52 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.devs.entity;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Embeddable;
++
++import java.io.Serial;
++import java.io.Serializable;
++import java.util.Objects;
++
++/**
++ * Clave compuesta de la entidad {@link DvPcerEntity} (DV_PCER en DEVS_EC).
++ */
++@Embeddable
++public class DvPcerEntityId implements Serializable {
++
++    @Serial
++    private static final long serialVersionUID = 1L;
++
++    @Column(name = "ID_DEV", nullable = false)
++    private Integer idDev;
++
++    @Column(name = "SQ_NMB", nullable = false)
++    private Integer sqNmb;
++
++    protected DvPcerEntityId() {
++    }
++
++    public DvPcerEntityId(Integer idDev, Integer sqNmb) {
++        this.idDev = idDev;
++        this.sqNmb = sqNmb;
++    }
++
++    public Integer getIdDev() {
++        return idDev;
++    }
++
++    public Integer getSqNmb() {
++        return sqNmb;
++    }
++
++    @Override
++    public boolean equals(Object o) {
++        if (this == o) return true;
++        if (!(o instanceof DvPcerEntityId that)) return false;
++        return Objects.equals(idDev, that.idDev) && Objects.equals(sqNmb, that.sqNmb);
++    }
++
++    @Override
++    public int hashCode() {
++        return Objects.hash(idDev, sqNmb);
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/devs/repository/JpaDvPcerRepository.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/devs/repository/JpaDvPcerRepository.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/devs/repository/JpaDvPcerRepository.java
+@@ -0,0 +1,8 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.devs.repository;
++
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.devs.entity.DvPcerEntity;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.devs.entity.DvPcerEntityId;
++import org.springframework.data.jpa.repository.JpaRepository;
++
++public interface JpaDvPcerRepository extends JpaRepository<DvPcerEntity, DvPcerEntityId> {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/CoCardDataEntity.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/CoCardDataEntity.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/CoCardDataEntity.java
+@@ -0,0 +1,53 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.EmbeddedId;
++import jakarta.persistence.Entity;
++import jakarta.persistence.Table;
++
++import java.io.Serial;
++import java.io.Serializable;
++import java.math.BigDecimal;
++
++/**
++ * Entidad JPA que representa la tabla CO_CRD_DT (datos de tarjeta en cobros) en ARTS_EC.
++ * Se consulta y actualiza durante el proceso de reversiÃ³n de pagos aprobados.
++ */
++@Entity
++@Table(name = "CO_CRD_DT")
++public class CoCardDataEntity implements Serializable {
++
++    @Serial
++    private static final long serialVersionUID = 1L;
++
++    @EmbeddedId
++    private CoCardDataEntityId id;
++
++    @Column(name = "CRD_NBR", length = 20)
++    private String crdNbr;
++
++    @Column(name = "AMNT", precision = 19, scale = 4)
++    private BigDecimal amnt;
++
++    @Column(name = "STS_CRD", length = 2)
++    private String stsCrd;
++
++    protected CoCardDataEntity() {
++    }
++
++    public CoCardDataEntityId getId() {
++        return id;
++    }
++
++    public String getCrdNbr() {
++        return crdNbr;
++    }
++
++    public BigDecimal getAmnt() {
++        return amnt;
++    }
++
++    public String getStsCrd() {
++        return stsCrd;
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/CoCardDataEntityId.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/CoCardDataEntityId.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/CoCardDataEntityId.java
+@@ -0,0 +1,47 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Embeddable;
++
++import java.io.Serial;
++import java.io.Serializable;
++import java.util.Objects;
++
++/**
++ * Clave compuesta de la entidad {@link CoCardDataEntity} (CO_CRD_DT).
++ */
++@Embeddable
++public class CoCardDataEntityId implements Serializable {
++
++    @Serial
++    private static final long serialVersionUID = 1L;
++
++    @Column(name = "ID_TRN", nullable = false)
++    private Integer idTrn;
++
++    @Column(name = "SQ_NBR", nullable = false)
++    private Integer sqNbr;
++
++    protected CoCardDataEntityId() {
++    }
++
++    public Integer getIdTrn() {
++        return idTrn;
++    }
++
++    public Integer getSqNbr() {
++        return sqNbr;
++    }
++
++    @Override
++    public boolean equals(Object o) {
++        if (this == o) return true;
++        if (!(o instanceof CoCardDataEntityId that)) return false;
++        return Objects.equals(idTrn, that.idTrn) && Objects.equals(sqNbr, that.sqNbr);
++    }
++
++    @Override
++    public int hashCode() {
++        return Objects.hash(idTrn, sqNbr);
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/TrInvcEntity.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/TrInvcEntity.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/TrInvcEntity.java
+@@ -0,0 +1,39 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++import jakarta.persistence.Table;
++
++import java.io.Serial;
++import java.io.Serializable;
++
++/**
++ * Entidad JPA que representa la tabla TR_INVC (facturas de transacciÃ³n) en ARTS_EC.
++ * Se usa para resolver el nÃºmero de factura al ID de transacciÃ³n en la reversa de pago.
++ */
++@Entity
++@Table(name = "TR_INVC")
++public class TrInvcEntity implements Serializable {
++
++    @Serial
++    private static final long serialVersionUID = 1L;
++
++    @Id
++    @Column(name = "ID_TRN", nullable = false)
++    private Integer idTrn;
++
++    @Column(name = "INVC_NMB", nullable = false, length = 15)
++    private String invcNmb;
++
++    protected TrInvcEntity() {
++    }
++
++    public Integer getIdTrn() {
++        return idTrn;
++    }
++
++    public String getInvcNmb() {
++        return invcNmb;
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/JpaCoCardDataRepository.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/JpaCoCardDataRepository.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/JpaCoCardDataRepository.java
+@@ -0,0 +1,44 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository;
++
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.CoCardDataEntity;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.CoCardDataEntityId;
++import org.springframework.data.jpa.repository.JpaRepository;
++import org.springframework.data.jpa.repository.Modifying;
++import org.springframework.data.jpa.repository.Query;
++import org.springframework.data.repository.query.Param;
++
++import java.math.BigDecimal;
++import java.util.List;
++
++public interface JpaCoCardDataRepository extends JpaRepository<CoCardDataEntity, CoCardDataEntityId> {
++
++    /**
++     * Busca registros de tarjeta cuyo nÃºmero de factura, nÃºmero de tarjeta y monto coincidan,
++     * y cuyo estado no sea '2' (ya reversado).
++     */
++    @Query("""
++            SELECT c FROM CoCardDataEntity c
++            JOIN TrInvcEntity t ON c.id.idTrn = t.idTrn
++            WHERE t.invcNmb = :invoiceNumber
++              AND c.crdNbr = :cardNumber
++              AND c.amnt = :amount
++              AND c.stsCrd <> '2'
++            """)
++    List<CoCardDataEntity> findMatchingCard(
++            @Param("invoiceNumber") String invoiceNumber,
++            @Param("cardNumber") String cardNumber,
++            @Param("amount") BigDecimal amount
++    );
++
++    /**
++     * Actualiza el estado de la tarjeta a '2' (reversado) por clave compuesta.
++     */
++    @Modifying
++    @Query("""
++            UPDATE CoCardDataEntity c
++            SET c.stsCrd = '2'
++            WHERE c.id.idTrn = :idTrn
++              AND c.id.sqNbr = :sqNbr
++            """)
++    void markReversed(@Param("idTrn") int idTrn, @Param("sqNbr") int sqNbr);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/JpaTrInvcRepository.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/JpaTrInvcRepository.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/JpaTrInvcRepository.java
+@@ -0,0 +1,7 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository;
++
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.TrInvcEntity;
++import org.springframework.data.jpa.repository.JpaRepository;
++
++public interface JpaTrInvcRepository extends JpaRepository<TrInvcEntity, Integer> {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/payment/Iso8583SocketAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/payment/Iso8583SocketAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/payment/Iso8583SocketAdapter.java
+@@ -0,0 +1,162 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.payment;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.Iso8583ReversalRequest;
++import com.elrosado.cersuitecloudlocalcore.domain.model.Iso8583ReversalResponse;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.PaymentGatewayPort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.PaymentServerProperties;
++import com.elrosado.cersuitecloudlocalcore.service.Iso8583MessageBuilderService;
++import com.elrosado.cersuitecloudlocalcore.service.Iso8583MessageParserService;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Component;
++
++import java.io.IOException;
++import java.io.InputStream;
++import java.io.OutputStream;
++import java.net.Socket;
++import java.util.HexFormat;
++import java.util.Optional;
++
++/**
++ * EnvÃ­a mensajes ISO8583 de reversiÃ³n al gateway de pagos mediante socket TCP.
++ * El protocolo usa prefijo de 2 bytes big-endian con el tamaÃ±o del payload.
++ * Reintenta hasta {@code retries} veces con {@code retrySleepMs} de pausa entre intentos.
++ * Retorna {@code Optional.empty()} Ãºnicamente cuando se agotan todos los reintentos sin respuesta.
++ */
++@Component
++public class Iso8583SocketAdapter implements PaymentGatewayPort {
++
++    private static final Logger log = LoggerFactory.getLogger(Iso8583SocketAdapter.class);
++
++    private final Iso8583MessageBuilderService builder;
++    private final Iso8583MessageParserService parser;
++    private final PaymentServerProperties properties;
++
++    public Iso8583SocketAdapter(
++            Iso8583MessageBuilderService builder,
++            Iso8583MessageParserService parser,
++            PaymentServerProperties properties) {
++        this.builder = builder;
++        this.parser = parser;
++        this.properties = properties;
++    }
++
++    @Override
++    public Optional<Iso8583ReversalResponse> send(Iso8583ReversalRequest request) {
++        String hexMessage = builder.buildHexMessage(request);
++        byte[] payload = hexStringToBytes(hexMessage);
++        byte[] frame = buildFrame(payload);
++
++        for (int attempt = 1; attempt <= properties.retries(); attempt++) {
++            Optional<Iso8583ReversalResponse> response = trySend(frame, attempt);
++            if (response.isPresent()) {
++                return response;
++            }
++            if (attempt < properties.retries()) {
++                sleepBetweenRetries(attempt);
++            }
++        }
++
++        log.atWarn()
++                .setMessage("Sin respuesta del gateway tras todos los reintentos")
++                .addKeyValue("host", properties.ip())
++                .addKeyValue("port", properties.port())
++                .addKeyValue("reintentos", properties.retries())
++                .log();
++        return Optional.empty();
++    }
++
++    private Optional<Iso8583ReversalResponse> trySend(byte[] frame, int attempt) {
++        try (Socket socket = new Socket()) {
++            socket.setSoTimeout(properties.timeoutMs());
++            socket.connect(
++                    new java.net.InetSocketAddress(properties.ip(), properties.port()),
++                    properties.timeoutMs()
++            );
++
++            OutputStream out = socket.getOutputStream();
++            out.write(frame);
++            out.flush();
++
++            InputStream in = socket.getInputStream();
++            byte[] responseFrame = readFrame(in);
++            if (responseFrame == null) {
++                log.atWarn()
++                        .setMessage("Respuesta vacÃ­a del gateway de pagos")
++                        .addKeyValue("intento", attempt)
++                        .log();
++                return Optional.empty();
++            }
++
++            String responseHex = HexFormat.of().formatHex(responseFrame).toUpperCase();
++            return parser.parse(responseHex);
++
++        } catch (IOException e) {
++            log.atWarn()
++                    .setMessage("Error de socket al comunicar con gateway de pagos")
++                    .addKeyValue("intento", attempt)
++                    .addKeyValue("host", properties.ip())
++                    .addKeyValue("port", properties.port())
++                    .setCause(e)
++                    .log();
++            return Optional.empty();
++        }
++    }
++
++    /**
++     * Construye el frame TCP: prefijo de 2 bytes big-endian con el tamaÃ±o del payload + payload.
++     */
++    private static byte[] buildFrame(byte[] payload) {
++        int length = payload.length;
++        byte[] frame = new byte[2 + length];
++        frame[0] = (byte) ((length >> 8) & 0xFF);
++        frame[1] = (byte) (length & 0xFF);
++        System.arraycopy(payload, 0, frame, 2, length);
++        return frame;
++    }
++
++    /**
++     * Lee el frame de respuesta: lee 2 bytes de longitud, luego esa cantidad de bytes de payload.
++     */
++    private static byte[] readFrame(InputStream in) throws IOException {
++        byte[] lengthBytes = readExact(in, 2);
++        if (lengthBytes == null) {
++            return null;
++        }
++        int length = ((lengthBytes[0] & 0xFF) << 8) | (lengthBytes[1] & 0xFF);
++        if (length <= 0) {
++            return null;
++        }
++        return readExact(in, length);
++    }
++
++    private static byte[] readExact(InputStream in, int count) throws IOException {
++        byte[] buffer = new byte[count];
++        int offset = 0;
++        while (offset < count) {
++            int read = in.read(buffer, offset, count - offset);
++            if (read < 0) {
++                return null;
++            }
++            offset += read;
++        }
++        return buffer;
++    }
++
++    private static byte[] hexStringToBytes(String hex) {
++        return HexFormat.of().parseHex(hex.toLowerCase());
++    }
++
++    private void sleepBetweenRetries(int attempt) {
++        try {
++            log.atDebug()
++                    .setMessage("Pausa antes del siguiente reintento al gateway")
++                    .addKeyValue("intento", attempt)
++                    .addKeyValue("pausaMs", properties.retrySleepMs())
++                    .log();
++            Thread.sleep(properties.retrySleepMs());
++        } catch (InterruptedException ie) {
++            Thread.currentThread().interrupt();
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsReversarConsumoFileAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsReversarConsumoFileAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsReversarConsumoFileAdapter.java
+@@ -0,0 +1,194 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.storage;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.ConsumptionReversal;
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.ConsumptionReversalFilePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.ReversarConsumoProperties;
++import com.google.cloud.storage.Blob;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Component;
++
++import java.io.BufferedReader;
++import java.io.IOException;
++import java.util.ArrayList;
++import java.util.Comparator;
++import java.util.List;
++import java.util.Optional;
++
++/**
++ * Adaptador GCS para archivos de reversa de consumo (CON{seq}.{storeCode}).
++ *
++ * <p>Formato de lÃ­nea 1 (97 caracteres):
++ * <pre>
++ *   [0:16]   PAN (nÃºmero de tarjeta, 16 dÃ­gitos)
++ *   [16:28]  Monto de transacciÃ³n (12 dÃ­gitos)
++ *   [28:34]  STAN (6 dÃ­gitos)
++ *   [34:40]  NÃºmero de autorizaciÃ³n (6 caracteres)
++ *   [40:48]  Terminal ID (8 caracteres)
++ *   [48:63]  Merchant ID (15 caracteres)
++ *   [63:97]  Datos raw para construcciÃ³n de RFPU (34 caracteres)
++ * </pre>
++ *
++ * <p>LÃ­nea 2 (opcional): datos crudos de cupones â prefijada con conteo 2 dÃ­gitos en el dominio.
++ * <p>LÃ­nea 3 (opcional): datos crudos de puntos â prefijada con conteo de bloques en el dominio.
++ */
++@Component
++public class GcsReversarConsumoFileAdapter implements ConsumptionReversalFilePort {
++
++    private static final Logger log = LoggerFactory.getLogger(GcsReversarConsumoFileAdapter.class);
++
++    private static final int LINE1_LENGTH = 97;
++    private static final int PAN_START = 0;
++    private static final int PAN_END = 16;
++    private static final int AMOUNT_START = 16;
++    private static final int AMOUNT_END = 28;
++    private static final int STAN_START = 28;
++    private static final int STAN_END = 34;
++    private static final int AUTH_START = 34;
++    private static final int AUTH_END = 40;
++    private static final int TERMINAL_START = 40;
++    private static final int TERMINAL_END = 48;
++    private static final int MERCHANT_START = 48;
++    private static final int MERCHANT_END = 63;
++    private static final int RFPU_RAW_START = 63;
++    private static final int RFPU_RAW_END = 97;
++    private static final int RFPU_LENGTH = 54;
++
++    // Nombre de archivo: CON{8-digit-seq}.{storeCode}
++    private static final String FILE_PREFIX = "CON";
++
++    private final GcsStorageHelper gcsHelper;
++    private final ReversarConsumoProperties properties;
++
++    public GcsReversarConsumoFileAdapter(GcsStorageHelper gcsHelper, ReversarConsumoProperties properties) {
++        this.gcsHelper = gcsHelper;
++        this.properties = properties;
++    }
++
++    @Override
++    public List<GcsObjectReference> listPendingFiles() {
++        GcsObjectReference inputFolder = new GcsObjectReference(properties.gcsBucket(), properties.gcsInPrefix());
++        String prefix = inputFolder.prefixWithSlash();
++
++        return gcsHelper.streamBlobs(inputFolder)
++                .filter(blob -> isConFile(blob.getName(), prefix))
++                .sorted(Comparator.comparing(blob -> extractSequence(blob.getName(), prefix)))
++                .map(blob -> new GcsObjectReference(properties.gcsBucket(), blob.getName()))
++                .toList();
++    }
++
++    @Override
++    public ConsumptionReversal parseFile(GcsObjectReference file) {
++        String fileName = file.fileName();
++        String storeCode = extractStoreCode(fileName);
++
++        try (BufferedReader reader = gcsHelper.openReader(file)) {
++            List<String> lines = new ArrayList<>();
++            String line;
++            while ((line = reader.readLine()) != null) {
++                if (!line.isBlank()) {
++                    lines.add(line);
++                }
++            }
++
++            if (lines.isEmpty()) {
++                throw new IllegalArgumentException("Archivo CON vacÃ­o: " + fileName);
++            }
++
++            String line1 = lines.getFirst();
++            if (line1.length() != LINE1_LENGTH) {
++                throw new IllegalArgumentException(
++                        "Longitud invÃ¡lida en lÃ­nea 1 de archivo CON [esperado=%d, actual=%d, archivo=%s]"
++                                .formatted(LINE1_LENGTH, line1.length(), fileName));
++            }
++
++            String rawRfpu = line1.substring(RFPU_RAW_START, RFPU_RAW_END);
++            String rfpu = buildRfpu(rawRfpu);
++
++            String cuponesData = lines.size() >= 2 ? buildCuponesData(lines.get(1)) : null;
++            String puntosData = lines.size() >= 3 ? buildPuntosData(lines.get(2)) : null;
++
++            return new ConsumptionReversal(
++                    storeCode,
++                    line1.substring(PAN_START, PAN_END),
++                    line1.substring(AMOUNT_START, AMOUNT_END),
++                    line1.substring(STAN_START, STAN_END),
++                    line1.substring(AUTH_START, AUTH_END),
++                    line1.substring(TERMINAL_START, TERMINAL_END),
++                    line1.substring(MERCHANT_START, MERCHANT_END),
++                    rfpu,
++                    cuponesData,
++                    puntosData
++            );
++
++        } catch (IOException e) {
++            throw new IllegalArgumentException("Error leyendo archivo CON desde GCS: " + file.toUri(), e);
++        }
++    }
++
++    @Override
++    public GcsObjectReference moveToBackup(GcsObjectReference file) {
++        GcsObjectReference target = new GcsObjectReference(properties.gcsBucket(), properties.gcsBkpPrefix());
++        return gcsHelper.moveBlob(file, target);
++    }
++
++    @Override
++    public GcsObjectReference moveToError(GcsObjectReference file) {
++        GcsObjectReference target = new GcsObjectReference(properties.gcsBucket(), properties.gcsErrorPrefix());
++        return gcsHelper.moveBlob(file, target);
++    }
++
++    /**
++     * Construye el campo RFPU de 54 caracteres a partir de los 34 bytes raw de la lÃ­nea 1.
++     * Los 34 bytes se copian al inicio del campo de 54 y el resto se rellena con espacios.
++     */
++    private static String buildRfpu(String rawData) {
++        return rawData + " ".repeat(RFPU_LENGTH - rawData.length());
++    }
++
++    /**
++     * Formatea los datos de cupones de la lÃ­nea 2: prefijo de 2 dÃ­gitos con la cantidad + datos raw.
++     */
++    private static String buildCuponesData(String rawLine) {
++        if (rawLine.length() < 2) {
++            return null;
++        }
++        // Los primeros 2 caracteres son el conteo, el resto son los datos
++        return rawLine;
++    }
++
++    /**
++     * Formatea los datos de puntos de la lÃ­nea 3: prefijo de 2 dÃ­gitos con el conteo de bloques + datos raw.
++     */
++    private static String buildPuntosData(String rawLine) {
++        if (rawLine.length() < 2) {
++            return null;
++        }
++        return rawLine;
++    }
++
++    private static boolean isConFile(String objectName, String prefix) {
++        if (!objectName.startsWith(prefix)) return false;
++        String relativeName = objectName.substring(prefix.length());
++        return !relativeName.contains("/") && !relativeName.isBlank()
++                && relativeName.toUpperCase().startsWith(FILE_PREFIX);
++    }
++
++    private static String extractSequence(String objectName, String prefix) {
++        String relativeName = objectName.substring(prefix.length());
++        // NÃºmero de secuencia de 8 dÃ­gitos a partir de la posiciÃ³n 3 (despuÃ©s de "CON")
++        if (relativeName.length() >= 11) {
++            return relativeName.substring(3, 11);
++        }
++        return relativeName;
++    }
++
++    private static String extractStoreCode(String fileName) {
++        int dotIndex = fileName.lastIndexOf('.');
++        if (dotIndex < 0 || dotIndex == fileName.length() - 1) {
++            throw new IllegalArgumentException("Nombre de archivo CON sin cÃ³digo de tienda: " + fileName);
++        }
++        return fileName.substring(dotIndex + 1);
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsReversarPagoFileAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsReversarPagoFileAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsReversarPagoFileAdapter.java
+@@ -0,0 +1,208 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.storage;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.PaymentReversal;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.PaymentReversalFilePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.ReversarPagoProperties;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Component;
++
++import java.io.BufferedReader;
++import java.io.IOException;
++import java.math.BigDecimal;
++import java.util.ArrayList;
++import java.util.Comparator;
++import java.util.List;
++
++/**
++ * Adaptador GCS para archivos de reversa de pago (PAG{seq}.{storeCode}).
++ *
++ * <p>Formato de lÃ­nea (88 caracteres), una por reversa:
++ * <pre>
++ *   [0:16]   PAN (nÃºmero de tarjeta, 16 dÃ­gitos)
++ *   [16:28]  Monto de transacciÃ³n (12 dÃ­gitos, centavos)
++ *   [28:34]  STAN (6 dÃ­gitos)
++ *   [34:40]  NÃºmero de autorizaciÃ³n (6 caracteres)
++ *   [40:48]  Terminal ID (8 caracteres)
++ *   [48:63]  Merchant ID (15 caracteres)
++ *   [63:73]  Datos raw para construcciÃ³n de RFPU (10 caracteres)
++ *   [73:88]  NÃºmero de factura (15 caracteres)
++ * </pre>
++ *
++ * <p>El {@code fileId} y el {@code storeCode} se extraen del nombre del archivo.
++ */
++@Component
++public class GcsReversarPagoFileAdapter implements PaymentReversalFilePort {
++
++    private static final Logger log = LoggerFactory.getLogger(GcsReversarPagoFileAdapter.class);
++
++    private static final int LINE_LENGTH = 88;
++    private static final int PAN_START = 0;
++    private static final int PAN_END = 16;
++    private static final int AMOUNT_START = 16;
++    private static final int AMOUNT_END = 28;
++    private static final int STAN_START = 28;
++    private static final int STAN_END = 34;
++    private static final int AUTH_START = 34;
++    private static final int AUTH_END = 40;
++    private static final int TERMINAL_START = 40;
++    private static final int TERMINAL_END = 48;
++    private static final int MERCHANT_START = 48;
++    private static final int MERCHANT_END = 63;
++    private static final int RFPU_RAW_START = 63;
++    private static final int RFPU_RAW_END = 73;
++    private static final int INVOICE_START = 73;
++    private static final int INVOICE_END = 88;
++    private static final int RFPU_LENGTH = 54;
++    // Factor de escala del monto almacenado en archivo (centavos con 2 decimales)
++    private static final BigDecimal AMOUNT_SCALE = new BigDecimal("100");
++
++    private static final String FILE_PREFIX = "PAG";
++
++    private final GcsStorageHelper gcsHelper;
++    private final ReversarPagoProperties properties;
++
++    public GcsReversarPagoFileAdapter(GcsStorageHelper gcsHelper, ReversarPagoProperties properties) {
++        this.gcsHelper = gcsHelper;
++        this.properties = properties;
++    }
++
++    @Override
++    public List<GcsObjectReference> listPendingFiles() {
++        GcsObjectReference inputFolder = new GcsObjectReference(properties.gcsBucket(), properties.gcsInPrefix());
++        String prefix = inputFolder.prefixWithSlash();
++
++        return gcsHelper.streamBlobs(inputFolder)
++                .filter(blob -> isPagFile(blob.getName(), prefix))
++                .sorted(Comparator.comparing(blob -> extractSequence(blob.getName(), prefix)))
++                .map(blob -> new GcsObjectReference(properties.gcsBucket(), blob.getName()))
++                .toList();
++    }
++
++    @Override
++    public List<PaymentReversal> parseAllLines(GcsObjectReference file) {
++        String fileName = file.fileName();
++        String storeCode = extractStoreCode(fileName);
++        int fileId = extractFileId(fileName);
++
++        try (BufferedReader reader = gcsHelper.openReader(file)) {
++            List<PaymentReversal> result = new ArrayList<>();
++            String rawLine;
++            int lineNumber = 0;
++
++            while ((rawLine = reader.readLine()) != null) {
++                if (rawLine.isBlank()) {
++                    continue;
++                }
++                lineNumber++;
++                if (rawLine.length() != LINE_LENGTH) {
++                    throw new IllegalArgumentException(
++                            "Longitud invÃ¡lida en lÃ­nea %d de archivo PAG [esperado=%d, actual=%d, archivo=%s]"
++                                    .formatted(lineNumber, LINE_LENGTH, rawLine.length(), fileName));
++                }
++                result.add(parseLine(rawLine, fileId, lineNumber, storeCode));
++            }
++
++            if (result.isEmpty()) {
++                throw new IllegalArgumentException("Archivo PAG vacÃ­o: " + fileName);
++            }
++
++            log.atDebug()
++                    .setMessage("LÃ­neas parseadas de archivo PAG")
++                    .addKeyValue("archivo", fileName)
++                    .addKeyValue("lineas", result.size())
++                    .log();
++
++            return result;
++
++        } catch (IOException e) {
++            throw new IllegalArgumentException("Error leyendo archivo PAG desde GCS: " + file.toUri(), e);
++        }
++    }
++
++    @Override
++    public GcsObjectReference moveToBackup(GcsObjectReference file) {
++        GcsObjectReference target = new GcsObjectReference(properties.gcsBucket(), properties.gcsBkpPrefix());
++        return gcsHelper.moveBlob(file, target);
++    }
++
++    @Override
++    public GcsObjectReference moveToError(GcsObjectReference file) {
++        GcsObjectReference target = new GcsObjectReference(properties.gcsBucket(), properties.gcsErrorPrefix());
++        return gcsHelper.moveBlob(file, target);
++    }
++
++    private PaymentReversal parseLine(String line, int fileId, int sequenceNumber, String storeCode) {
++        String amountStr = line.substring(AMOUNT_START, AMOUNT_END);
++        BigDecimal amountValue = new BigDecimal(amountStr.trim()).divide(AMOUNT_SCALE);
++
++        String rawRfpu = line.substring(RFPU_RAW_START, RFPU_RAW_END);
++        String invoiceNumber = line.substring(INVOICE_START, INVOICE_END);
++        String rfpu = buildRfpu(rawRfpu, amountStr, invoiceNumber);
++
++        return new PaymentReversal(
++                fileId,
++                sequenceNumber,
++                storeCode,
++                line.substring(PAN_START, PAN_END),
++                amountStr,
++                amountValue,
++                line.substring(STAN_START, STAN_END),
++                line.substring(AUTH_START, AUTH_END),
++                line.substring(TERMINAL_START, TERMINAL_END),
++                line.substring(MERCHANT_START, MERCHANT_END),
++                rfpu,
++                invoiceNumber
++        );
++    }
++
++    /**
++     * Construye el campo RFPU de 54 caracteres para reversas de pago.
++     * Concatena los 10 bytes raw + monto (12) + factura (15) y rellena con espacios hasta 54.
++     */
++    private static String buildRfpu(String rawData, String amount, String invoice) {
++        String combined = rawData + amount + invoice;
++        int available = Math.min(combined.length(), RFPU_LENGTH);
++        String rfpu = combined.substring(0, available);
++        if (rfpu.length() < RFPU_LENGTH) {
++            rfpu = rfpu + " ".repeat(RFPU_LENGTH - rfpu.length());
++        }
++        return rfpu;
++    }
++
++    private static boolean isPagFile(String objectName, String prefix) {
++        if (!objectName.startsWith(prefix)) return false;
++        String relativeName = objectName.substring(prefix.length());
++        return !relativeName.contains("/") && !relativeName.isBlank()
++                && relativeName.toUpperCase().startsWith(FILE_PREFIX);
++    }
++
++    private static String extractSequence(String objectName, String prefix) {
++        String relativeName = objectName.substring(prefix.length());
++        if (relativeName.length() >= 11) {
++            return relativeName.substring(3, 11);
++        }
++        return relativeName;
++    }
++
++    private static String extractStoreCode(String fileName) {
++        int dotIndex = fileName.lastIndexOf('.');
++        if (dotIndex < 0 || dotIndex == fileName.length() - 1) {
++            throw new IllegalArgumentException("Nombre de archivo PAG sin cÃ³digo de tienda: " + fileName);
++        }
++        return fileName.substring(dotIndex + 1);
++    }
++
++    private static int extractFileId(String fileName) {
++        int dotIndex = fileName.lastIndexOf('.');
++        String withoutExt = dotIndex > 0 ? fileName.substring(0, dotIndex) : fileName;
++        // Nombre: PAG{8-digit-fileId} â dÃ­gitos despuÃ©s de "PAG"
++        String idStr = withoutExt.substring(FILE_PREFIX.length());
++        try {
++            return Integer.parseInt(idStr);
++        } catch (NumberFormatException e) {
++            throw new IllegalArgumentException("No se pudo extraer fileId del archivo PAG: " + fileName, e);
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsReversarRedencionFileAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsReversarRedencionFileAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsReversarRedencionFileAdapter.java
+@@ -0,0 +1,150 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.storage;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.GiftcardReversal;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.GiftcardReversalFilePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.ReversarRedencionProperties;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Component;
++
++import java.io.BufferedReader;
++import java.io.IOException;
++import java.util.Comparator;
++import java.util.List;
++
++/**
++ * Adaptador GCS para archivos de reversa de redenciÃ³n de giftcard (RED{seq}.{storeCode}).
++ *
++ * <p>Formato de lÃ­nea Ãºnica (97 caracteres):
++ * <pre>
++ *   [0:16]   PAN (nÃºmero de tarjeta, 16 dÃ­gitos)
++ *   [16:28]  Monto de transacciÃ³n (12 dÃ­gitos)
++ *   [28:34]  STAN (6 dÃ­gitos)
++ *   [34:40]  NÃºmero de autorizaciÃ³n (6 caracteres)
++ *   [40:48]  Terminal ID (8 caracteres)
++ *   [48:63]  Merchant ID (15 caracteres)
++ *   [63:97]  Datos raw para construcciÃ³n de RFPU (34 caracteres)
++ * </pre>
++ */
++@Component
++public class GcsReversarRedencionFileAdapter implements GiftcardReversalFilePort {
++
++    private static final Logger log = LoggerFactory.getLogger(GcsReversarRedencionFileAdapter.class);
++
++    private static final int LINE_LENGTH = 97;
++    private static final int PAN_START = 0;
++    private static final int PAN_END = 16;
++    private static final int AMOUNT_START = 16;
++    private static final int AMOUNT_END = 28;
++    private static final int STAN_START = 28;
++    private static final int STAN_END = 34;
++    private static final int AUTH_START = 34;
++    private static final int AUTH_END = 40;
++    private static final int TERMINAL_START = 40;
++    private static final int TERMINAL_END = 48;
++    private static final int MERCHANT_START = 48;
++    private static final int MERCHANT_END = 63;
++    private static final int RFPU_RAW_START = 63;
++    private static final int RFPU_RAW_END = 97;
++    private static final int RFPU_LENGTH = 54;
++
++    private static final String FILE_PREFIX = "RED";
++
++    private final GcsStorageHelper gcsHelper;
++    private final ReversarRedencionProperties properties;
++
++    public GcsReversarRedencionFileAdapter(GcsStorageHelper gcsHelper, ReversarRedencionProperties properties) {
++        this.gcsHelper = gcsHelper;
++        this.properties = properties;
++    }
++
++    @Override
++    public List<GcsObjectReference> listPendingFiles() {
++        GcsObjectReference inputFolder = new GcsObjectReference(properties.gcsBucket(), properties.gcsInPrefix());
++        String prefix = inputFolder.prefixWithSlash();
++
++        return gcsHelper.streamBlobs(inputFolder)
++                .filter(blob -> isRedFile(blob.getName(), prefix))
++                .sorted(Comparator.comparing(blob -> extractSequence(blob.getName(), prefix)))
++                .map(blob -> new GcsObjectReference(properties.gcsBucket(), blob.getName()))
++                .toList();
++    }
++
++    @Override
++    public GiftcardReversal parseFile(GcsObjectReference file) {
++        String fileName = file.fileName();
++        String storeCode = extractStoreCode(fileName);
++
++        try (BufferedReader reader = gcsHelper.openReader(file)) {
++            String line = reader.readLine();
++            if (line == null || line.isBlank()) {
++                throw new IllegalArgumentException("Archivo RED vacÃ­o: " + fileName);
++            }
++            if (line.length() != LINE_LENGTH) {
++                throw new IllegalArgumentException(
++                        "Longitud invÃ¡lida en archivo RED [esperado=%d, actual=%d, archivo=%s]"
++                                .formatted(LINE_LENGTH, line.length(), fileName));
++            }
++
++            String rawRfpu = line.substring(RFPU_RAW_START, RFPU_RAW_END);
++            String rfpu = buildRfpu(rawRfpu);
++
++            return new GiftcardReversal(
++                    storeCode,
++                    line.substring(PAN_START, PAN_END),
++                    line.substring(AMOUNT_START, AMOUNT_END),
++                    line.substring(STAN_START, STAN_END),
++                    line.substring(AUTH_START, AUTH_END),
++                    line.substring(TERMINAL_START, TERMINAL_END),
++                    line.substring(MERCHANT_START, MERCHANT_END),
++                    rfpu
++            );
++
++        } catch (IOException e) {
++            throw new IllegalArgumentException("Error leyendo archivo RED desde GCS: " + file.toUri(), e);
++        }
++    }
++
++    @Override
++    public GcsObjectReference moveToBackup(GcsObjectReference file) {
++        GcsObjectReference target = new GcsObjectReference(properties.gcsBucket(), properties.gcsBkpPrefix());
++        return gcsHelper.moveBlob(file, target);
++    }
++
++    @Override
++    public GcsObjectReference moveToError(GcsObjectReference file) {
++        GcsObjectReference target = new GcsObjectReference(properties.gcsBucket(), properties.gcsErrorPrefix());
++        return gcsHelper.moveBlob(file, target);
++    }
++
++    /**
++     * Construye el campo RFPU de 54 caracteres a partir de los 34 bytes raw del archivo RED.
++     */
++    private static String buildRfpu(String rawData) {
++        return rawData + " ".repeat(RFPU_LENGTH - rawData.length());
++    }
++
++    private static boolean isRedFile(String objectName, String prefix) {
++        if (!objectName.startsWith(prefix)) return false;
++        String relativeName = objectName.substring(prefix.length());
++        return !relativeName.contains("/") && !relativeName.isBlank()
++                && relativeName.toUpperCase().startsWith(FILE_PREFIX);
++    }
++
++    private static String extractSequence(String objectName, String prefix) {
++        String relativeName = objectName.substring(prefix.length());
++        if (relativeName.length() >= 11) {
++            return relativeName.substring(3, 11);
++        }
++        return relativeName;
++    }
++
++    private static String extractStoreCode(String fileName) {
++        int dotIndex = fileName.lastIndexOf('.');
++        if (dotIndex < 0 || dotIndex == fileName.length() - 1) {
++            throw new IllegalArgumentException("Nombre de archivo RED sin cÃ³digo de tienda: " + fileName);
++        }
++        return fileName.substring(dotIndex + 1);
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/DevsEcDataSourceConfig.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/DevsEcDataSourceConfig.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/DevsEcDataSourceConfig.java
+@@ -0,0 +1,17 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.context.annotation.Configuration;
++import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
++
++/**
++ * Activa los repositorios Spring Data JPA del datasource DEVS_EC.
++ * Cubre entidades del proceso de reversiÃ³n de pagos (DV_PCER).
++ */
++@Configuration
++@EnableJpaRepositories(
++        basePackages = "com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.devs.repository",
++        entityManagerFactoryRef = "devsEcEntityManagerFactory",
++        transactionManagerRef = "devsEcTransactionManager"
++)
++public class DevsEcDataSourceConfig {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/PaymentServerProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/PaymentServerProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/PaymentServerProperties.java
+@@ -0,0 +1,17 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.boot.context.properties.ConfigurationProperties;
++
++/**
++ * ParÃ¡metros de conexiÃ³n al gateway de pagos para los procesos de reversa
++ * (ReversarConsumo, ReversarRedencion, ReversarPago).
++ * Provienen de {@code activateGiftcard.server.*} en ArmsServerConf.properties.
++ */
++@ConfigurationProperties(prefix = "app.payment-server")
++public record PaymentServerProperties(
++        String ip,
++        int port,
++        int retries,
++        int timeoutMs,
++        int retrySleepMs
++) {}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/ReversarConsumoProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/ReversarConsumoProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/ReversarConsumoProperties.java
+@@ -0,0 +1,16 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.boot.context.properties.ConfigurationProperties;
++
++/**
++ * ConfiguraciÃ³n del proceso de reversiÃ³n de consumos de tarjeta (archivos CON*).
++ */
++@ConfigurationProperties(prefix = "app.reversar-consumo")
++public record ReversarConsumoProperties(
++        boolean enabled,
++        String gcsBucket,
++        String gcsInPrefix,
++        String gcsBkpPrefix,
++        String gcsErrorPrefix,
++        int socketRetryThreshold
++) {}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/ReversarPagoProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/ReversarPagoProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/ReversarPagoProperties.java
+@@ -0,0 +1,16 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.boot.context.properties.ConfigurationProperties;
++
++/**
++ * ConfiguraciÃ³n del proceso de reversiÃ³n de pagos de tarjeta (archivos PAG*).
++ */
++@ConfigurationProperties(prefix = "app.reversar-pago")
++public record ReversarPagoProperties(
++        boolean enabled,
++        String gcsBucket,
++        String gcsInPrefix,
++        String gcsBkpPrefix,
++        String gcsErrorPrefix,
++        int socketRetryThreshold
++) {}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/ReversarRedencionProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/ReversarRedencionProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/ReversarRedencionProperties.java
+@@ -0,0 +1,16 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.boot.context.properties.ConfigurationProperties;
++
++/**
++ * ConfiguraciÃ³n del proceso de reversiÃ³n de redenciones de giftcard (archivos RED*).
++ */
++@ConfigurationProperties(prefix = "app.reversar-redencion")
++public record ReversarRedencionProperties(
++        boolean enabled,
++        String gcsBucket,
++        String gcsInPrefix,
++        String gcsBkpPrefix,
++        String gcsErrorPrefix,
++        int socketRetryThreshold
++) {}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java
+@@ -18,7 +18,11 @@
+         SendCartaMotoProperties.class,
+         LegacySendCartaMotoProperties.class,
+         UpdateSecSubSecProperties.class,
+-        LegacyUpdateSecSubSecProperties.class
++        LegacyUpdateSecSubSecProperties.class,
++        PaymentServerProperties.class,
++        ReversarConsumoProperties.class,
++        ReversarRedencionProperties.class,
++        ReversarPagoProperties.class
+ })
+ public class SchedulingConfig {
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/Iso8583MessageBuilderService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/Iso8583MessageBuilderService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/Iso8583MessageBuilderService.java
+@@ -0,0 +1,167 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.Iso8583ReversalRequest;
++import org.springframework.stereotype.Service;
++
++import java.time.LocalDateTime;
++import java.time.format.DateTimeFormatter;
++
++/**
++ * Construye el hex string del mensaje ISO8583 de reversa de tarjeta.
++ * Replica fielmente la lÃ³gica legacy de createMsg() para reversas de consumo, redenciÃ³n y pago.
++ */
++@Service
++public class Iso8583MessageBuilderService {
++
++    private static final String HEADER = "0000000000";
++    private static final String MTI = "0400";
++    private static final DateTimeFormatter DATE_TIME_FMT = DateTimeFormatter.ofPattern("MMddHHmmss");
++
++    /**
++     * Construye el hex string completo del mensaje (sin prefijo de longitud).
++     *
++     * @param request Datos del mensaje a construir.
++     * @return Cadena hexadecimal del mensaje ISO8583, en mayÃºsculas.
++     */
++    public String buildHexMessage(Iso8583ReversalRequest request) {
++        char[] bitmap = buildBitmap(request);
++        String bitmapHex = bitmapToHex(bitmap);
++
++        String nowStr = LocalDateTime.now().format(DATE_TIME_FMT);
++        String localTime = nowStr.substring(4, 10);  // HHmmss
++        String localDate = nowStr.substring(0, 4);   // MMdd
++
++        StringBuilder mje = new StringBuilder(HEADER);
++        mje.append(MTI);
++        mje.append(bitmapHex);
++
++        // Campo 2 â PAN, BCD con prefijo de 2 dÃ­gitos decimales
++        mje.append(String.format("%02d", request.primaryAccountNumber().length()));
++        mje.append(request.primaryAccountNumber());
++
++        // Campo 3 â Processing Code, numÃ©rico fijo 6
++        mje.append(request.processingCode());
++
++        // Campo 4 â Transaction Amount, numÃ©rico fijo 12
++        mje.append(request.transactionAmount());
++
++        // Campo 11 â STAN, numÃ©rico fijo 6
++        mje.append(request.stan());
++
++        // Campo 12 â Local Transaction Time, numÃ©rico fijo 6 (HHmmss)
++        mje.append(localTime);
++
++        // Campo 13 â Local Transaction Date, numÃ©rico fijo 4 (MMdd)
++        mje.append(localDate);
++
++        // Campo 14 â Expiration Date (solo para consumo y redenciÃ³n)
++        if (request.includeExpirationDate()) {
++            mje.append("9912");
++        }
++
++        // Campo 22 â POS Entry Mode, numÃ©rico fijo 4
++        mje.append("0120");
++
++        // Campo 24 â NII, numÃ©rico fijo 4 (legacy usa 4 chars "0001")
++        mje.append("0001");
++
++        // Campo 25 â POS Condition Code, numÃ©rico fijo 2
++        mje.append("00");
++
++        // Campo 38 â Authorization Number, ANS fijo 6
++        mje.append(asciiToHex(request.authorizationNumber()));
++
++        // Campo 41 â Terminal ID, ANS fijo 8
++        mje.append(asciiToHex(request.terminalId()));
++
++        // Campo 42 â Merchant ID, ANS fijo 15
++        mje.append(asciiToHex(request.merchantId()));
++
++        // Campo 61 â Lot Number, ANS variable prefijo 4 dÃ­gitos
++        mje.append(buildAnsVariable("000001", 4));
++
++        // Campo 114 â Additional Data 3, ANS variable prefijo 4 dÃ­gitos
++        mje.append(buildAnsVariable("01", 4));
++
++        // Campo 116 â RFNU, ANS variable prefijo 4 dÃ­gitos
++        mje.append(buildAnsVariable("00010001", 4));
++
++        // Campo 122 â Cupones (condicional, solo consumo con lÃ­nea 2)
++        if (request.cuponesData() != null) {
++            mje.append(buildAnsVariable(request.cuponesData(), 4));
++        }
++
++        // Campo 124 â RFPU, ANS variable prefijo 4 dÃ­gitos, 54 caracteres
++        mje.append(buildAnsVariable(request.rfpu(), 4));
++
++        // Campo 125 â Puntos (condicional, solo consumo con lÃ­nea 3)
++        if (request.puntosData() != null) {
++            mje.append(buildAnsVariable(request.puntosData(), 4));
++        }
++
++        return mje.toString().toUpperCase();
++    }
++
++    // --- Helpers privados ---
++
++    private char[] buildBitmap(Iso8583ReversalRequest request) {
++        char[] bitmap = new char[128];
++        java.util.Arrays.fill(bitmap, '0');
++
++        bitmap[0] = '1';   // bit 1: bitmap secundario activo
++        bitmap[1] = '1';   // bit 2: PAN
++        bitmap[2] = '1';   // bit 3: processing code
++        bitmap[3] = '1';   // bit 4: amount
++        bitmap[10] = '1';  // bit 11: STAN
++        bitmap[11] = '1';  // bit 12: local time
++        bitmap[12] = '1';  // bit 13: local date
++        if (request.includeExpirationDate()) {
++            bitmap[13] = '1'; // bit 14: expiration date
++        }
++        bitmap[21] = '1';  // bit 22: POS entry mode
++        bitmap[23] = '1';  // bit 24: NII
++        bitmap[24] = '1';  // bit 25: POS condition code
++        bitmap[37] = '1';  // bit 38: authorization number
++        bitmap[40] = '1';  // bit 41: terminal ID
++        bitmap[41] = '1';  // bit 42: merchant ID
++        bitmap[60] = '1';  // bit 61: lot number
++        bitmap[113] = '1'; // bit 114: additional data 3
++        bitmap[115] = '1'; // bit 116: RFNU
++        if (request.cuponesData() != null) {
++            bitmap[121] = '1'; // bit 122: cupones
++        }
++        bitmap[123] = '1'; // bit 124: RFPU
++        if (request.puntosData() != null) {
++            bitmap[124] = '1'; // bit 125: puntos
++        }
++
++        return bitmap;
++    }
++
++    private String bitmapToHex(char[] bitmap) {
++        StringBuilder hex = new StringBuilder(32);
++        for (int i = 0; i < 128; i += 4) {
++            int nibble = 0;
++            for (int j = 0; j < 4; j++) {
++                if (bitmap[i + j] == '1') {
++                    nibble |= (8 >> j);
++                }
++            }
++            hex.append(Integer.toHexString(nibble).toUpperCase());
++        }
++        return hex.toString();
++    }
++
++    private String asciiToHex(String data) {
++        StringBuilder sb = new StringBuilder(data.length() * 2);
++        for (char c : data.toCharArray()) {
++            sb.append(String.format("%02X", (int) c));
++        }
++        return sb.toString();
++    }
++
++    private String buildAnsVariable(String data, int prefixLen) {
++        String lenStr = String.format("%0" + prefixLen + "d", data.length());
++        return lenStr + asciiToHex(data);
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/Iso8583MessageParserService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/Iso8583MessageParserService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/Iso8583MessageParserService.java
+@@ -0,0 +1,105 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.Iso8583ReversalResponse;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Service;
++
++import java.util.Optional;
++
++/**
++ * Parsea la respuesta ISO8583 del gateway de pagos y extrae el cÃ³digo de respuesta (campo 39).
++ */
++@Service
++public class Iso8583MessageParserService {
++
++    private static final Logger log = LoggerFactory.getLogger(Iso8583MessageParserService.class);
++
++    // PosiciÃ³n de inicio del bitmap primario en el hex string de respuesta (sin prefijo de longitud)
++    private static final int PRIMARY_BITMAP_OFFSET = 14;
++    private static final int PRIMARY_BITMAP_HEX_LEN = 16;
++    private static final int SECONDARY_BITMAP_HEX_LEN = 16;
++
++    /**
++     * Extrae el cÃ³digo de respuesta del campo 39 del mensaje de respuesta ISO8583.
++     *
++     * @param responseHex Cadena hex completa de la respuesta (sin prefijo de longitud).
++     * @return La respuesta parseada, o {@code Optional.empty()} si el campo 39 no estÃ¡ presente.
++     */
++    public Optional<Iso8583ReversalResponse> parse(String responseHex) {
++        String upperHex = responseHex.toUpperCase();
++        if (upperHex.length() < PRIMARY_BITMAP_OFFSET + PRIMARY_BITMAP_HEX_LEN) {
++            log.atWarn()
++                    .setMessage("Respuesta ISO8583 demasiado corta para parsear")
++                    .addKeyValue("responseHexLen", upperHex.length())
++                    .log();
++            return Optional.empty();
++        }
++
++        char[] bitmap = new char[128];
++        String primaryBitmapHex = upperHex.substring(PRIMARY_BITMAP_OFFSET,
++                PRIMARY_BITMAP_OFFSET + PRIMARY_BITMAP_HEX_LEN);
++        expandBitmapHex(primaryBitmapHex, bitmap, 0);
++
++        int pos = PRIMARY_BITMAP_OFFSET + PRIMARY_BITMAP_HEX_LEN;
++        if (bitmap[0] == '1') {
++            expandBitmapHex(upperHex.substring(pos, pos + SECONDARY_BITMAP_HEX_LEN), bitmap, 64);
++            pos += SECONDARY_BITMAP_HEX_LEN;
++        }
++
++        // Avanzar campo por campo hasta llegar al campo 39
++        if (bitmap[1] == '1') { // campo 2: PAN variable
++            int len = Integer.parseInt(upperHex.substring(pos, pos + 2));
++            if (len % 2 != 0) len++;
++            pos += 2 + len;
++        }
++        if (bitmap[2] == '1') pos += 6;    // campo 3: processing code
++        if (bitmap[3] == '1') pos += 12;   // campo 4: amount
++        if (bitmap[10] == '1') pos += 6;   // campo 11: STAN
++        if (bitmap[11] == '1') pos += 6;   // campo 12: local time
++        if (bitmap[12] == '1') pos += 4;   // campo 13: local date
++        if (bitmap[13] == '1') pos += 4;   // campo 14: expiration date
++        if (bitmap[21] == '1') pos += 4;   // campo 22: POS entry mode
++        if (bitmap[23] == '1') pos += 4;   // campo 24: NII (4 hex chars = 2 bytes)
++        if (bitmap[24] == '1') pos += 2;   // campo 25: POS condition code
++        if (bitmap[34] == '1') { // campo 35: track 2 variable
++            int len = Integer.parseInt(upperHex.substring(pos, pos + 2));
++            if (len % 2 != 0) len++;
++            pos += 2 + len;
++        }
++        if (bitmap[36] == '1') pos += 24;  // campo 37: RRN (12 chars ASCII = 24 hex)
++        if (bitmap[37] == '1') pos += 12;  // campo 38: auth number (6 chars ASCII = 12 hex)
++
++        // Campo 39 â Response Code, ANS fijo 2 caracteres
++        if (bitmap[38] == '1' && pos + 4 <= upperHex.length()) {
++            String rc = hexToAscii(upperHex.substring(pos, pos + 4));
++            log.atDebug()
++                    .setMessage("CÃ³digo de respuesta ISO8583 extraÃ­do")
++                    .addKeyValue("responseCode", rc)
++                    .log();
++            return Optional.of(Iso8583ReversalResponse.of(rc));
++        }
++
++        log.atWarn()
++                .setMessage("Campo 39 (Response Code) no encontrado en respuesta ISO8583")
++                .log();
++        return Optional.empty();
++    }
++
++    private static void expandBitmapHex(String hexBitmap, char[] target, int offset) {
++        for (int i = 0; i < hexBitmap.length(); i++) {
++            int nibble = Integer.parseInt(String.valueOf(hexBitmap.charAt(i)), 16);
++            for (int j = 0; j < 4; j++) {
++                target[offset + i * 4 + j] = ((nibble >> (3 - j)) & 1) == 1 ? '1' : '0';
++            }
++        }
++    }
++
++    private static String hexToAscii(String hex) {
++        StringBuilder sb = new StringBuilder();
++        for (int i = 0; i < hex.length(); i += 2) {
++            sb.append((char) Integer.parseInt(hex.substring(i, i + 2), 16));
++        }
++        return sb.toString();
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/ReversarConsumoService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/ReversarConsumoService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/ReversarConsumoService.java
+@@ -0,0 +1,155 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.ConsumptionReversal;
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.Iso8583ReversalRequest;
++import com.elrosado.cersuitecloudlocalcore.domain.model.Iso8583ReversalResponse;
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.ProcessConsumptionReversalUseCase;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.ConsumptionReversalFilePort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.PaymentGatewayPort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.ReversarConsumoProperties;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Service;
++
++import java.util.List;
++import java.util.Optional;
++import java.util.concurrent.ConcurrentHashMap;
++
++/**
++ * Orquesta la reversiÃ³n de consumos de tarjeta: lee archivos CON* de GCS, envÃ­a mensaje ISO8583
++ * al gateway de pagos y mueve el archivo a backup (respuesta recibida) o contabiliza el fallo
++ * de socket para eventual envÃ­o a error.
++ */
++@Service
++public class ReversarConsumoService implements ProcessConsumptionReversalUseCase {
++
++    private static final Logger log = LoggerFactory.getLogger(ReversarConsumoService.class);
++    private static final String PROCESSING_CODE = "284000";
++
++    private final ConsumptionReversalFilePort filePort;
++    private final PaymentGatewayPort gatewayPort;
++    private final ReversarConsumoProperties properties;
++    // Contador de fallos de socket por nombre de archivo (persiste entre ciclos del scheduler)
++    private final ConcurrentHashMap<String, Integer> socketFailureCount = new ConcurrentHashMap<>();
++
++    public ReversarConsumoService(
++            ConsumptionReversalFilePort filePort,
++            PaymentGatewayPort gatewayPort,
++            ReversarConsumoProperties properties) {
++        this.filePort = filePort;
++        this.gatewayPort = gatewayPort;
++        this.properties = properties;
++    }
++
++    @Override
++    public void processNextCycle() {
++        if (!properties.enabled()) {
++            log.atDebug().setMessage("ReversarConsumo deshabilitado; ciclo omitido").log();
++            return;
++        }
++
++        List<GcsObjectReference> files = filePort.listPendingFiles();
++        if (files.isEmpty()) {
++            log.atDebug().setMessage("No hay archivos CON pendientes de reversa").log();
++            return;
++        }
++
++        log.atInfo()
++                .setMessage("Iniciando ciclo de reversa de consumos")
++                .addKeyValue("archivosPendientes", files.size())
++                .log();
++
++        files.forEach(this::processFile);
++    }
++
++    private void processFile(GcsObjectReference file) {
++        String fileName = file.fileName();
++
++        ConsumptionReversal reversal;
++        try {
++            reversal = filePort.parseFile(file);
++        } catch (IllegalArgumentException e) {
++            log.atError()
++                    .setMessage("Archivo CON con formato invÃ¡lido â movido a error")
++                    .addKeyValue("archivo", fileName)
++                    .setCause(e)
++                    .log();
++            filePort.moveToError(file);
++            socketFailureCount.remove(fileName);
++            return;
++        }
++
++        Iso8583ReversalRequest request = buildRequest(reversal);
++        Optional<Iso8583ReversalResponse> response;
++        try {
++            response = gatewayPort.send(request);
++        } catch (Exception e) {
++            handleSocketFailure(file, fileName, e);
++            return;
++        }
++
++        if (response.isEmpty()) {
++            handleSocketFailure(file, fileName, null);
++            return;
++        }
++
++        // Respuesta recibida (cualquier RC) â mover a backup
++        socketFailureCount.remove(fileName);
++        filePort.moveToBackup(file);
++
++        Iso8583ReversalResponse resp = response.get();
++        log.atInfo()
++                .setMessage("Reversa de consumo procesada")
++                .addKeyValue("archivo", fileName)
++                .addKeyValue("responseCode", resp.responseCode())
++                .addKeyValue("afirmativo", resp.affirmative())
++                .log();
++    }
++
++    private void handleSocketFailure(GcsObjectReference file, String fileName, Exception cause) {
++        int failures = socketFailureCount.merge(fileName, 1, Integer::sum);
++        if (failures >= properties.socketRetryThreshold()) {
++            log.atError()
++                    .setMessage("Umbral de fallos de socket alcanzado â archivo CON movido a error")
++                    .addKeyValue("archivo", fileName)
++                    .addKeyValue("intentos", failures)
++                    .log();
++            filePort.moveToError(file);
++            socketFailureCount.remove(fileName);
++        } else {
++            if (cause != null) {
++                log.atWarn()
++                        .setMessage("Fallo de conexiÃ³n al gateway en reversa de consumo; se reintentarÃ¡")
++                        .addKeyValue("archivo", fileName)
++                        .addKeyValue("intentos", failures)
++                        .addKeyValue("umbral", properties.socketRetryThreshold())
++                        .setCause(cause)
++                        .log();
++            } else {
++                log.atWarn()
++                        .setMessage("Sin respuesta del gateway en reversa de consumo; se reintentarÃ¡")
++                        .addKeyValue("archivo", fileName)
++                        .addKeyValue("intentos", failures)
++                        .addKeyValue("umbral", properties.socketRetryThreshold())
++                        .log();
++            }
++        }
++    }
++
++    private Iso8583ReversalRequest buildRequest(ConsumptionReversal reversal) {
++        return new Iso8583ReversalRequest(
++                PROCESSING_CODE,
++                reversal.primaryAccountNumber(),
++                reversal.transactionAmount(),
++                reversal.stan(),
++                reversal.authorizationNumber(),
++                reversal.terminalId(),
++                reversal.merchantId(),
++                reversal.rfpu(),
++                true,
++                reversal.cuponesData(),
++                reversal.puntosData()
++        );
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/ReversarPagoService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/ReversarPagoService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/ReversarPagoService.java
+@@ -0,0 +1,243 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.Iso8583ReversalRequest;
++import com.elrosado.cersuitecloudlocalcore.domain.model.Iso8583ReversalResponse;
++import com.elrosado.cersuitecloudlocalcore.domain.model.PaymentReversal;
++import com.elrosado.cersuitecloudlocalcore.domain.model.PaymentReversalResult;
++import com.elrosado.cersuitecloudlocalcore.domain.model.ReversalStatus;
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.ProcessPaymentReversalUseCase;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.CardCreditStatusPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.PaymentGatewayPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.PaymentReversalFilePort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.PaymentReversalResultPort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.ReversarPagoProperties;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Service;
++
++import java.util.List;
++import java.util.Optional;
++import java.util.concurrent.ConcurrentHashMap;
++
++/**
++ * Orquesta la reversiÃ³n de pagos de tarjeta: lee archivos PAG* de GCS, envÃ­a mensaje ISO8583 por cada
++ * lÃ­nea, persiste el resultado en DV_PCER y actualiza STS_CRD cuando la reversa es aprobada.
++ */
++@Service
++public class ReversarPagoService implements ProcessPaymentReversalUseCase {
++
++    private static final Logger log = LoggerFactory.getLogger(ReversarPagoService.class);
++    private static final String PROCESSING_CODE = "284000";
++
++    private final PaymentReversalFilePort filePort;
++    private final PaymentGatewayPort gatewayPort;
++    private final PaymentReversalResultPort resultPort;
++    private final CardCreditStatusPort cardCreditStatusPort;
++    private final ReversarPagoProperties properties;
++    private final ConcurrentHashMap<String, Integer> socketFailureCount = new ConcurrentHashMap<>();
++
++    public ReversarPagoService(
++            PaymentReversalFilePort filePort,
++            PaymentGatewayPort gatewayPort,
++            PaymentReversalResultPort resultPort,
++            CardCreditStatusPort cardCreditStatusPort,
++            ReversarPagoProperties properties) {
++        this.filePort = filePort;
++        this.gatewayPort = gatewayPort;
++        this.resultPort = resultPort;
++        this.cardCreditStatusPort = cardCreditStatusPort;
++        this.properties = properties;
++    }
++
++    @Override
++    public void processNextCycle() {
++        if (!properties.enabled()) {
++            log.atDebug().setMessage("ReversarPago deshabilitado; ciclo omitido").log();
++            return;
++        }
++
++        List<GcsObjectReference> files = filePort.listPendingFiles();
++        if (files.isEmpty()) {
++            log.atDebug().setMessage("No hay archivos PAG pendientes de reversa").log();
++            return;
++        }
++
++        log.atInfo()
++                .setMessage("Iniciando ciclo de reversa de pagos")
++                .addKeyValue("archivosPendientes", files.size())
++                .log();
++
++        files.forEach(this::processFile);
++    }
++
++    private void processFile(GcsObjectReference file) {
++        String fileName = file.fileName();
++
++        List<PaymentReversal> lines;
++        try {
++            lines = filePort.parseAllLines(file);
++        } catch (IllegalArgumentException e) {
++            log.atError()
++                    .setMessage("Archivo PAG con formato invÃ¡lido â movido a error")
++                    .addKeyValue("archivo", fileName)
++                    .setCause(e)
++                    .log();
++            filePort.moveToError(file);
++            socketFailureCount.remove(fileName);
++            return;
++        }
++
++        boolean hasSocketFailure = false;
++        for (PaymentReversal reversal : lines) {
++            boolean socketFailed = processLine(reversal);
++            if (socketFailed) {
++                hasSocketFailure = true;
++                break;
++            }
++        }
++
++        if (hasSocketFailure) {
++            int failures = socketFailureCount.merge(fileName, 1, Integer::sum);
++            if (failures >= properties.socketRetryThreshold()) {
++                log.atError()
++                        .setMessage("Umbral de fallos de socket alcanzado â archivo PAG movido a error")
++                        .addKeyValue("archivo", fileName)
++                        .addKeyValue("intentos", failures)
++                        .log();
++                filePort.moveToError(file);
++                socketFailureCount.remove(fileName);
++            } else {
++                log.atWarn()
++                        .setMessage("Fallo de conexiÃ³n al gateway en reversa de pago; se reintentarÃ¡")
++                        .addKeyValue("archivo", fileName)
++                        .addKeyValue("intentos", failures)
++                        .addKeyValue("umbral", properties.socketRetryThreshold())
++                        .log();
++            }
++        } else {
++            socketFailureCount.remove(fileName);
++            filePort.moveToBackup(file);
++            log.atInfo()
++                    .setMessage("Archivo PAG procesado completamente")
++                    .addKeyValue("archivo", fileName)
++                    .addKeyValue("lineas", lines.size())
++                    .log();
++        }
++    }
++
++    /**
++     * Procesa una lÃ­nea del archivo PAG.
++     *
++     * @return {@code true} si hubo fallo de socket (sin respuesta del gateway).
++     */
++    private boolean processLine(PaymentReversal reversal) {
++        Iso8583ReversalRequest request = buildRequest(reversal);
++        Optional<Iso8583ReversalResponse> response;
++        try {
++            response = gatewayPort.send(request);
++        } catch (Exception e) {
++            log.atWarn()
++                    .setMessage("ExcepciÃ³n al enviar reversa de pago al gateway")
++                    .addKeyValue("fileId", reversal.fileId())
++                    .addKeyValue("seqNum", reversal.sequenceNumber())
++                    .setCause(e)
++                    .log();
++            return true;
++        }
++
++        if (response.isEmpty()) {
++            log.atWarn()
++                    .setMessage("Sin respuesta del gateway para reversa de pago")
++                    .addKeyValue("fileId", reversal.fileId())
++                    .addKeyValue("seqNum", reversal.sequenceNumber())
++                    .log();
++            saveResult(reversal, ReversalStatus.NO_RESPONSE, null);
++            return false;
++        }
++
++        Iso8583ReversalResponse resp = response.get();
++        if (resp.affirmative()) {
++            saveResult(reversal, ReversalStatus.APPROVED, resp.responseCode());
++            updateCardCreditStatus(reversal);
++        } else {
++            saveResult(reversal, ReversalStatus.REJECTED, resp.responseCode());
++        }
++
++        log.atInfo()
++                .setMessage("LÃ­nea de reversa de pago procesada")
++                .addKeyValue("fileId", reversal.fileId())
++                .addKeyValue("seqNum", reversal.sequenceNumber())
++                .addKeyValue("responseCode", resp.responseCode())
++                .addKeyValue("afirmativo", resp.affirmative())
++                .log();
++        return false;
++    }
++
++    private void saveResult(PaymentReversal reversal, ReversalStatus status, String responseCode) {
++        try {
++            resultPort.save(new PaymentReversalResult(
++                    reversal.fileId(),
++                    reversal.sequenceNumber(),
++                    status,
++                    responseCode
++            ));
++        } catch (Exception e) {
++            log.atError()
++                    .setMessage("Error al persistir resultado de reversa de pago en DV_PCER")
++                    .addKeyValue("fileId", reversal.fileId())
++                    .addKeyValue("seqNum", reversal.sequenceNumber())
++                    .addKeyValue("status", status)
++                    .setCause(e)
++                    .log();
++        }
++    }
++
++    private void updateCardCreditStatus(PaymentReversal reversal) {
++        try {
++            cardCreditStatusPort.findByInvoiceAndCard(
++                    reversal.invoiceNumber(),
++                    reversal.primaryAccountNumber(),
++                    reversal.amountValue()
++            ).ifPresentOrElse(
++                    ids -> {
++                        cardCreditStatusPort.markReversed(ids[0], ids[1]);
++                        log.atDebug()
++                                .setMessage("STS_CRD actualizado a '2' en CO_CRD_DT")
++                                .addKeyValue("idTrn", ids[0])
++                                .addKeyValue("sqNbr", ids[1])
++                                .log();
++                    },
++                    () -> log.atWarn()
++                            .setMessage("No se encontrÃ³ registro en CO_CRD_DT para actualizar STS_CRD")
++                            .addKeyValue("invoiceNumber", reversal.invoiceNumber())
++                            .addKeyValue("fileId", reversal.fileId())
++                            .addKeyValue("seqNum", reversal.sequenceNumber())
++                            .log()
++            );
++        } catch (Exception e) {
++            log.atError()
++                    .setMessage("Error al actualizar STS_CRD en CO_CRD_DT")
++                    .addKeyValue("fileId", reversal.fileId())
++                    .addKeyValue("seqNum", reversal.sequenceNumber())
++                    .setCause(e)
++                    .log();
++        }
++    }
++
++    private Iso8583ReversalRequest buildRequest(PaymentReversal reversal) {
++        return new Iso8583ReversalRequest(
++                PROCESSING_CODE,
++                reversal.primaryAccountNumber(),
++                reversal.transactionAmount(),
++                reversal.stan(),
++                reversal.authorizationNumber(),
++                reversal.terminalId(),
++                reversal.merchantId(),
++                reversal.rfpu(),
++                false,
++                null,
++                null
++        );
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/ReversarRedencionService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/ReversarRedencionService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/ReversarRedencionService.java
+@@ -0,0 +1,152 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.GiftcardReversal;
++import com.elrosado.cersuitecloudlocalcore.domain.model.Iso8583ReversalRequest;
++import com.elrosado.cersuitecloudlocalcore.domain.model.Iso8583ReversalResponse;
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.ProcessGiftcardReversalUseCase;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.GiftcardReversalFilePort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.PaymentGatewayPort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.ReversarRedencionProperties;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Service;
++
++import java.util.List;
++import java.util.Optional;
++import java.util.concurrent.ConcurrentHashMap;
++
++/**
++ * Orquesta la reversiÃ³n de redenciones de giftcard: lee archivos RED* de GCS, envÃ­a mensaje ISO8583
++ * y mueve el archivo a backup cuando se recibe respuesta, o contabiliza fallo de socket.
++ */
++@Service
++public class ReversarRedencionService implements ProcessGiftcardReversalUseCase {
++
++    private static final Logger log = LoggerFactory.getLogger(ReversarRedencionService.class);
++    private static final String PROCESSING_CODE = "944000";
++
++    private final GiftcardReversalFilePort filePort;
++    private final PaymentGatewayPort gatewayPort;
++    private final ReversarRedencionProperties properties;
++    private final ConcurrentHashMap<String, Integer> socketFailureCount = new ConcurrentHashMap<>();
++
++    public ReversarRedencionService(
++            GiftcardReversalFilePort filePort,
++            PaymentGatewayPort gatewayPort,
++            ReversarRedencionProperties properties) {
++        this.filePort = filePort;
++        this.gatewayPort = gatewayPort;
++        this.properties = properties;
++    }
++
++    @Override
++    public void processNextCycle() {
++        if (!properties.enabled()) {
++            log.atDebug().setMessage("ReversarRedencion deshabilitado; ciclo omitido").log();
++            return;
++        }
++
++        List<GcsObjectReference> files = filePort.listPendingFiles();
++        if (files.isEmpty()) {
++            log.atDebug().setMessage("No hay archivos RED pendientes de reversa").log();
++            return;
++        }
++
++        log.atInfo()
++                .setMessage("Iniciando ciclo de reversa de redenciones")
++                .addKeyValue("archivosPendientes", files.size())
++                .log();
++
++        files.forEach(this::processFile);
++    }
++
++    private void processFile(GcsObjectReference file) {
++        String fileName = file.fileName();
++
++        GiftcardReversal reversal;
++        try {
++            reversal = filePort.parseFile(file);
++        } catch (IllegalArgumentException e) {
++            log.atError()
++                    .setMessage("Archivo RED con formato invÃ¡lido â movido a error")
++                    .addKeyValue("archivo", fileName)
++                    .setCause(e)
++                    .log();
++            filePort.moveToError(file);
++            socketFailureCount.remove(fileName);
++            return;
++        }
++
++        Iso8583ReversalRequest request = buildRequest(reversal);
++        Optional<Iso8583ReversalResponse> response;
++        try {
++            response = gatewayPort.send(request);
++        } catch (Exception e) {
++            handleSocketFailure(file, fileName, e);
++            return;
++        }
++
++        if (response.isEmpty()) {
++            handleSocketFailure(file, fileName, null);
++            return;
++        }
++
++        socketFailureCount.remove(fileName);
++        filePort.moveToBackup(file);
++
++        Iso8583ReversalResponse resp = response.get();
++        log.atInfo()
++                .setMessage("Reversa de redenciÃ³n procesada")
++                .addKeyValue("archivo", fileName)
++                .addKeyValue("responseCode", resp.responseCode())
++                .addKeyValue("afirmativo", resp.affirmative())
++                .log();
++    }
++
++    private void handleSocketFailure(GcsObjectReference file, String fileName, Exception cause) {
++        int failures = socketFailureCount.merge(fileName, 1, Integer::sum);
++        if (failures >= properties.socketRetryThreshold()) {
++            log.atError()
++                    .setMessage("Umbral de fallos de socket alcanzado â archivo RED movido a error")
++                    .addKeyValue("archivo", fileName)
++                    .addKeyValue("intentos", failures)
++                    .log();
++            filePort.moveToError(file);
++            socketFailureCount.remove(fileName);
++        } else {
++            if (cause != null) {
++                log.atWarn()
++                        .setMessage("Fallo de conexiÃ³n al gateway en reversa de redenciÃ³n; se reintentarÃ¡")
++                        .addKeyValue("archivo", fileName)
++                        .addKeyValue("intentos", failures)
++                        .addKeyValue("umbral", properties.socketRetryThreshold())
++                        .setCause(cause)
++                        .log();
++            } else {
++                log.atWarn()
++                        .setMessage("Sin respuesta del gateway en reversa de redenciÃ³n; se reintentarÃ¡")
++                        .addKeyValue("archivo", fileName)
++                        .addKeyValue("intentos", failures)
++                        .addKeyValue("umbral", properties.socketRetryThreshold())
++                        .log();
++            }
++        }
++    }
++
++    private Iso8583ReversalRequest buildRequest(GiftcardReversal reversal) {
++        return new Iso8583ReversalRequest(
++                PROCESSING_CODE,
++                reversal.primaryAccountNumber(),
++                reversal.transactionAmount(),
++                reversal.stan(),
++                reversal.authorizationNumber(),
++                reversal.terminalId(),
++                reversal.merchantId(),
++                reversal.rfpu(),
++                true,
++                null,
++                null
++        );
++    }
++}
+
+
+--- Diff for /src/main/resources/application-dev.yml ---
+--- a//src/main/resources/application-dev.yml
++++ b//src/main/resources/application-dev.yml
+@@ -54,6 +54,12 @@
+       password: ${CVMT_DB_PASSWORD}
+       entity-packages:
+         - com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.cvmt.entity
++    devs-ec:
++      url: ${SPRING_DATASOURCE_DEVS_URL}
++      username: ${SPRING_DATASOURCE_USERNAME}
++      password: ${SPRING_DATASOURCE_PASSWORD}
++      entity-packages:
++        - com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.devs.entity
+ 
+ sendCartaMoto:
+   username: ${SFTP_CARTA_MOTO_USERNAME}
+@@ -83,3 +89,30 @@
+     enabled: true
+     polling-interval-ms: 30000
+     batch-size: 10
++  payment-server:
++    ip: ${PAYMENT_SERVER_IP:10.22.14.201}
++    port: ${PAYMENT_SERVER_PORT:4001}
++    retries: ${PAYMENT_SERVER_RETRIES:3}
++    timeout-ms: ${PAYMENT_SERVER_TIMEOUT_MS:120000}
++    retry-sleep-ms: ${PAYMENT_SERVER_RETRY_SLEEP_MS:600}
++  reversar-consumo:
++    enabled: ${REVERSAR_CONSUMO_ENABLED:true}
++    gcs-bucket: ${GCS_BUCKET:gcs-cer-suite-core-files}
++    gcs-in-prefix: ${REVERSAR_CONSUMO_GCS_IN:EYES/RVSCER/IN}
++    gcs-bkp-prefix: ${REVERSAR_CONSUMO_GCS_BKP:EYES/RVSCER/BKP}
++    gcs-error-prefix: ${REVERSAR_CONSUMO_GCS_ERROR:EYES/RVSCER/ERROR}
++    socket-retry-threshold: ${REVERSAR_CONSUMO_SOCKET_RETRIES:3}
++  reversar-redencion:
++    enabled: ${REVERSAR_REDENCION_ENABLED:true}
++    gcs-bucket: ${GCS_BUCKET:gcs-cer-suite-core-files}
++    gcs-in-prefix: ${REVERSAR_REDENCION_GCS_IN:EYES/RVSRED/IN}
++    gcs-bkp-prefix: ${REVERSAR_REDENCION_GCS_BKP:EYES/RVSRED/BKP}
++    gcs-error-prefix: ${REVERSAR_REDENCION_GCS_ERROR:EYES/RVSRED/ERROR}
++    socket-retry-threshold: ${REVERSAR_REDENCION_SOCKET_RETRIES:3}
++  reversar-pago:
++    enabled: ${REVERSAR_PAGO_ENABLED:true}
++    gcs-bucket: ${GCS_BUCKET:gcs-cer-suite-core-files}
++    gcs-in-prefix: ${REVERSAR_PAGO_GCS_IN:EYES/PAGCE/IN}
++    gcs-bkp-prefix: ${REVERSAR_PAGO_GCS_BKP:EYES/PAGCE/BKP}
++    gcs-error-prefix: ${REVERSAR_PAGO_GCS_ERROR:EYES/PAGCE/ERROR}
++    socket-retry-threshold: ${REVERSAR_PAGO_SOCKET_RETRIES:3}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/ReversarConsumoSchedulerAdapterTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/ReversarConsumoSchedulerAdapterTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/ReversarConsumoSchedulerAdapterTest.java
+@@ -0,0 +1,37 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.scheduler;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.ProcessConsumptionReversalUseCase;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.InjectMocks;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import static org.mockito.Mockito.doThrow;
++import static org.mockito.Mockito.verify;
++
++@ExtendWith(MockitoExtension.class)
++class ReversarConsumoSchedulerAdapterTest {
++
++    @Mock
++    ProcessConsumptionReversalUseCase useCase;
++
++    @InjectMocks
++    ReversarConsumoSchedulerAdapter scheduler;
++
++    @Test
++    void poll_invocaUseCase() {
++        scheduler.poll();
++
++        verify(useCase).processNextCycle();
++    }
++
++    @Test
++    void poll_errorUseCase_noPropagaExcepcion() {
++        doThrow(new RuntimeException("GCS error")).when(useCase).processNextCycle();
++
++        scheduler.poll();
++
++        verify(useCase).processNextCycle();
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/ReversarPagoSchedulerAdapterTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/ReversarPagoSchedulerAdapterTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/ReversarPagoSchedulerAdapterTest.java
+@@ -0,0 +1,37 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.scheduler;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.ProcessPaymentReversalUseCase;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.InjectMocks;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import static org.mockito.Mockito.doThrow;
++import static org.mockito.Mockito.verify;
++
++@ExtendWith(MockitoExtension.class)
++class ReversarPagoSchedulerAdapterTest {
++
++    @Mock
++    ProcessPaymentReversalUseCase useCase;
++
++    @InjectMocks
++    ReversarPagoSchedulerAdapter scheduler;
++
++    @Test
++    void poll_invocaUseCase() {
++        scheduler.poll();
++
++        verify(useCase).processNextCycle();
++    }
++
++    @Test
++    void poll_errorUseCase_noPropagaExcepcion() {
++        doThrow(new RuntimeException("gateway down")).when(useCase).processNextCycle();
++
++        scheduler.poll();
++
++        verify(useCase).processNextCycle();
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/ReversarRedencionSchedulerAdapterTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/ReversarRedencionSchedulerAdapterTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/ReversarRedencionSchedulerAdapterTest.java
+@@ -0,0 +1,37 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.scheduler;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.ProcessGiftcardReversalUseCase;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.InjectMocks;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import static org.mockito.Mockito.doThrow;
++import static org.mockito.Mockito.verify;
++
++@ExtendWith(MockitoExtension.class)
++class ReversarRedencionSchedulerAdapterTest {
++
++    @Mock
++    ProcessGiftcardReversalUseCase useCase;
++
++    @InjectMocks
++    ReversarRedencionSchedulerAdapter scheduler;
++
++    @Test
++    void poll_invocaUseCase() {
++        scheduler.poll();
++
++        verify(useCase).processNextCycle();
++    }
++
++    @Test
++    void poll_errorUseCase_noPropagaExcepcion() {
++        doThrow(new RuntimeException("socket error")).when(useCase).processNextCycle();
++
++        scheduler.poll();
++
++        verify(useCase).processNextCycle();
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/Iso8583MessageBuilderServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/Iso8583MessageBuilderServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/Iso8583MessageBuilderServiceTest.java
+@@ -0,0 +1,120 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.Iso8583ReversalRequest;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++class Iso8583MessageBuilderServiceTest {
++
++    Iso8583MessageBuilderService service;
++
++    @BeforeEach
++    void setUp() {
++        service = new Iso8583MessageBuilderService();
++    }
++
++    @Test
++    void buildHexMessage_conExpiration_contieneHeader() {
++        Iso8583ReversalRequest request = buildRequest(true, null, null);
++
++        String hex = service.buildHexMessage(request);
++
++        // Los primeros 10 chars del hex son el HEADER "0000000000"
++        assertThat(hex).startsWith("0000000000");
++    }
++
++    @Test
++    void buildHexMessage_conExpiration_contieneDataMin() {
++        Iso8583ReversalRequest request = buildRequest(true, null, null);
++
++        String hex = service.buildHexMessage(request);
++
++        // MTI "0400" sigue al HEADER
++        assertThat(hex.substring(10, 14)).isEqualTo("0400");
++    }
++
++    @Test
++    void buildHexMessage_conExpiration_msjNoVacio() {
++        Iso8583ReversalRequest request = buildRequest(true, null, null);
++
++        String hex = service.buildHexMessage(request);
++
++        assertThat(hex).isNotBlank();
++        assertThat(hex.length()).isGreaterThan(100);
++    }
++
++    @Test
++    void buildHexMessage_sinExpiracion_msjMasCorto() {
++        Iso8583ReversalRequest conExp = buildRequest(true, null, null);
++        Iso8583ReversalRequest sinExp = buildRequest(false, null, null);
++
++        String hexConExp = service.buildHexMessage(conExp);
++        String hexSinExp = service.buildHexMessage(sinExp);
++
++        // Sin campo 14 el mensaje debe ser 4 chars menos en hex (2 bytes = "9912")
++        assertThat(hexSinExp.length()).isLessThan(hexConExp.length());
++    }
++
++    @Test
++    void buildHexMessage_conCupones_msjMasLargo() {
++        Iso8583ReversalRequest sinCup = buildRequest(true, null, null);
++        Iso8583ReversalRequest conCup = buildRequest(true, "01DATOSCUPONES", null);
++
++        String hexSin = service.buildHexMessage(sinCup);
++        String hexCon = service.buildHexMessage(conCup);
++
++        assertThat(hexCon.length()).isGreaterThan(hexSin.length());
++    }
++
++    @Test
++    void buildHexMessage_conPuntos_msjMasLargo() {
++        Iso8583ReversalRequest sinPt = buildRequest(true, null, null);
++        Iso8583ReversalRequest conPt = buildRequest(true, null, "01DATOSP");
++
++        String hexSin = service.buildHexMessage(sinPt);
++        String hexCon = service.buildHexMessage(conPt);
++
++        assertThat(hexCon.length()).isGreaterThan(hexSin.length());
++    }
++
++    @Test
++    void buildHexMessage_resultado_enMayusculas() {
++        Iso8583ReversalRequest request = buildRequest(true, null, null);
++
++        String hex = service.buildHexMessage(request);
++
++        assertThat(hex).isEqualTo(hex.toUpperCase());
++    }
++
++    @Test
++    void buildHexMessage_bitmapPrimario_tiene32chars() {
++        Iso8583ReversalRequest request = buildRequest(true, null, null);
++
++        String hex = service.buildHexMessage(request);
++        // Bitmap primario empieza en posiciÃ³n 14 (despuÃ©s de HEADER 10 + MTI 4)
++        String bitmapHex = hex.substring(14, 46);
++
++        assertThat(bitmapHex).hasSize(32);
++        // Todos los chars son hexadecimales vÃ¡lidos
++        assertThat(bitmapHex).matches("[0-9A-F]+");
++    }
++
++    private static Iso8583ReversalRequest buildRequest(
++            boolean includeExpiry, String cupones, String puntos) {
++        return new Iso8583ReversalRequest(
++                "284000",
++                "4111111111111111",
++                "000000001234",
++                "123456",
++                "AUTH01",
++                "TERM0001",
++                "MERCHANT000000 ",
++                "123456789012345678901234567890123456789012345678901234",
++                includeExpiry,
++                cupones,
++                puntos
++        );
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/ReversarConsumoServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/ReversarConsumoServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/ReversarConsumoServiceTest.java
+@@ -0,0 +1,164 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.ConsumptionReversal;
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.Iso8583ReversalResponse;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.ConsumptionReversalFilePort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.PaymentGatewayPort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.ReversarConsumoProperties;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.util.List;
++import java.util.Optional;
++
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.Mockito.doThrow;
++import static org.mockito.Mockito.lenient;
++import static org.mockito.Mockito.never;
++import static org.mockito.Mockito.times;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.verifyNoInteractions;
++import static org.mockito.Mockito.when;
++
++@ExtendWith(MockitoExtension.class)
++class ReversarConsumoServiceTest {
++
++    @Mock ConsumptionReversalFilePort filePort;
++    @Mock PaymentGatewayPort gatewayPort;
++
++    private static final ReversarConsumoProperties PROPS_ENABLED =
++            new ReversarConsumoProperties(true, "bucket", "IN", "BKP", "ERROR", 3);
++    private static final ReversarConsumoProperties PROPS_DISABLED =
++            new ReversarConsumoProperties(false, "bucket", "IN", "BKP", "ERROR", 3);
++
++    private static final GcsObjectReference FILE_REF =
++            new GcsObjectReference("bucket", "IN/CON00000001.001");
++
++    private static final ConsumptionReversal REVERSAL = new ConsumptionReversal(
++            "001", "4111111111111111", "000000001200",
++            "123456", "AUTH01", "TERM0001", "MERCHANT000000 ",
++            "123456789012345678901234567890123456789012345678901234",
++            null, null
++    );
++
++    ReversarConsumoService service;
++
++    @BeforeEach
++    void setUp() {
++        service = new ReversarConsumoService(filePort, gatewayPort, PROPS_ENABLED);
++    }
++
++    @Test
++    void processNextCycle_disabled_sinInteraccion() {
++        ReversarConsumoService disabled = new ReversarConsumoService(filePort, gatewayPort, PROPS_DISABLED);
++
++        disabled.processNextCycle();
++
++        verifyNoInteractions(filePort, gatewayPort);
++    }
++
++    @Test
++    void processNextCycle_sinArchivos_sinInteraccionGateway() {
++        when(filePort.listPendingFiles()).thenReturn(List.of());
++
++        service.processNextCycle();
++
++        verify(filePort).listPendingFiles();
++        verifyNoInteractions(gatewayPort);
++    }
++
++    @Test
++    void processNextCycle_parseError_mueveAError() {
++        when(filePort.listPendingFiles()).thenReturn(List.of(FILE_REF));
++        when(filePort.parseFile(FILE_REF)).thenThrow(new IllegalArgumentException("bad format"));
++
++        service.processNextCycle();
++
++        verify(filePort).moveToError(FILE_REF);
++        verify(filePort, never()).moveToBackup(any());
++        verifyNoInteractions(gatewayPort);
++    }
++
++    @Test
++    void processNextCycle_respuestaAfirmativa_mueveABackup() {
++        when(filePort.listPendingFiles()).thenReturn(List.of(FILE_REF));
++        when(filePort.parseFile(FILE_REF)).thenReturn(REVERSAL);
++        when(gatewayPort.send(any())).thenReturn(Optional.of(Iso8583ReversalResponse.of("00")));
++
++        service.processNextCycle();
++
++        verify(filePort).moveToBackup(FILE_REF);
++        verify(filePort, never()).moveToError(any());
++    }
++
++    @Test
++    void processNextCycle_respuestaNoAfirmativa_mueveABackup() {
++        when(filePort.listPendingFiles()).thenReturn(List.of(FILE_REF));
++        when(filePort.parseFile(FILE_REF)).thenReturn(REVERSAL);
++        when(gatewayPort.send(any())).thenReturn(Optional.of(Iso8583ReversalResponse.of("51")));
++
++        service.processNextCycle();
++
++        // Cualquier respuesta del gateway mueve a backup para CON
++        verify(filePort).moveToBackup(FILE_REF);
++        verify(filePort, never()).moveToError(any());
++    }
++
++    @Test
++    void processNextCycle_falloSocket_bajoUmbral_noMueve() {
++        when(filePort.listPendingFiles()).thenReturn(List.of(FILE_REF));
++        when(filePort.parseFile(FILE_REF)).thenReturn(REVERSAL);
++        when(gatewayPort.send(any())).thenReturn(Optional.empty());
++
++        service.processNextCycle();
++
++        verify(filePort, never()).moveToBackup(any());
++        verify(filePort, never()).moveToError(any());
++    }
++
++    @Test
++    void processNextCycle_falloSocketAlcanzaUmbral_mueveAError() {
++        when(filePort.listPendingFiles()).thenReturn(List.of(FILE_REF));
++        when(filePort.parseFile(FILE_REF)).thenReturn(REVERSAL);
++        when(gatewayPort.send(any())).thenReturn(Optional.empty());
++
++        // Threshold = 3: el tercer ciclo fallido mueve a error
++        service.processNextCycle();
++        service.processNextCycle();
++        service.processNextCycle();
++
++        verify(filePort).moveToError(FILE_REF);
++        verify(filePort, never()).moveToBackup(any());
++    }
++
++    @Test
++    void processNextCycle_respuestaExitosaDespuesDeFallos_mueveABackupYLimpiaCont() {
++        when(filePort.listPendingFiles()).thenReturn(List.of(FILE_REF));
++        when(filePort.parseFile(FILE_REF)).thenReturn(REVERSAL);
++        when(gatewayPort.send(any()))
++                .thenReturn(Optional.empty())
++                .thenReturn(Optional.of(Iso8583ReversalResponse.of("00")));
++
++        service.processNextCycle(); // 1 fallo
++        service.processNextCycle(); // respuesta OK
++
++        verify(filePort).moveToBackup(FILE_REF);
++        verify(filePort, never()).moveToError(any());
++    }
++
++    @Test
++    void processNextCycle_excepcionSocket_contabilizaFallo() {
++        when(filePort.listPendingFiles()).thenReturn(List.of(FILE_REF));
++        when(filePort.parseFile(FILE_REF)).thenReturn(REVERSAL);
++        when(gatewayPort.send(any())).thenThrow(new RuntimeException("connection refused"));
++
++        service.processNextCycle();
++
++        verify(filePort, never()).moveToBackup(any());
++        verify(filePort, never()).moveToError(any());
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/ReversarPagoServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/ReversarPagoServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/ReversarPagoServiceTest.java
+@@ -0,0 +1,202 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.Iso8583ReversalResponse;
++import com.elrosado.cersuitecloudlocalcore.domain.model.PaymentReversal;
++import com.elrosado.cersuitecloudlocalcore.domain.model.PaymentReversalResult;
++import com.elrosado.cersuitecloudlocalcore.domain.model.ReversalStatus;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.CardCreditStatusPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.PaymentGatewayPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.PaymentReversalFilePort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.PaymentReversalResultPort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.ReversarPagoProperties;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.ArgumentCaptor;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.math.BigDecimal;
++import java.util.List;
++import java.util.Optional;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.ArgumentMatchers.anyInt;
++import static org.mockito.ArgumentMatchers.anyString;
++import static org.mockito.Mockito.never;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.verifyNoInteractions;
++import static org.mockito.Mockito.when;
++
++@ExtendWith(MockitoExtension.class)
++class ReversarPagoServiceTest {
++
++    @Mock PaymentReversalFilePort filePort;
++    @Mock PaymentGatewayPort gatewayPort;
++    @Mock PaymentReversalResultPort resultPort;
++    @Mock CardCreditStatusPort cardCreditStatusPort;
++
++    private static final ReversarPagoProperties PROPS_ENABLED =
++            new ReversarPagoProperties(true, "bucket", "IN", "BKP", "ERROR", 3);
++    private static final ReversarPagoProperties PROPS_DISABLED =
++            new ReversarPagoProperties(false, "bucket", "IN", "BKP", "ERROR", 3);
++
++    private static final GcsObjectReference FILE_REF =
++            new GcsObjectReference("bucket", "IN/PAG00000001.001");
++
++    private static final PaymentReversal REVERSAL = new PaymentReversal(
++            1, 1, "001", "4111111111111111", "000000001200",
++            new BigDecimal("12.00"), "123456", "AUTH01", "TERM0001",
++            "MERCHANT000000 ",
++            "123456789012345678901234567890123456789012345678901234",
++            "FACTURA-000001 "
++    );
++
++    ReversarPagoService service;
++
++    @BeforeEach
++    void setUp() {
++        service = new ReversarPagoService(filePort, gatewayPort, resultPort, cardCreditStatusPort, PROPS_ENABLED);
++    }
++
++    @Test
++    void processNextCycle_disabled_sinInteraccion() {
++        ReversarPagoService disabled = new ReversarPagoService(
++                filePort, gatewayPort, resultPort, cardCreditStatusPort, PROPS_DISABLED);
++
++        disabled.processNextCycle();
++
++        verifyNoInteractions(filePort, gatewayPort, resultPort, cardCreditStatusPort);
++    }
++
++    @Test
++    void processNextCycle_sinArchivos_sinInteraccionGateway() {
++        when(filePort.listPendingFiles()).thenReturn(List.of());
++
++        service.processNextCycle();
++
++        verifyNoInteractions(gatewayPort);
++    }
++
++    @Test
++    void processNextCycle_parseError_mueveAError() {
++        when(filePort.listPendingFiles()).thenReturn(List.of(FILE_REF));
++        when(filePort.parseAllLines(FILE_REF)).thenThrow(new IllegalArgumentException("bad format"));
++
++        service.processNextCycle();
++
++        verify(filePort).moveToError(FILE_REF);
++        verify(filePort, never()).moveToBackup(any());
++    }
++
++    @Test
++    void processNextCycle_lineaAprobada_persisteAprobado() {
++        when(filePort.listPendingFiles()).thenReturn(List.of(FILE_REF));
++        when(filePort.parseAllLines(FILE_REF)).thenReturn(List.of(REVERSAL));
++        when(gatewayPort.send(any())).thenReturn(Optional.of(Iso8583ReversalResponse.of("00")));
++        when(cardCreditStatusPort.findByInvoiceAndCard(anyString(), anyString(), any()))
++                .thenReturn(Optional.of(new int[]{100, 1}));
++
++        service.processNextCycle();
++
++        ArgumentCaptor<PaymentReversalResult> captor = ArgumentCaptor.forClass(PaymentReversalResult.class);
++        verify(resultPort).save(captor.capture());
++        assertThat(captor.getValue().status()).isEqualTo(ReversalStatus.APPROVED);
++        assertThat(captor.getValue().responseCode()).isEqualTo("00");
++        verify(filePort).moveToBackup(FILE_REF);
++    }
++
++    @Test
++    void processNextCycle_lineaAprobada_actualizaStsCard() {
++        when(filePort.listPendingFiles()).thenReturn(List.of(FILE_REF));
++        when(filePort.parseAllLines(FILE_REF)).thenReturn(List.of(REVERSAL));
++        when(gatewayPort.send(any())).thenReturn(Optional.of(Iso8583ReversalResponse.of("00")));
++        when(cardCreditStatusPort.findByInvoiceAndCard(anyString(), anyString(), any()))
++                .thenReturn(Optional.of(new int[]{200, 3}));
++
++        service.processNextCycle();
++
++        verify(cardCreditStatusPort).markReversed(200, 3);
++    }
++
++    @Test
++    void processNextCycle_lineaRechazada_persisteRechazado() {
++        when(filePort.listPendingFiles()).thenReturn(List.of(FILE_REF));
++        when(filePort.parseAllLines(FILE_REF)).thenReturn(List.of(REVERSAL));
++        when(gatewayPort.send(any())).thenReturn(Optional.of(Iso8583ReversalResponse.of("05")));
++
++        service.processNextCycle();
++
++        ArgumentCaptor<PaymentReversalResult> captor = ArgumentCaptor.forClass(PaymentReversalResult.class);
++        verify(resultPort).save(captor.capture());
++        assertThat(captor.getValue().status()).isEqualTo(ReversalStatus.REJECTED);
++        verify(cardCreditStatusPort, never()).markReversed(anyInt(), anyInt());
++        verify(filePort).moveToBackup(FILE_REF);
++    }
++
++    @Test
++    void processNextCycle_sinRespuesta_persisteSinRespuestaYMueveABackup() {
++        when(filePort.listPendingFiles()).thenReturn(List.of(FILE_REF));
++        when(filePort.parseAllLines(FILE_REF)).thenReturn(List.of(REVERSAL));
++        when(gatewayPort.send(any())).thenReturn(Optional.empty());
++
++        service.processNextCycle();
++
++        // Para PAG, Optional.empty() = NO_RESPONSE persistido; el archivo se mueve a backup
++        ArgumentCaptor<PaymentReversalResult> captor = ArgumentCaptor.forClass(PaymentReversalResult.class);
++        verify(resultPort).save(captor.capture());
++        assertThat(captor.getValue().status()).isEqualTo(ReversalStatus.NO_RESPONSE);
++        verify(filePort).moveToBackup(FILE_REF);
++        verify(filePort, never()).moveToError(any());
++    }
++
++    @Test
++    void processNextCycle_falloSocketPuro_contabilizaYNoMueve() {
++        when(filePort.listPendingFiles()).thenReturn(List.of(FILE_REF));
++        when(filePort.parseAllLines(FILE_REF)).thenReturn(List.of(REVERSAL));
++        when(gatewayPort.send(any())).thenThrow(new RuntimeException("connection refused"));
++
++        service.processNextCycle();
++
++        verify(filePort, never()).moveToBackup(any());
++        verify(filePort, never()).moveToError(any());
++    }
++
++    @Test
++    void processNextCycle_falloSocketAlcanzaUmbral_mueveAError() {
++        when(filePort.listPendingFiles()).thenReturn(List.of(FILE_REF));
++        when(filePort.parseAllLines(FILE_REF)).thenReturn(List.of(REVERSAL));
++        when(gatewayPort.send(any())).thenThrow(new RuntimeException("connection refused"));
++
++        service.processNextCycle();
++        service.processNextCycle();
++        service.processNextCycle();
++
++        verify(filePort).moveToError(FILE_REF);
++        verify(filePort, never()).moveToBackup(any());
++    }
++
++    @Test
++    void processNextCycle_multiLinea_procesaTodasLasLineas() {
++        PaymentReversal line2 = new PaymentReversal(
++                1, 2, "001", "5500000000000004", "000000002500",
++                new BigDecimal("25.00"), "654321", "AUTH02", "TERM0001",
++                "MERCHANT000000 ",
++                "RFPU000000000000000000000000000000000000000000000000  ",
++                "FACTURA-000002 "
++        );
++        when(filePort.listPendingFiles()).thenReturn(List.of(FILE_REF));
++        when(filePort.parseAllLines(FILE_REF)).thenReturn(List.of(REVERSAL, line2));
++        when(gatewayPort.send(any())).thenReturn(Optional.of(Iso8583ReversalResponse.of("00")));
++        when(cardCreditStatusPort.findByInvoiceAndCard(anyString(), anyString(), any()))
++                .thenReturn(Optional.empty());
++
++        service.processNextCycle();
++
++        // Se deben guardar 2 resultados
++        verify(resultPort, org.mockito.Mockito.times(2)).save(any());
++        verify(filePort).moveToBackup(FILE_REF);
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/ReversarRedencionServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/ReversarRedencionServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/ReversarRedencionServiceTest.java
+@@ -0,0 +1,129 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.GiftcardReversal;
++import com.elrosado.cersuitecloudlocalcore.domain.model.Iso8583ReversalResponse;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.GiftcardReversalFilePort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.PaymentGatewayPort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.ReversarRedencionProperties;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.util.List;
++import java.util.Optional;
++
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.Mockito.never;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.verifyNoInteractions;
++import static org.mockito.Mockito.when;
++
++@ExtendWith(MockitoExtension.class)
++class ReversarRedencionServiceTest {
++
++    @Mock GiftcardReversalFilePort filePort;
++    @Mock PaymentGatewayPort gatewayPort;
++
++    private static final ReversarRedencionProperties PROPS_ENABLED =
++            new ReversarRedencionProperties(true, "bucket", "IN", "BKP", "ERROR", 3);
++    private static final ReversarRedencionProperties PROPS_DISABLED =
++            new ReversarRedencionProperties(false, "bucket", "IN", "BKP", "ERROR", 3);
++
++    private static final GcsObjectReference FILE_REF =
++            new GcsObjectReference("bucket", "IN/RED00000001.001");
++
++    private static final GiftcardReversal REVERSAL = new GiftcardReversal(
++            "001", "4111111111111111", "000000001200",
++            "123456", "AUTH01", "TERM0001", "MERCHANT000000 ",
++            "123456789012345678901234567890123456789012345678901234"
++    );
++
++    ReversarRedencionService service;
++
++    @BeforeEach
++    void setUp() {
++        service = new ReversarRedencionService(filePort, gatewayPort, PROPS_ENABLED);
++    }
++
++    @Test
++    void processNextCycle_disabled_sinInteraccion() {
++        ReversarRedencionService disabled = new ReversarRedencionService(filePort, gatewayPort, PROPS_DISABLED);
++
++        disabled.processNextCycle();
++
++        verifyNoInteractions(filePort, gatewayPort);
++    }
++
++    @Test
++    void processNextCycle_sinArchivos_sinInteraccionGateway() {
++        when(filePort.listPendingFiles()).thenReturn(List.of());
++
++        service.processNextCycle();
++
++        verifyNoInteractions(gatewayPort);
++    }
++
++    @Test
++    void processNextCycle_parseError_mueveAError() {
++        when(filePort.listPendingFiles()).thenReturn(List.of(FILE_REF));
++        when(filePort.parseFile(FILE_REF)).thenThrow(new IllegalArgumentException("bad format"));
++
++        service.processNextCycle();
++
++        verify(filePort).moveToError(FILE_REF);
++        verify(filePort, never()).moveToBackup(any());
++        verifyNoInteractions(gatewayPort);
++    }
++
++    @Test
++    void processNextCycle_respuestaGateway_mueveABackup() {
++        when(filePort.listPendingFiles()).thenReturn(List.of(FILE_REF));
++        when(filePort.parseFile(FILE_REF)).thenReturn(REVERSAL);
++        when(gatewayPort.send(any())).thenReturn(Optional.of(Iso8583ReversalResponse.of("00")));
++
++        service.processNextCycle();
++
++        verify(filePort).moveToBackup(FILE_REF);
++        verify(filePort, never()).moveToError(any());
++    }
++
++    @Test
++    void processNextCycle_respuestaRechazada_tambienMueveABackup() {
++        when(filePort.listPendingFiles()).thenReturn(List.of(FILE_REF));
++        when(filePort.parseFile(FILE_REF)).thenReturn(REVERSAL);
++        when(gatewayPort.send(any())).thenReturn(Optional.of(Iso8583ReversalResponse.of("05")));
++
++        service.processNextCycle();
++
++        verify(filePort).moveToBackup(FILE_REF);
++    }
++
++    @Test
++    void processNextCycle_sinRespuesta_bajoUmbral_noMueve() {
++        when(filePort.listPendingFiles()).thenReturn(List.of(FILE_REF));
++        when(filePort.parseFile(FILE_REF)).thenReturn(REVERSAL);
++        when(gatewayPort.send(any())).thenReturn(Optional.empty());
++
++        service.processNextCycle();
++
++        verify(filePort, never()).moveToBackup(any());
++        verify(filePort, never()).moveToError(any());
++    }
++
++    @Test
++    void processNextCycle_sinRespuestaAlcanzaUmbral_mueveAError() {
++        when(filePort.listPendingFiles()).thenReturn(List.of(FILE_REF));
++        when(filePort.parseFile(FILE_REF)).thenReturn(REVERSAL);
++        when(gatewayPort.send(any())).thenReturn(Optional.empty());
++
++        service.processNextCycle();
++        service.processNextCycle();
++        service.processNextCycle();
++
++        verify(filePort).moveToError(FILE_REF);
++        verify(filePort, never()).moveToBackup(any());
++    }
++}
+
+

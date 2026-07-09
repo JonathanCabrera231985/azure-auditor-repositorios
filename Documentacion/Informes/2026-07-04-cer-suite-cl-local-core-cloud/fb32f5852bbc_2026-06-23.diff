@@ -1,0 +1,376 @@
+--- Diff for /CLAUDE.md ---
+--- a//CLAUDE.md
++++ b//CLAUDE.md
+@@ -2,9 +2,9 @@
+ 
+ This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+ 
+-## Reglas del proyecto (cargadas automГЎticamente)
+-
+-Los siguientes archivos definen las reglas de arquitectura, tecnologГ­a y diseГ±o que **deben aplicarse en toda sesiГіn y consulta**:
++## Reglas del proyecto (cargadas automáticamente)
++
++Los siguientes archivos definen las reglas de arquitectura, tecnología y diseño que **deben aplicarse en toda sesión y consulta**:
+ 
+ @../.claude_rules/rules_and_prompt.md
+ @../.claude_rules/sharedlibs.md
+@@ -15,22 +15,22 @@
+ 
+ ## Project Overview
+ 
+-**SuiteCloud вЂ“ Ventas** (artifact: `cer-suite-cloud-local-core`) вЂ” asynchronous component of the SuiteCloud ecosystem. Migrates Java 8 legacy retail POS backend (ArmsServerLocal) to Java 25 + Spring Boot 4.0.6 on GCP Cloud Run. Receives TSL (Terminal Sales Log) transaction frames from Point-of-Sale terminals via Pub/Sub, parses them, generates XML, and distributes to downstream systems (Firestore, Pub/Sub, Cloud SQL).
++**SuiteCloud – Ventas** (artifact: `cer-suite-cloud-local-core`) — asynchronous component of the SuiteCloud ecosystem. Migrates Java 8 legacy retail POS backend (ArmsServerLocal) to Java 25 + Spring Boot 4.0.6 on GCP Cloud Run. Receives TSL (Terminal Sales Log) transaction frames from Point-of-Sale terminals via Pub/Sub, parses them, generates XML, and distributes to downstream systems (Firestore, Pub/Sub, Cloud SQL).
+ 
+ ## Template Base
+ 
+ Reference project: `D:\SIPECOM\repository-git\cer-gcp\template-microservice`.
+ 
+-This template defines the **structural conventions** to follow in this and all SuiteCloud microservices. It is a reference вЂ” apply only the patterns that make sense for each service's actual responsibilities.
++This template defines the **structural conventions** to follow in this and all SuiteCloud microservices. It is a reference — apply only the patterns that make sense for each service's actual responsibilities.
+ 
+ ### Conventions that apply to this project
+ 
+ - **Package layout** (hexagonal): `domain/{model,port/{in,out}}`, `service/`, `infrastructure/adapter/{in,out}`, `infrastructure/config/`
+ - **Build/deploy artifacts**: `build.sh` (Podman + Skaffold `$IMAGE` support), `skaffold.yaml` (v4beta11), `docker/dev/Dockerfile` (dev image with `SPRING_PROFILES_ACTIVE=dev`), `k8s/namespace.yaml` (`ns-cer-suite-dev`)
+ - **Profiles**: `local` (developer machine, local SQL + GCP credentials file), `dev` (GCP dev, env vars), `prod` (GCP prod, env vars)
+-- **Exception handling**: `@RestControllerAdvice` with RFC 7807 `ProblemDetail` вЂ” already implemented as `SuiteCloudExceptionHandler`
++- **Exception handling**: `@RestControllerAdvice` with RFC 7807 `ProblemDetail` — already implemented as `SuiteCloudExceptionHandler`
+ - **Domain models**: immutable Java `record`s; mutations return copies via `with*()` methods
+-- **Virtual threads**: `spring.threads.virtual.enabled: true`; no `synchronized` вЂ” use `ReentrantLock`/`Semaphore`
++- **Virtual threads**: `spring.threads.virtual.enabled: true`; no `synchronized` — use `ReentrantLock`/`Semaphore`
+ 
+ ### Template patterns NOT used in this project (and why)
+ 
+@@ -64,25 +64,25 @@
+ Java 25 preview features are required (`--enable-preview` is configured in pom.xml for compile, test, and runtime).
+ 
+ **Known pre-existing test failures (do not investigate):**
+-- `XmlGeneratorServiceTest.generate_omitDeclaration_false_hasXmlDeclaration` вЂ” Spring XML transformer behavior difference.
++- `XmlGeneratorServiceTest.generate_omitDeclaration_false_hasXmlDeclaration` — Spring XML transformer behavior difference.
+ 
+ ## Architecture
+ 
+ Hexagonal (Ports & Adapters) layered as:
+ 
+ ```
+-infrastructure/adapter/in/event/   в†ђ PubSubSalesAdapter (inbound trigger)
+-infrastructure/adapter/out/        в†ђ DB, Firestore, KMS, Pub/Sub adapters
+-service/                           в†ђ Business logic (implements domain ports)
+-domain/port/in/                    в†ђ UseCase interfaces
+-domain/port/out/                   в†ђ Repository/publisher interfaces
+-domain/model/                      в†ђ Immutable Java records + enums
++infrastructure/adapter/in/event/   ← PubSubSalesAdapter (inbound trigger)
++infrastructure/adapter/out/        ← DB, Firestore, KMS, Pub/Sub adapters
++service/                           ← Business logic (implements domain ports)
++domain/port/in/                    ← UseCase interfaces
++domain/port/out/                   ← Repository/publisher interfaces
++domain/model/                      ← Immutable Java records + enums
+ ```
+ 
+ ### Data flow
+ 
+ 1. **PubSubSalesAdapter** receives a `transactionId` and dispatches to a virtual thread.
+-2. **ProcessSaleService** orchestrates: reads Firestore payload в†’ parses в†’ fetches store from SQL в†’ builds transaction в†’ generates XML в†’ updates Firestore в†’ publishes to Pub/Sub.
++2. **ProcessSaleService** orchestrates: reads Firestore payload → parses → fetches store from SQL → builds transaction → generates XML → updates Firestore → publishes to Pub/Sub.
+ 3. **TslFrameParserService** does all TSL parsing (see below).
+ 4. **XmlGeneratorService** serializes the domain model to XML using JDK DOM API (no XStream/JAXB).
+ 
+@@ -90,8 +90,8 @@
+ 
+ | Class | Role |
+ |-------|------|
+-| `TslFrameParserService` | Parses raw TSL string в†’ `SaleTransaction`. Contains a private `TransactionBuilder` for accumulating mutable state during parsing; `build()` produces the immutable record. |
+-| `XmlGeneratorService` | `SaleTransaction` в†’ XML string. Mirrors the legacy XStreamConfig2 alias map field-by-field. |
++| `TslFrameParserService` | Parses raw TSL string → `SaleTransaction`. Contains a private `TransactionBuilder` for accumulating mutable state during parsing; `build()` produces the immutable record. |
++| `XmlGeneratorService` | `SaleTransaction` → XML string. Mirrors the legacy XStreamConfig2 alias map field-by-field. |
+ | `SaleTransaction` | Central immutable record holding all parsed data: header, lineItems, tenders, taxes, and all UserData subtypes. |
+ | `TslTransactionHeader` | Transaction metadata (timestamps, flags, operator, store). |
+ | `TslLineItem` | Single sale/return item. `withAppliedTax()` / `withTaxType()` return copies. |
+@@ -100,9 +100,9 @@
+ 
+ ### TSL Frame Format
+ 
+-Frame separator: `'|'` (three characters вЂ” single-quote, pipe, single-quote). Body is split by `,`.
+-
+-Header segments (indices 0вЂ“5): `communicationChannel`, `operationType`, `responseChannel`, `storeCode`, `permanentConn`, `dateTimeProcess`. Body is `header[6]`; `businessDayDate` is `header[7]`.
++Frame separator: `'|'` (three characters — single-quote, pipe, single-quote). Body is split by `,`.
++
++Header segments (indices 0–5): `communicationChannel`, `operationType`, `responseChannel`, `storeCode`, `permanentConn`, `dateTimeProcess`. Body is `header[6]`; `businessDayDate` is `header[7]`.
+ 
+ Body record types:
+ 
+@@ -116,12 +116,12 @@
+ | `09` | Change | change/cashback amount |
+ | `11` | DataEntry | `EE` identifier = PreferredCustomer data |
+ | `13` | TillChange | cashier loan/pickup (logged, not persisted) |
+-| `21` | StoreClosing | EOD в†’ ControlTransaction |
++| `21` | StoreClosing | EOD → ControlTransaction |
+ | `99` | UserData | sub-typed extended data (see below) |
+ 
+ Records with type `03`, `04`, `16`, `80`, `97` are explicit no-ops (logged at DEBUG, ignored).
+ 
+-### Type 99 UserData вЂ” implemented subtypes
++### Type 99 UserData — implemented subtypes
+ 
+ | Subtype | Name | XML element produced |
+ |---------|------|----------------------|
+@@ -147,20 +147,20 @@
+ | `64` | GIFTCARD_DATA | `<GiftcardDataList>` |
+ | `77` | RECAUDACION_DATA | `<Recaudaciones>` |
+ 
+-All `99` records (regardless of subtype) are also stored verbatim in `rawUserDataList` в†’ `<StringUsuariosDataList>` in XML.
++All `99` records (regardless of subtype) are also stored verbatim in `rawUserDataList` → `<StringUsuariosDataList>` in XML.
+ 
+ ### TslLineItem (critical record)
+-- `extendedAmountCents` вЂ” raw cents, **never divide by 100** (legacy compatibility and XML output both use raw cents).
+-- `isVoid` вЂ” derived from INDICAT2 bit 7 or INDICAT3 T-value `'8'`/`'9'`.
+-- `taxType` вЂ” `"A"`вЂ“`"H"` or `"0"` (no IVA); bit4в†’A, bit5в†’B, bit6в†’C, bit7в†’D from INDICAT1 (ISSUE-02). Overridden by `99|06|41` INDITAX field (VERIF-03).
+-- `itemCode` вЂ” leading zero stripped only for 12-char codes starting with `"0"` (ISSUE-22).
+-- `merchandiseHierarchyGroup` вЂ” stored as int, leading zeros removed (ISSUE-21).
+-- `departmentCode` вЂ” normalized numeric string; `01`, `04`, `05` must serialize as `1`, `4`, `5` like legacy integer fields.
+-- `appliedTaxCents` вЂ” filled by `99|06|41` FIFO queue per itemCode (ISSUE-V3-06).
+-- `itemType` вЂ” legacy `INDICAT3[0]` value, not inferred from `itemCode`; `7` is store coupon/service and `8`/`9` are cancel item types.
+-- `priceEntered` вЂ” `1` when `INDICAT1` bit 13 is active, otherwise `0`.
+-- `promoFlag` вЂ” nullable XML flag: `true` for `811099999998`/`811099999996`, `false` for store coupon `itemType=7`, `null` means omit `<IsPromo>`.
+-- `isPorMayor` вЂ” set by `99|06|16` on the last line item and serialized as `<IsPorMayor>true</IsPorMayor>`.
++- `extendedAmountCents` — raw cents, **never divide by 100** (legacy compatibility and XML output both use raw cents).
++- `isVoid` — derived from INDICAT2 bit 7 or INDICAT3 T-value `'8'`/`'9'`.
++- `taxType` — `"A"`–`"H"` or `"0"` (no IVA); bit4→A, bit5→B, bit6→C, bit7→D from INDICAT1 (ISSUE-02). Overridden by `99|06|41` INDITAX field (VERIF-03).
++- `itemCode` — leading zero stripped only for 12-char codes starting with `"0"` (ISSUE-22).
++- `merchandiseHierarchyGroup` — stored as int, leading zeros removed (ISSUE-21).
++- `departmentCode` — normalized numeric string; `01`, `04`, `05` must serialize as `1`, `4`, `5` like legacy integer fields.
++- `appliedTaxCents` — filled by `99|06|41` FIFO queue per itemCode (ISSUE-V3-06).
++- `itemType` — legacy `INDICAT3[0]` value, not inferred from `itemCode`; `7` is store coupon/service and `8`/`9` are cancel item types.
++- `priceEntered` — `1` when `INDICAT1` bit 13 is active, otherwise `0`.
++- `promoFlag` — nullable XML flag: `true` for `811099999998`/`811099999996`, `false` for store coupon `itemType=7`, `null` means omit `<IsPromo>`.
++- `isPorMayor` — set by `99|06|16` on the last line item and serialized as `<IsPorMayor>true</IsPorMayor>`.
+ - `emitSaleReturnSequenceNumber` - parser-resolved legacy parity flag for the inner `<Sale>/<Return><sequenceNumber>`; promo behavior depends on `99|06|53` state, not only on `itemType`.
+ 
+ ### Timestamp handling (changeNDate)
+@@ -176,7 +176,7 @@
+ Collections are wrapped with `List.copyOf()` / `Map.copyOf()` in canonical constructors.
+ 
+ ### Virtual threads
+-`spring.threads.virtual.enabled: true` вЂ” all Pub/Sub dispatch goes through `virtualThreadTaskExecutor`. Do not block virtual threads with `synchronized`; prefer `ReentrantLock` or `Semaphore`.
++`spring.threads.virtual.enabled: true` — all Pub/Sub dispatch goes through `virtualThreadTaskExecutor`. Do not block virtual threads with `synchronized`; prefer `ReentrantLock` or `Semaphore`.
+ 
+ ## Test Fixtures
+ 
+@@ -191,7 +191,7 @@
+ 
+ Active ISSUE labels in source track intentional deviations from the legacy system:
+ - **ISSUE-01**: Amounts in cents (no /100).
+-- **ISSUE-05**: Operator ID from field[6] (cГ©dula), not field[5].
++- **ISSUE-05**: Operator ID from field[6] (cédula), not field[5].
+ - **ISSUE-V3-06**: Queued tax application by itemCode (FIFO) for `99|06|41` records.
+ - **VERIF-03**: `INDITAX` field overrides `taxType` for a line item.
+ 
+@@ -209,29 +209,29 @@
+ - `<PriceEntered>` is serialized from `INDICAT1` bit 13; never hardcode it to `0`.
+ - `<Totals>` each `<Total>` has `CancelFlag="false"` attribute.
+ - `<InvoiceData>` includes `<Address>`, `<Telephone>`, `<flagReg>1</flagReg>` (from subtype 27 f[7], f[8]).
+-- Amounts in XML are formatted as `"171.0"` (long + `.0`) вЂ” no decimal arithmetic.
++- Amounts in XML are formatted as `"171.0"` (long + `.0`) — no decimal arithmetic.
+ - `<StringUsuariosDataList>` cadenas use `'|'` as separator with `&apos;` XML-escaping.
+ 
+ ## GCP Infrastructure
+ 
+-- **Firestore**: transaction state machine (`IN_PROCESS` в†’ `XML_GENERATED`) and payload storage.
++- **Firestore**: transaction state machine (`IN_PROCESS` → `XML_GENERATED`) and payload storage.
+ - **Pub/Sub**: inbound transaction events + outbound XML distribution.
+ - **Cloud SQL (SQL Server)**: retail store catalog (`RetailStore`).
+ - **KMS**: decryption of sensitive fields via `KmsDecryptionAdapter`.
+ 
+-Kubernetes manifests are in `k8s/` (deployment, service, HPA, configmap, secret). Cloud Run target: 80 concurrent requests, 1вЂ“100 instances, 1 GB RAM, 2 CPU.
++Kubernetes manifests are in `k8s/` (deployment, service, HPA, configmap, secret). Cloud Run target: 80 concurrent requests, 1–100 instances, 1 GB RAM, 2 CPU.
+ 
+ ---
+ 
+ ## SuiteCloud Ecosystem
+ 
+-SuiteCloud is composed of five services communicating via GCP Pub/Sub and Firestore. This repository implements **SuiteCloud вЂ“ Ventas** only.
++SuiteCloud is composed of five services communicating via GCP Pub/Sub and Firestore. This repository implements **SuiteCloud – Ventas** only.
+ 
+ | Service | Mode | Responsibility |
+ |---------|------|----------------|
+ | **Generador** | Sync | Entry point: receives TCP frames from POS terminals, stores in Firestore, sends ACK, publishes to Pub/Sub. |
+-| **SuiteCloud вЂ“ Ventas** *(this service)* | Async | Processes TSL frame, applies business logic, generates XML, persists in Firestore, notifies Distributor Cloud. |
+-| **SuiteCloud вЂ“ Consultas** | Sync | Answers real-time queries (prices, stock, customers) from Cloud SQL Multi Local. |
++| **SuiteCloud – Ventas** *(this service)* | Async | Processes TSL frame, applies business logic, generates XML, persists in Firestore, notifies Distributor Cloud. |
++| **SuiteCloud – Consultas** | Sync | Answers real-time queries (prices, stock, customers) from Cloud SQL Multi Local. |
+ | **Distributor Cloud** | Async | Persists XML to Cloud SQL Multi Local, updates Firestore state to `PROCESSED`, inserts XML into `TBL_XML_GENERATOR` in Central DB, updates Firestore state to `PROCESSED_CENTRAL`. |
+ | **Transaction Cloud** | Async | Transfers XML to Central DB, manages day-close, journal, customer replica, and old-return recovery. |
+ 
+@@ -240,8 +240,8 @@
+ | Step | State | Meaning |
+ |------|-------|---------|
+ | 1 | `PENDING` | Received and queued. |
+-| 2 | `IN_PROCESS` | SuiteCloud вЂ“ Ventas is processing. |
+-| 3 | `XML_GENERATED` | SuiteCloud вЂ“ Ventas finished; XML created. |
++| 2 | `IN_PROCESS` | SuiteCloud – Ventas is processing. |
++| 3 | `XML_GENERATED` | SuiteCloud – Ventas finished; XML created. |
+ | 4 | `DISTRIBUTING` | Distributor Cloud persisting to Cloud SQL Multi Local. |
+ | 5 | `PROCESSED` | Persisted in Cloud SQL Multi Local. |
+ | 6 | `PROCESSED_CENTRAL` | Distributor Cloud inserted XML into `TBL_XML_GENERATOR` in Central DB. |
+@@ -250,7 +250,7 @@
+ 
+ ---
+ 
+-## SuiteCloud вЂ“ Ventas: Scope
++## SuiteCloud – Ventas: Scope
+ 
+ ### What this service DOES
+ 1. Subscribes to the Pub/Sub sales topic published by Generador.
+@@ -263,10 +263,10 @@
+ 8. Publishes a Pub/Sub event notifying Distributor Cloud that the XML is available.
+ 
+ ### What this service does NOT do
+-- Does NOT persist to Cloud SQL Server (Multi Local) вЂ” that is Distributor Cloud's responsibility.
++- Does NOT persist to Cloud SQL Server (Multi Local) — that is Distributor Cloud's responsibility.
+ - Does NOT communicate directly with POS terminals or controllers (no TCP).
+ - Does NOT transfer data to the Central El Rosado database (Transaction Cloud's responsibility).
+-- Does NOT answer real-time queries (SuiteCloud вЂ“ Consultas handles that).
++- Does NOT answer real-time queries (SuiteCloud – Consultas handles that).
+ - Does NOT handle the ACK to the Controller/POS (Generador already sent it before this process starts).
+ 
+ ---
+@@ -278,13 +278,13 @@
+ - DB adapter sub-packages: `infrastructure/adapter/out/db/entity/` for JPA entities, `infrastructure/adapter/out/db/repository/` for Spring Data interfaces.
+ - No stored procedure calls. All business logic lives in Java; the database is a pure persistence engine.
+ - No local filesystem access. All file storage goes through GCS.
+-- No `synchronized` blocks on virtual threads вЂ” use `ReentrantLock` or `Semaphore`.
++- No `synchronized` blocks on virtual threads — use `ReentrantLock` or `Semaphore`.
+ 
+ ### Migration phases
+ - **Phase 1**: migrated legacy `Process`/`Operation` components that use `ArmsServerConf.properties` values must register those values only in `k8s/properties.yaml`, never in the main ConfigMap.
+ - **Phase 1**: file routes must use GCS and must be checked against `.claude_rules/GCS_ROUTES_INVENTORY.md`; missing routes stop the migration until the exact value is provided.
+ - **Phase 1**: scheduled legacy polling uses Spring `@Scheduled`; do not use Pub/Sub, `@Async`, `ExecutorService`, manual `Thread`, or infinite loops unless a later phase explicitly changes the rule.
+-- **Phase 1**: Firestore error tracking for `UpdateCedPadRucProcess` is limited to files moved to the confirmed error bucket/path, collection `update_ced_pad_ruc_error`.
++- **Phase 1**: Firestore error tracking for all migrated processes uses the generic collection `process_error`. Each process adapter writes to this shared collection via its own `*ErrorTrackerPort` implementation. The collection name is resolved from `app.gcp.firestore.collection-process-error` (env var `GCP_FIRESTORE_COLLECTION_PROCESS_ERROR`, default `process_error`).
+ - **Phase 1**: database credentials remain in Kubernetes Secrets.
+ - **DDL gate**: do not create or update JPA entities, repositories, DTOs, projections, queries, or mappers without the exact DDL of every involved table.
+ - **Phase 2**: Pub/Sub is allowed only after the upstream file producer and event contract are defined.
+@@ -297,32 +297,32 @@
+ - Lombok `@Slf4j`, `@RequiredArgsConstructor`, `@Builder`, `@Data` are project standard.
+ - Domain models: immutable Java `record`s; mutations return copies via `with*()` methods.
+ - Prefer functional style (`stream`, `map`, `filter`, `.toList()`) over imperative loops where readable.
+-- No hardcoded business values вЂ” use configuration or named constants.
++- No hardcoded business values — use configuration or named constants.
+ - Code must pass SonarQube quality gate (no smells, no vulnerabilities).
+ 
+ ### Logging
+ 
+-- `DEBUG` вЂ” internal flow steps.
+-- `INFO` вЂ” business events (use SLF4J 2.0+ fluent API).
+-- `WARN` вЂ” degraded but handled situations.
+-- `ERROR` вЂ” unexpected failures on the critical path.
++- `DEBUG` — internal flow steps.
++- `INFO` — business events (use SLF4J 2.0+ fluent API).
++- `WARN` — degraded but handled situations.
++- `ERROR` — unexpected failures on the critical path.
+ 
+ ```java
+ log.atInfo()
+-   .setMessage("DescripciГіn del evento")
++   .setMessage("Descripción del evento")
+    .addKeyValue("transactionId", id)
+    .addKeyValue("estado", estado)
+    .log();
+ ```
+-In production, `logging.structured.format.console=gcp` converts `addKeyValue` to structured Cloud Logging fields вЂ” never concatenate values into the message string.
++In production, `logging.structured.format.console=gcp` converts `addKeyValue` to structured Cloud Logging fields — never concatenate values into the message string.
+ 
+ ### Spring profiles
+-- `application.yml` вЂ” shared generic config (virtual threads, app name).
+-- `application-local.yml` вЂ” local dev: plain-text logs, localhost DB connection.
+-- `application-prod.yml` вЂ” GCP/K8s: JSON logs, env-var-injected secrets.
++- `application.yml` — shared generic config (virtual threads, app name).
++- `application-local.yml` — local dev: plain-text logs, localhost DB connection.
++- `application-prod.yml` — GCP/K8s: JSON logs, env-var-injected secrets.
+ 
+ ### Testing standards
+-- Unit tests: **no Spring context** вЂ” JUnit 5 + Mockito only (`@ExtendWith(MockitoExtension.class)`).
++- Unit tests: **no Spring context** — JUnit 5 + Mockito only (`@ExtendWith(MockitoExtension.class)`).
+ - Integration tests: annotated `@Disabled`; require emulators or local infra.
+ - Use `lenient().when(...)` in `@BeforeEach` when a stub only applies to some tests.
+ - Minimum **80% code coverage** per SonarQube standards.
+
+
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -18,6 +18,7 @@
+   FIRESTORE_DATABASE_ID: "cer-suite-multilocal"
+   GCP_FIRESTORE_COLLECTION: "frames"
+   GCP_FIRESTORE_COLLECTION_REPRO: "frames_repro"
++  GCP_FIRESTORE_COLLECTION_PROCESS_ERROR: "process_error"
+ 
+   # Configuración del scheduler de reproceso
+   REPRO_ENABLED: "true"
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/UpdateCedPadRucErrorFirestoreAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/UpdateCedPadRucErrorFirestoreAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/UpdateCedPadRucErrorFirestoreAdapter.java
+@@ -4,6 +4,7 @@
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.UpdateCedPadRucErrorTrackerPort;
+ import com.google.cloud.Timestamp;
+ import com.google.cloud.firestore.Firestore;
++import org.springframework.beans.factory.annotation.Value;
+ import org.springframework.stereotype.Component;
+ 
+ import java.util.LinkedHashMap;
+@@ -13,9 +14,10 @@
+ @Component
+ public class UpdateCedPadRucErrorFirestoreAdapter implements UpdateCedPadRucErrorTrackerPort {
+ 
+-    private static final String COLLECTION = "update_ced_pad_ruc_error";
++    private final Firestore firestore;
+ 
+-    private final Firestore firestore;
++    @Value("${app.gcp.firestore.collection-process-error:process_error}")
++    private String COLLECTION;
+ 
+     public UpdateCedPadRucErrorFirestoreAdapter(Firestore firestore) {
+         this.firestore = firestore;
+
+
+--- Diff for /src/main/resources/application-dev.yml ---
+--- a//src/main/resources/application-dev.yml
++++ b//src/main/resources/application-dev.yml
+@@ -55,6 +55,7 @@
+     firestore:
+       collection: ${GCP_FIRESTORE_COLLECTION:frames}
+       collection-repro: ${GCP_FIRESTORE_COLLECTION_REPRO:frames_repro}
++      collection-process-error: ${GCP_FIRESTORE_COLLECTION_PROCESS_ERROR:process_error}
+   repro:
+     enabled: true
+     polling-interval-ms: 30000
+
+
+--- Diff for /src/main/resources/application-local.yml ---
+--- a//src/main/resources/application-local.yml
++++ b//src/main/resources/application-local.yml
+@@ -80,6 +80,7 @@
+     firestore:
+       collection: frames
+       collection-repro: frames_repro
++      collection-process-error: process_error
+   repro:
+     enabled: true
+     polling-interval-ms: 30000
+
+
+--- Diff for /src/main/resources/application-prod.yml ---
+--- a//src/main/resources/application-prod.yml
++++ b//src/main/resources/application-prod.yml
+@@ -61,6 +61,7 @@
+     firestore:
+       collection: ${GCP_FIRESTORE_COLLECTION:frames}
+       collection-repro: ${GCP_FIRESTORE_COLLECTION_REPRO:frames_repro}
++      collection-process-error: ${GCP_FIRESTORE_COLLECTION_PROCESS_ERROR:process_error}
+   repro:
+     enabled: ${REPRO_ENABLED:true}
+     polling-interval-ms: ${REPRO_POLLING_MS:30000}
+
+

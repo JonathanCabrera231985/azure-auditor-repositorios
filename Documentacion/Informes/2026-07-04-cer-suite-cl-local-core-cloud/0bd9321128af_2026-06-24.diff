@@ -1,0 +1,2068 @@
+--- Diff for /.claude_rules/GCS_ROUTES_INVENTORY.md ---
+--- a//.claude_rules/GCS_ROUTES_INVENTORY.md
++++ b//.claude_rules/GCS_ROUTES_INVENTORY.md
+@@ -13,10 +13,12 @@
+ | `app.update-ced-pad-ruc.gcs.error-uri` | `gs://gcs-cer-suite-core-files/eyes/arsap/in/cedpadruc-error` | `gcs-cer-suite-core-files` | `eyes/arsap/in/cedpadruc-error` | Defined | User confirmation, 2026-06-18 |
+ | `sendCartaMoto.in.folder.path` | `gs://gcs-cer-suite-core-files/eyes/xmlcvm/out` | `gcs-cer-suite-core-files` | `eyes/xmlcvm/out` | Defined | User confirmation, 2026-06-23 |
+ | `sendCartaMoto.out.folder.path` | `gs://gcs-cer-suite-core-files/eyes/xmlcvm/bkp` | `gcs-cer-suite-core-files` | `eyes/xmlcvm/bkp` | Defined | User confirmation, 2026-06-23 |
++| `updateSecSubSec.in.folder.path` | `gs://gcs-cer-suite-core-files/EYES/ARSAP/IN` | `gcs-cer-suite-core-files` | `EYES/ARSAP/IN` | Defined | User confirmation, 2026-06-24 |
++| `updateSecSubSec.bkp.folder.path` | `gs://gcs-cer-suite-core-files/EYES/ARSAP/BKP` | `gcs-cer-suite-core-files` | `EYES/ARSAP/BKP` | Defined | User confirmation, 2026-06-24 |
+ 
+ ## Pending Routes
+ 
+-No pending GCS routes as of 2026-06-23.
++No pending GCS routes as of 2026-06-24.
+ 
+ ## Rules
+ 
+@@ -24,3 +26,4 @@
+ - If a legacy file route is not listed under "Defined Routes", stop and request the exact GCS value.
+ - Store successful `UpdateCedPadRucProcess` files in the defined backup route, matching the legacy successful move to `outFolder`.
+ - Firestore error tracking for `UpdateCedPadRucProcess` is only created after a file is moved to the confirmed error route.
++- From 2026-06-24, all new GCS paths (prefix only, not the bucket name `gcs-cer-suite-core-files`) are in UPPER_CASE for GCS case-sensitivity compatibility.
+
+
+--- Diff for /CLAUDE.md ---
+--- a//CLAUDE.md
++++ b//CLAUDE.md
+@@ -8,8 +8,6 @@
+ 
+ @../.claude_rules/rules_and_prompt.md
+ @../.claude_rules/sharedlibs.md
+-@.claude_rules/RTD_VENTAS_CLOUD.md
+-@.claude_rules/ALCANCE_COMPONENTE.md
+ @.claude_rules/MIGRATION_PHASES_AND_PROPERTIES.md
+ @.claude_rules/GCS_ROUTES_INVENTORY.md
+ 
+
+
+--- Diff for /k8s/properties.yaml ---
+--- a//k8s/properties.yaml
++++ b//k8s/properties.yaml
+@@ -21,3 +21,12 @@
+     sendCartaMoto.server.serverIp=10.11.1.16
+     sendCartaMoto.server.port=22
+     sendCartaMoto.server.remoteDir=/poscer/suitemotos
++    updateSecSubSec.in.folder.path=gs://gcs-cer-suite-core-files/EYES/ARSAP/IN
++    updateSecSubSec.bkp.folder.path=gs://gcs-cer-suite-core-files/EYES/ARSAP/BKP
++    updateSecSubSec.timesleep=30000
++    updateSecSubSec.controllerName=ACEDEPTS
++    updateSecSubSec.targetDir=C:\ADX_UDT1
++    updateSecSubSec.cmdLine=C:\ADX_IPGM\ACEDEPTS.286
++    updateSecSubSec.pctEmpDefault=0
++    updateSecSubSec.pctSolDefault=0
++    updateSecSubSec.guiName=SECLIST
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/ActiveStoreInfo.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/ActiveStoreInfo.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/ActiveStoreInfo.java
+@@ -0,0 +1,3 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++public record ActiveStoreInfo(int desClave, String ip) {}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/MerchandiseHierarchyGroup.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/MerchandiseHierarchyGroup.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/MerchandiseHierarchyGroup.java
+@@ -0,0 +1,11 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++public record MerchandiseHierarchyGroup(
++        Integer id,
++        Integer code,
++        String codMrhCer,
++        String name,
++        String description,
++        Integer posDepartmentId,
++        int porcentajeRecargo
++) {}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/PosDepartment.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/PosDepartment.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/PosDepartment.java
+@@ -0,0 +1,21 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++public record PosDepartment(
++        Integer id,
++        String codDptoCer,
++        String name,
++        String codNegocio,
++        int porcentajeRecargo,
++        int porcentajeDscEmp,
++        int porcentajeBonSol,
++        int qtyFlias
++) {
++
++    public PosDepartment withQtyFlias(int qty) {
++        return new PosDepartment(id, codDptoCer, name, codNegocio, porcentajeRecargo, porcentajeDscEmp, porcentajeBonSol, qty);
++    }
++
++    public PosDepartment withName(String n) {
++        return new PosDepartment(id, codDptoCer, n, codNegocio, porcentajeRecargo, porcentajeDscEmp, porcentajeBonSol, qtyFlias);
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SecSubSecFile.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SecSubSecFile.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SecSubSecFile.java
+@@ -0,0 +1,21 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++public record SecSubSecFile(
++        GcsObjectReference location,
++        String fileName,
++        SecSubSecFileType type,
++        long sortKey
++) {
++
++    public enum SecSubSecFileType {
++        SEC, SUBSEC;
++
++        public static SecSubSecFileType fromFileName(String name) {
++            if (name == null) return null;
++            String upper = name.toUpperCase();
++            if (upper.startsWith("SUBSEC") && name.length() == 21) return SUBSEC;
++            if (upper.startsWith("SEC") && name.length() == 18) return SEC;
++            return null;
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/UpdateSecSubSecUseCase.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/UpdateSecSubSecUseCase.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/UpdateSecSubSecUseCase.java
+@@ -0,0 +1,6 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.in;
++
++public interface UpdateSecSubSecUseCase {
++
++    void processPendingFiles();
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/ActiveStoreQueryPort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/ActiveStoreQueryPort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/ActiveStoreQueryPort.java
+@@ -0,0 +1,11 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.ActiveStoreInfo;
++
++import java.util.List;
++
++public interface ActiveStoreQueryPort {
++
++    // Retorna tiendas activas con servidor local (IND_ACTIVO=1 AND FL_LCL_SRVR=1)
++    List<ActiveStoreInfo> findActiveStoresWithLocalServer();
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/PosDepartmentPersistencePort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/PosDepartmentPersistencePort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/PosDepartmentPersistencePort.java
+@@ -0,0 +1,22 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.MerchandiseHierarchyGroup;
++import com.elrosado.cersuitecloudlocalcore.domain.model.PosDepartment;
++
++import java.util.List;
++import java.util.Optional;
++
++public interface PosDepartmentPersistencePort {
++
++    Optional<PosDepartment> findByCodDptoCer(String codDptoCer);
++
++    PosDepartment save(PosDepartment department);
++
++    Optional<MerchandiseHierarchyGroup> findMhgByCodAndDept(String codMrhCer, Integer deptId);
++
++    MerchandiseHierarchyGroup saveMhg(MerchandiseHierarchyGroup mhg);
++
++    List<PosDepartment> findAllOrderById();
++
++    List<Object[]> findAllMhgWithDeptData();
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/SynchroControllerPublisherPort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/SynchroControllerPublisherPort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/SynchroControllerPublisherPort.java
+@@ -0,0 +1,6 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++public interface SynchroControllerPublisherPort {
++
++    void publishFileReady(int codStore, String gcsBucket, String gcsPath, String fileName, String targetDir);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/UpdateSecSubSecStoragePort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/UpdateSecSubSecStoragePort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/UpdateSecSubSecStoragePort.java
+@@ -0,0 +1,18 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SecSubSecFile;
++
++import java.io.BufferedReader;
++import java.util.List;
++
++public interface UpdateSecSubSecStoragePort {
++
++    List<SecSubSecFile> listPendingFiles();
++
++    BufferedReader openReader(SecSubSecFile file);
++
++    GcsObjectReference moveToBackup(SecSubSecFile file);
++
++    GcsObjectReference uploadControllerFile(String fileName, byte[] content);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/UpdateSecSubSecSchedulerAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/UpdateSecSubSecSchedulerAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/UpdateSecSubSecSchedulerAdapter.java
+@@ -0,0 +1,31 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.scheduler;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.UpdateSecSubSecUseCase;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.scheduling.annotation.Scheduled;
++import org.springframework.stereotype.Component;
++
++@Component
++public class UpdateSecSubSecSchedulerAdapter {
++
++    private static final Logger log = LoggerFactory.getLogger(UpdateSecSubSecSchedulerAdapter.class);
++
++    private final UpdateSecSubSecUseCase useCase;
++
++    public UpdateSecSubSecSchedulerAdapter(UpdateSecSubSecUseCase useCase) {
++        this.useCase = useCase;
++    }
++
++    @Scheduled(fixedDelayString = "${updateSecSubSec.timesleep:30000}")
++    public void poll() {
++        try {
++            useCase.processPendingFiles();
++        } catch (Exception e) {
++            log.atError()
++                    .setMessage("Error no controlado en scheduler UpdateSecSubSec")
++                    .setCause(e)
++                    .log();
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbUpdateSecSubSecAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbUpdateSecSubSecAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbUpdateSecSubSecAdapter.java
+@@ -0,0 +1,63 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.MerchandiseHierarchyGroup;
++import com.elrosado.cersuitecloudlocalcore.domain.model.PosDepartment;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.PosDepartmentPersistencePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.MerchandiseHierarchyGroupEntity;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.PosDepartmentEntity;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository.JpaMerchandiseHierarchyGroupRepository;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository.JpaPosDepartmentRepository;
++import org.springframework.stereotype.Component;
++import org.springframework.transaction.annotation.Transactional;
++
++import java.util.List;
++import java.util.Optional;
++
++@Component
++public class DbUpdateSecSubSecAdapter implements PosDepartmentPersistencePort {
++
++    private final JpaPosDepartmentRepository deptRepo;
++    private final JpaMerchandiseHierarchyGroupRepository mhgRepo;
++
++    public DbUpdateSecSubSecAdapter(
++            JpaPosDepartmentRepository deptRepo,
++            JpaMerchandiseHierarchyGroupRepository mhgRepo) {
++        this.deptRepo = deptRepo;
++        this.mhgRepo = mhgRepo;
++    }
++
++    @Override
++    public Optional<PosDepartment> findByCodDptoCer(String codDptoCer) {
++        return deptRepo.findByCodDptoCer(codDptoCer).map(PosDepartmentEntity::toDomain);
++    }
++
++    @Override
++    @Transactional(transactionManager = "artsEcTransactionManager")
++    public PosDepartment save(PosDepartment department) {
++        return deptRepo.save(PosDepartmentEntity.fromDomain(department)).toDomain();
++    }
++
++    @Override
++    public Optional<MerchandiseHierarchyGroup> findMhgByCodAndDept(String codMrhCer, Integer deptId) {
++        return mhgRepo.findByCodMrhCerAndPosDepartmentId(codMrhCer, deptId)
++                .map(MerchandiseHierarchyGroupEntity::toDomain);
++    }
++
++    @Override
++    @Transactional(transactionManager = "artsEcTransactionManager")
++    public MerchandiseHierarchyGroup saveMhg(MerchandiseHierarchyGroup mhg) {
++        return mhgRepo.save(MerchandiseHierarchyGroupEntity.fromDomain(mhg)).toDomain();
++    }
++
++    @Override
++    public List<PosDepartment> findAllOrderById() {
++        return deptRepo.findAllOrderById().stream()
++                .map(PosDepartmentEntity::toDomain)
++                .toList();
++    }
++
++    @Override
++    public List<Object[]> findAllMhgWithDeptData() {
++        return mhgRepo.findAllWithDeptData();
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/MerchandiseHierarchyGroupEntity.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/MerchandiseHierarchyGroupEntity.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/MerchandiseHierarchyGroupEntity.java
+@@ -0,0 +1,62 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.MerchandiseHierarchyGroup;
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.GeneratedValue;
++import jakarta.persistence.GenerationType;
++import jakarta.persistence.Id;
++import jakarta.persistence.Table;
++
++@Entity
++@Table(name = "CO_MRHRC_GP")
++public class MerchandiseHierarchyGroupEntity {
++
++    @Id
++    @GeneratedValue(strategy = GenerationType.IDENTITY)
++    @Column(name = "ID_MRHRC_GP")
++    private Integer id;
++
++    @Column(name = "CD_MRHRC_GP", nullable = false)
++    private Integer code = 0;
++
++    @Column(name = "NM_MRHRC_GP", length = 50)
++    private String name;
++
++    @Column(name = "DE_MRHRC_GP", length = 255)
++    private String description;
++
++    @Column(name = "ID_DPT_PS")
++    private Integer posDepartmentId;
++
++    @Column(name = "CD_MRHRC_CER", length = 6)
++    private String codMrhCer;
++
++    @Column(name = "PORC_REC", nullable = false)
++    private Integer porcentajeRecargo = 0;
++
++    protected MerchandiseHierarchyGroupEntity() {}
++
++    public static MerchandiseHierarchyGroupEntity fromDomain(MerchandiseHierarchyGroup d) {
++        MerchandiseHierarchyGroupEntity e = new MerchandiseHierarchyGroupEntity();
++        e.id = d.id();
++        e.code = d.code() == null ? 0 : d.code();
++        e.name = d.name();
++        e.description = d.description();
++        e.posDepartmentId = d.posDepartmentId();
++        e.codMrhCer = d.codMrhCer();
++        e.porcentajeRecargo = d.porcentajeRecargo();
++        return e;
++    }
++
++    public MerchandiseHierarchyGroup toDomain() {
++        return new MerchandiseHierarchyGroup(
++                id,
++                code,
++                codMrhCer,
++                name,
++                description,
++                posDepartmentId,
++                porcentajeRecargo == null ? 0 : porcentajeRecargo);
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/PosDepartmentEntity.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/PosDepartmentEntity.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/PosDepartmentEntity.java
+@@ -0,0 +1,72 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.PosDepartment;
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.GeneratedValue;
++import jakarta.persistence.GenerationType;
++import jakarta.persistence.Id;
++import jakarta.persistence.Table;
++
++@Entity
++@Table(name = "ID_DPT_PS")
++public class PosDepartmentEntity {
++
++    @Id
++    @GeneratedValue(strategy = GenerationType.IDENTITY)
++    @Column(name = "ID_DPT_PS")
++    private Integer id;
++
++    @Column(name = "NM_DPT_PS", length = 50)
++    private String name;
++
++    @Column(name = "CD_DPT_CER", length = 6)
++    private String codDptoCer;
++
++    @Column(name = "COD_NEGOCIO", nullable = false)
++    private Integer codNegocio = 0;
++
++    @Column(name = "PORC_REC", nullable = false)
++    private Integer porcentajeRecargo = 0;
++
++    @Column(name = "PORC_DESEMP", nullable = false)
++    private Integer porcentajeDscEmp = 0;
++
++    @Column(name = "PORC_BOSOL", nullable = false)
++    private Integer porcentajeBonSol = 0;
++
++    @Column(name = "QTY_MRHRC_GP", nullable = false)
++    private Integer qtyFlias = 0;
++
++    protected PosDepartmentEntity() {}
++
++    public static PosDepartmentEntity fromDomain(PosDepartment d) {
++        PosDepartmentEntity e = new PosDepartmentEntity();
++        e.id = d.id();
++        e.name = d.name();
++        e.codDptoCer = d.codDptoCer();
++        e.codNegocio = (d.codNegocio() == null || d.codNegocio().isBlank())
++                ? 0 : Integer.parseInt(d.codNegocio().trim());
++        e.porcentajeRecargo = d.porcentajeRecargo();
++        e.porcentajeDscEmp = d.porcentajeDscEmp();
++        e.porcentajeBonSol = d.porcentajeBonSol();
++        e.qtyFlias = d.qtyFlias();
++        return e;
++    }
++
++    public PosDepartment toDomain() {
++        return new PosDepartment(
++                id,
++                codDptoCer,
++                name,
++                codNegocio == null ? "0" : String.valueOf(codNegocio),
++                porcentajeRecargo == null ? 0 : porcentajeRecargo,
++                porcentajeDscEmp == null ? 0 : porcentajeDscEmp,
++                porcentajeBonSol == null ? 0 : porcentajeBonSol,
++                qtyFlias == null ? 0 : qtyFlias);
++    }
++
++    public Integer getId() { return id; }
++    public String getCodDptoCer() { return codDptoCer; }
++    public Integer getQtyFlias() { return qtyFlias; }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/JpaMerchandiseHierarchyGroupRepository.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/JpaMerchandiseHierarchyGroupRepository.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/JpaMerchandiseHierarchyGroupRepository.java
+@@ -0,0 +1,22 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository;
++
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.MerchandiseHierarchyGroupEntity;
++import org.springframework.data.jpa.repository.JpaRepository;
++import org.springframework.data.jpa.repository.Query;
++
++import java.util.List;
++import java.util.Optional;
++
++public interface JpaMerchandiseHierarchyGroupRepository extends JpaRepository<MerchandiseHierarchyGroupEntity, Integer> {
++
++    Optional<MerchandiseHierarchyGroupEntity> findByCodMrhCerAndPosDepartmentId(String codMrhCer, Integer deptId);
++
++    @Query(value = """
++            SELECT d.ID_DPT_PS AS DEPTO, m.CD_MRHRC_GP AS FAMILIA, m.PORC_REC AS PORC_FAMILIA,
++                   d.PORC_DESEMP AS PORC_DESEMP, d.PORC_BOSOL AS PORC_BOSOL
++            FROM ID_DPT_PS d
++            INNER JOIN CO_MRHRC_GP m ON m.ID_DPT_PS = d.ID_DPT_PS
++            ORDER BY d.ID_DPT_PS ASC, m.ID_MRHRC_GP ASC
++            """, nativeQuery = true)
++    List<Object[]> findAllWithDeptData();
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/JpaPosDepartmentRepository.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/JpaPosDepartmentRepository.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/JpaPosDepartmentRepository.java
+@@ -0,0 +1,16 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository;
++
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.PosDepartmentEntity;
++import org.springframework.data.jpa.repository.JpaRepository;
++import org.springframework.data.jpa.repository.Query;
++
++import java.util.List;
++import java.util.Optional;
++
++public interface JpaPosDepartmentRepository extends JpaRepository<PosDepartmentEntity, Integer> {
++
++    Optional<PosDepartmentEntity> findByCodDptoCer(String codDptoCer);
++
++    @Query("SELECT d FROM PosDepartmentEntity d ORDER BY d.id ASC")
++    List<PosDepartmentEntity> findAllOrderById();
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/saadmin/DbActiveStoreAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/saadmin/DbActiveStoreAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/saadmin/DbActiveStoreAdapter.java
+@@ -0,0 +1,28 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.saadmin;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.ActiveStoreInfo;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.ActiveStoreQueryPort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.StoreRegistry;
++import org.springframework.stereotype.Component;
++
++import java.util.List;
++
++// Usa StoreRegistry (cargado en @PostConstruct) en lugar de consultar la BD en cada ciclo.
++// StoreRegistry filtra IND_ACTIVO=1, MULTI_LOCAL=1, FL_LCL_SRVR=1 desde MN_TIENDA (SAADMIN).
++@Component
++public class DbActiveStoreAdapter implements ActiveStoreQueryPort {
++
++    private final StoreRegistry storeRegistry;
++
++    public DbActiveStoreAdapter(StoreRegistry storeRegistry) {
++        this.storeRegistry = storeRegistry;
++    }
++
++    @Override
++    public List<ActiveStoreInfo> findActiveStoresWithLocalServer() {
++        return storeRegistry.getActiveLocalServerStores()
++                .stream()
++                .map(s -> new ActiveStoreInfo(s.getDesClave(), s.getIp()))
++                .toList();
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/messaging/PubSubSynchroControllerPublisher.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/messaging/PubSubSynchroControllerPublisher.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/messaging/PubSubSynchroControllerPublisher.java
+@@ -0,0 +1,72 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.messaging;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.SynchroControllerPublisherPort;
++import com.elrosado.jlib_pubsub.interfaces.IMessagePublisher;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.beans.factory.annotation.Value;
++import org.springframework.stereotype.Component;
++import tools.jackson.databind.ObjectMapper;
++
++import java.time.Instant;
++import java.util.LinkedHashMap;
++import java.util.Map;
++import java.util.UUID;
++
++@Component
++public class PubSubSynchroControllerPublisher implements SynchroControllerPublisherPort {
++
++    private static final Logger log = LoggerFactory.getLogger(PubSubSynchroControllerPublisher.class);
++
++    private final IMessagePublisher messagePublisher;
++    private final ObjectMapper objectMapper;
++
++    @Value("${app.gcp.pubsub.topic-synchro-controller}")
++    private String synchroTopic;
++
++    public PubSubSynchroControllerPublisher(IMessagePublisher messagePublisher, ObjectMapper objectMapper) {
++        this.messagePublisher = messagePublisher;
++        this.objectMapper = objectMapper;
++    }
++
++    @Override
++    public void publishFileReady(int codStore, String gcsBucket, String gcsPath, String fileName, String targetDir) {
++        try {
++            Map<String, Object> payload = new LinkedHashMap<>();
++            payload.put("eventId", UUID.randomUUID().toString());
++            payload.put("eventType", "file.ready");
++            payload.put("source", "cer-suite-cloud-local-core");
++            payload.put("codStore", codStore);
++            payload.put("gcsBucket", gcsBucket);
++            payload.put("gcsPath", gcsPath);
++            payload.put("fileName", fileName);
++            payload.put("targetDir", targetDir);
++            payload.put("createdAt", Instant.now().toString());
++
++            String message = objectMapper.writeValueAsString(payload);
++
++            messagePublisher.publishAsync(synchroTopic, message)
++                    .whenComplete((msgId, ex) -> {
++                        if (ex != null) {
++                            log.atError()
++                                    .setMessage("Error publicando evento a synchro-controller")
++                                    .addKeyValue("codStore", codStore)
++                                    .addKeyValue("fileName", fileName)
++                                    .addKeyValue("topic", synchroTopic)
++                                    .setCause(ex)
++                                    .log();
++                        } else {
++                            log.atInfo()
++                                    .setMessage("Evento publicado a synchro-controller")
++                                    .addKeyValue("codStore", codStore)
++                                    .addKeyValue("fileName", fileName)
++                                    .addKeyValue("messageId", msgId)
++                                    .log();
++                        }
++                    });
++        } catch (Exception e) {
++            throw new IllegalStateException(
++                    "Error publicando evento synchro-controller para archivo: " + fileName, e);
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsStorageHelper.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsStorageHelper.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsStorageHelper.java
+@@ -0,0 +1,84 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.storage;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.google.cloud.storage.Blob;
++import com.google.cloud.storage.BlobId;
++import com.google.cloud.storage.BlobInfo;
++import com.google.cloud.storage.Storage;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Component;
++
++import java.io.BufferedReader;
++import java.io.InputStreamReader;
++import java.nio.channels.Channels;
++import java.nio.charset.StandardCharsets;
++import java.util.stream.Stream;
++import java.util.stream.StreamSupport;
++
++/**
++ * Utilitario stateless para operaciones GCS compartidas entre adaptadores de almacenamiento.
++ * No contiene lÃ³gica de negocio ni dependencias del dominio.
++ */
++@Component
++public class GcsStorageHelper {
++
++    private static final Logger log = LoggerFactory.getLogger(GcsStorageHelper.class);
++
++    private final Storage storage;
++
++    public GcsStorageHelper(Storage storage) {
++        this.storage = storage;
++    }
++
++    public BufferedReader openReader(GcsObjectReference location) {
++        Blob blob = storage.get(BlobId.of(location.bucket(), location.objectName()));
++        if (blob == null) {
++            throw new IllegalArgumentException("Objeto GCS no encontrado: " + location.toUri());
++        }
++        return new BufferedReader(
++                new InputStreamReader(Channels.newInputStream(blob.reader()), StandardCharsets.UTF_8));
++    }
++
++    public GcsObjectReference moveBlob(GcsObjectReference source, GcsObjectReference targetFolder) {
++        GcsObjectReference target = targetFolder.resolve(source.fileName());
++        BlobId sourceId = BlobId.of(source.bucket(), source.objectName());
++        BlobId targetId = BlobId.of(target.bucket(), target.objectName());
++
++        storage.delete(targetId);
++        storage.copy(Storage.CopyRequest.newBuilder()
++                .setSource(sourceId)
++                .setTarget(BlobInfo.newBuilder(targetId).build())
++                .build()).getResult();
++
++        boolean deleted = storage.delete(sourceId);
++        if (!deleted) {
++            log.atWarn()
++                    .setMessage("Objeto fuente no eliminado luego del movimiento GCS")
++                    .addKeyValue("sourceObject", source.toUri())
++                    .log();
++        }
++        return target;
++    }
++
++    public GcsObjectReference upload(GcsObjectReference target, byte[] content, String contentType) {
++        BlobInfo blobInfo = BlobInfo.newBuilder(BlobId.of(target.bucket(), target.objectName()))
++                .setContentType(contentType)
++                .build();
++        storage.create(blobInfo, content);
++        log.atInfo()
++                .setMessage("Archivo subido a GCS")
++                .addKeyValue("uri", target.toUri())
++                .log();
++        return target;
++    }
++
++    public Stream<Blob> streamBlobs(GcsObjectReference folder) {
++        String prefix = folder.prefixWithSlash();
++        return StreamSupport.stream(
++                        storage.list(folder.bucket(), Storage.BlobListOption.prefix(prefix))
++                                .iterateAll()
++                                .spliterator(), false)
++                .filter(blob -> !blob.isDirectory());
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsUpdateCedPadRucStorageAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsUpdateCedPadRucStorageAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsUpdateCedPadRucStorageAdapter.java
+@@ -7,36 +7,29 @@
+ import com.elrosado.cersuitecloudlocalcore.infrastructure.config.LegacyUpdateCedPadRucProperties;
+ import com.elrosado.cersuitecloudlocalcore.infrastructure.config.UpdateCedPadRucProperties;
+ import com.google.cloud.storage.Blob;
+-import com.google.cloud.storage.BlobId;
+-import com.google.cloud.storage.BlobInfo;
+-import com.google.cloud.storage.Storage;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ import org.springframework.stereotype.Component;
+ 
+ import java.io.BufferedReader;
+-import java.io.InputStreamReader;
+-import java.nio.channels.Channels;
+-import java.nio.charset.StandardCharsets;
+ import java.util.Comparator;
+ import java.util.List;
+ import java.util.Optional;
+-import java.util.stream.StreamSupport;
+ 
+ @Component
+ public class GcsUpdateCedPadRucStorageAdapter implements UpdateCedPadRucStoragePort {
+ 
+     private static final Logger log = LoggerFactory.getLogger(GcsUpdateCedPadRucStorageAdapter.class);
+ 
+-    private final Storage storage;
++    private final GcsStorageHelper gcsHelper;
+     private final LegacyUpdateCedPadRucProperties legacyProperties;
+     private final UpdateCedPadRucProperties properties;
+ 
+     public GcsUpdateCedPadRucStorageAdapter(
+-            Storage storage,
++            GcsStorageHelper gcsHelper,
+             LegacyUpdateCedPadRucProperties legacyProperties,
+             UpdateCedPadRucProperties properties) {
+-        this.storage = storage;
++        this.gcsHelper = gcsHelper;
+         this.legacyProperties = legacyProperties;
+         this.properties = properties;
+     }
+@@ -46,10 +39,7 @@
+         GcsObjectReference input = GcsObjectReference.fromUri(legacyProperties.inputUri());
+         String prefix = input.prefixWithSlash();
+ 
+-        return StreamSupport.stream(storage.list(input.bucket(), Storage.BlobListOption.prefix(prefix))
+-                        .iterateAll()
+-                        .spliterator(), false)
+-                .filter(blob -> !blob.isDirectory())
++        return gcsHelper.streamBlobs(input)
+                 .flatMap(blob -> toPendingFile(input, prefix, blob).stream())
+                 .sorted(Comparator
+                         .comparing((UpdateCedPadRucFile file) -> file.type().legacyOrder())
+@@ -60,23 +50,17 @@
+ 
+     @Override
+     public BufferedReader openReader(UpdateCedPadRucFile file) {
+-        Blob blob = storage.get(BlobId.of(file.location().bucket(), file.location().objectName()));
+-        if (blob == null) {
+-            throw new IllegalArgumentException("Objeto GCS no encontrado: " + file.location().toUri());
+-        }
+-        return new BufferedReader(new InputStreamReader(
+-                Channels.newInputStream(blob.reader()),
+-                StandardCharsets.UTF_8));
++        return gcsHelper.openReader(file.location());
+     }
+ 
+     @Override
+     public GcsObjectReference moveToBackup(UpdateCedPadRucFile file) {
+-        return move(file, GcsObjectReference.fromUri(legacyProperties.backupUri()));
++        return gcsHelper.moveBlob(file.location(), GcsObjectReference.fromUri(legacyProperties.backupUri()));
+     }
+ 
+     @Override
+     public GcsObjectReference moveToError(UpdateCedPadRucFile file) {
+-        return move(file, GcsObjectReference.fromUri(properties.gcs().errorUri()));
++        return gcsHelper.moveBlob(file.location(), GcsObjectReference.fromUri(properties.gcs().errorUri()));
+     }
+ 
+     private Optional<UpdateCedPadRucFile> toPendingFile(
+@@ -116,25 +100,4 @@
+             return Integer.MAX_VALUE;
+         }
+     }
+-
+-    private GcsObjectReference move(UpdateCedPadRucFile file, GcsObjectReference targetFolder) {
+-        GcsObjectReference target = targetFolder.resolve(file.fileName());
+-        BlobId sourceId = BlobId.of(file.location().bucket(), file.location().objectName());
+-        BlobId targetId = BlobId.of(target.bucket(), target.objectName());
+-
+-        storage.delete(targetId);
+-        storage.copy(Storage.CopyRequest.newBuilder()
+-                .setSource(sourceId)
+-                .setTarget(BlobInfo.newBuilder(targetId).build())
+-                .build()).getResult();
+-
+-        boolean deleted = storage.delete(sourceId);
+-        if (!deleted) {
+-            log.atWarn()
+-                    .setMessage("Objeto fuente no eliminado luego del movimiento GCS")
+-                    .addKeyValue("sourceObject", file.location().toUri())
+-                    .log();
+-        }
+-        return target;
+-    }
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsUpdateMotoStorageAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsUpdateMotoStorageAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsUpdateMotoStorageAdapter.java
+@@ -6,23 +6,16 @@
+ import com.elrosado.cersuitecloudlocalcore.infrastructure.config.LegacyUpdateMotoProperties;
+ import com.elrosado.cersuitecloudlocalcore.infrastructure.config.UpdateMotoProperties;
+ import com.google.cloud.storage.Blob;
+-import com.google.cloud.storage.BlobId;
+-import com.google.cloud.storage.BlobInfo;
+-import com.google.cloud.storage.Storage;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ import org.springframework.stereotype.Component;
+ 
+ import java.io.BufferedReader;
+-import java.io.InputStreamReader;
+-import java.nio.channels.Channels;
+-import java.nio.charset.StandardCharsets;
+ import java.util.Comparator;
+ import java.util.List;
+ import java.util.Optional;
+ import java.util.regex.Matcher;
+ import java.util.regex.Pattern;
+-import java.util.stream.StreamSupport;
+ 
+ @Component
+ public class GcsUpdateMotoStorageAdapter implements MotoStoragePort {
+@@ -33,15 +26,15 @@
+     private static final Pattern MOTO_FILE_PATTERN =
+             Pattern.compile("^MOLOTE(\\d+)\\.(\\d+)$", Pattern.CASE_INSENSITIVE);
+ 
+-    private final Storage storage;
++    private final GcsStorageHelper gcsHelper;
+     private final LegacyUpdateMotoProperties legacyProperties;
+     private final UpdateMotoProperties properties;
+ 
+     public GcsUpdateMotoStorageAdapter(
+-            Storage storage,
++            GcsStorageHelper gcsHelper,
+             LegacyUpdateMotoProperties legacyProperties,
+             UpdateMotoProperties properties) {
+-        this.storage = storage;
++        this.gcsHelper = gcsHelper;
+         this.legacyProperties = legacyProperties;
+         this.properties = properties;
+     }
+@@ -51,11 +44,7 @@
+         GcsObjectReference input = GcsObjectReference.fromUri(legacyProperties.inputUri());
+         String prefix = input.prefixWithSlash();
+ 
+-        return StreamSupport.stream(
+-                        storage.list(input.bucket(), Storage.BlobListOption.prefix(prefix))
+-                                .iterateAll()
+-                                .spliterator(), false)
+-                .filter(blob -> !blob.isDirectory())
++        return gcsHelper.streamBlobs(input)
+                 .flatMap(blob -> toMotoFile(input, prefix, blob).stream())
+                 .sorted(Comparator
+                         .comparingInt(MotoFile::storeCode)
+@@ -65,13 +54,7 @@
+ 
+     @Override
+     public BufferedReader openReader(MotoFile file) {
+-        Blob blob = storage.get(BlobId.of(file.location().bucket(), file.location().objectName()));
+-        if (blob == null) {
+-            throw new IllegalArgumentException("GCS object not found: " + file.location().toUri());
+-        }
+-        return new BufferedReader(new InputStreamReader(
+-                Channels.newInputStream(blob.reader()),
+-                StandardCharsets.UTF_8));
++        return gcsHelper.openReader(file.location());
+     }
+ 
+     @Override
+@@ -79,7 +62,7 @@
+         String storeCodeStr = String.format("%03d", file.storeCode());
+         GcsObjectReference targetFolder = GcsObjectReference.fromUri(
+                 legacyProperties.backupUri() + "/" + storeCodeStr);
+-        return move(file, targetFolder);
++        return gcsHelper.moveBlob(file.location(), targetFolder);
+     }
+ 
+     @Override
+@@ -87,7 +70,7 @@
+         String storeCodeStr = String.format("%03d", file.storeCode());
+         GcsObjectReference targetFolder = GcsObjectReference.fromUri(
+                 properties.gcs().errorUri() + "/" + storeCodeStr);
+-        return move(file, targetFolder);
++        return gcsHelper.moveBlob(file.location(), targetFolder);
+     }
+ 
+     private Optional<MotoFile> toMotoFile(GcsObjectReference input, String prefix, Blob blob) {
+@@ -117,25 +100,4 @@
+             return Optional.empty();
+         }
+     }
+-
+-    private GcsObjectReference move(MotoFile file, GcsObjectReference targetFolder) {
+-        GcsObjectReference target = targetFolder.resolve(file.fileName());
+-        BlobId sourceId = BlobId.of(file.location().bucket(), file.location().objectName());
+-        BlobId targetId = BlobId.of(target.bucket(), target.objectName());
+-
+-        storage.delete(targetId);
+-        storage.copy(Storage.CopyRequest.newBuilder()
+-                .setSource(sourceId)
+-                .setTarget(BlobInfo.newBuilder(targetId).build())
+-                .build()).getResult();
+-
+-        boolean deleted = storage.delete(sourceId);
+-        if (!deleted) {
+-            log.atWarn()
+-                    .setMessage("Source object not deleted after GCS move")
+-                    .addKeyValue("sourceObject", file.location().toUri())
+-                    .log();
+-        }
+-        return target;
+-    }
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsUpdateSecSubSecStorageAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsUpdateSecSubSecStorageAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsUpdateSecSubSecStorageAdapter.java
+@@ -0,0 +1,91 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.storage;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SecSubSecFile;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SecSubSecFile.SecSubSecFileType;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.UpdateSecSubSecStoragePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.LegacyUpdateSecSubSecProperties;
++import com.google.cloud.storage.Blob;
++import org.springframework.stereotype.Component;
++
++import java.io.BufferedReader;
++import java.util.Comparator;
++import java.util.List;
++import java.util.Optional;
++
++@Component
++public class GcsUpdateSecSubSecStorageAdapter implements UpdateSecSubSecStoragePort {
++
++    private final GcsStorageHelper gcsHelper;
++    private final LegacyUpdateSecSubSecProperties legacyProperties;
++
++    public GcsUpdateSecSubSecStorageAdapter(
++            GcsStorageHelper gcsHelper,
++            LegacyUpdateSecSubSecProperties legacyProperties) {
++        this.gcsHelper = gcsHelper;
++        this.legacyProperties = legacyProperties;
++    }
++
++    @Override
++    public List<SecSubSecFile> listPendingFiles() {
++        GcsObjectReference input = GcsObjectReference.fromUri(legacyProperties.inputUri());
++        String prefix = input.prefixWithSlash();
++
++        return gcsHelper.streamBlobs(input)
++                .flatMap(blob -> toPendingFile(input, prefix, blob).stream())
++                // SEC (ordinal 0) antes que SUBSEC (ordinal 1); dentro del mismo tipo, por sortKey
++                .sorted(Comparator
++                        .comparingInt((SecSubSecFile f) -> f.type().ordinal())
++                        .thenComparingLong(SecSubSecFile::sortKey))
++                .toList();
++    }
++
++    @Override
++    public BufferedReader openReader(SecSubSecFile file) {
++        return gcsHelper.openReader(file.location());
++    }
++
++    @Override
++    public GcsObjectReference moveToBackup(SecSubSecFile file) {
++        return gcsHelper.moveBlob(file.location(), GcsObjectReference.fromUri(legacyProperties.backupUri()));
++    }
++
++    @Override
++    public GcsObjectReference uploadControllerFile(String fileName, byte[] content) {
++        GcsObjectReference target = GcsObjectReference.fromUri(legacyProperties.inputUri()).resolve(fileName);
++        return gcsHelper.upload(target, content, "application/octet-stream");
++    }
++
++    private Optional<SecSubSecFile> toPendingFile(GcsObjectReference input, String prefix, Blob blob) {
++        String objectName = blob.getName();
++        if (!objectName.startsWith(prefix)) {
++            return Optional.empty();
++        }
++
++        String relativeName = objectName.substring(prefix.length());
++        if (relativeName.isBlank() || relativeName.contains("/")) {
++            return Optional.empty();
++        }
++
++        SecSubSecFileType type = SecSubSecFileType.fromFileName(relativeName);
++        if (type == null) {
++            return Optional.empty();
++        }
++
++        long sortKey = parseSortKey(relativeName);
++        return Optional.of(new SecSubSecFile(
++                new GcsObjectReference(input.bucket(), objectName),
++                relativeName,
++                type,
++                sortKey));
++    }
++
++    // Usa los Ãºltimos 14 caracteres del nombre de archivo como clave de ordenaciÃ³n (timestamp)
++    private long parseSortKey(String fileName) {
++        try {
++            return Long.parseLong(fileName.substring(fileName.length() - 14));
++        } catch (Exception e) {
++            return Long.MAX_VALUE;
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LegacyUpdateSecSubSecProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LegacyUpdateSecSubSecProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LegacyUpdateSecSubSecProperties.java
+@@ -0,0 +1,49 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.boot.context.properties.ConfigurationProperties;
++
++@ConfigurationProperties(prefix = "update-sec-sub-sec")
++public record LegacyUpdateSecSubSecProperties(
++        LegacyRoute in,
++        LegacyRoute bkp,
++        long timesleep,
++        String controllerName,
++        String targetDir,
++        String cmdLine,
++        String pctEmpDefault,
++        String pctSolDefault,
++        String guiName
++) {
++
++    public LegacyUpdateSecSubSecProperties {
++        if (in == null) in = new LegacyRoute(new LegacyFolder(""));
++        if (bkp == null) bkp = new LegacyRoute(new LegacyFolder(""));
++        if (timesleep <= 0) timesleep = 30_000L;
++        if (controllerName == null) controllerName = "";
++        if (targetDir == null) targetDir = "";
++        if (cmdLine == null) cmdLine = "";
++        if (pctEmpDefault == null) pctEmpDefault = "0";
++        if (pctSolDefault == null) pctSolDefault = "0";
++        if (guiName == null) guiName = "";
++    }
++
++    public String inputUri() {
++        return in.folder().path();
++    }
++
++    public String backupUri() {
++        return bkp.folder().path();
++    }
++
++    public record LegacyRoute(LegacyFolder folder) {
++        public LegacyRoute {
++            if (folder == null) folder = new LegacyFolder("");
++        }
++    }
++
++    public record LegacyFolder(String path) {
++        public LegacyFolder {
++            if (path == null) path = "";
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java
+@@ -16,7 +16,9 @@
+         UpdateMotoProperties.class,
+         LegacyUpdateMotoProperties.class,
+         SendCartaMotoProperties.class,
+-        LegacySendCartaMotoProperties.class
++        LegacySendCartaMotoProperties.class,
++        UpdateSecSubSecProperties.class,
++        LegacyUpdateSecSubSecProperties.class
+ })
+ public class SchedulingConfig {
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/UpdateSecSubSecProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/UpdateSecSubSecProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/UpdateSecSubSecProperties.java
+@@ -0,0 +1,6 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.boot.context.properties.ConfigurationProperties;
++
++@ConfigurationProperties(prefix = "app.update-sec-sub-sec")
++public record UpdateSecSubSecProperties(boolean enabled) {}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/UpdateSecSubSecService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/UpdateSecSubSecService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/UpdateSecSubSecService.java
+@@ -0,0 +1,360 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.ActiveStoreInfo;
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.MerchandiseHierarchyGroup;
++import com.elrosado.cersuitecloudlocalcore.domain.model.PosDepartment;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SecSubSecFile;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SecSubSecFile.SecSubSecFileType;
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.UpdateSecSubSecUseCase;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.ActiveStoreQueryPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.PosDepartmentPersistencePort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.SynchroControllerPublisherPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.UpdateSecSubSecStoragePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.LegacyUpdateSecSubSecProperties;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.UpdateSecSubSecProperties;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Service;
++
++import java.io.BufferedReader;
++import java.io.IOException;
++import java.nio.charset.StandardCharsets;
++import java.util.List;
++
++@Service
++public class UpdateSecSubSecService implements UpdateSecSubSecUseCase {
++
++    private static final Logger log = LoggerFactory.getLogger(UpdateSecSubSecService.class);
++    private static final int MAX_ATTEMPTS = 3;
++    private static final String PROCESS_CODE = "UPD_SECSUBSEC_P";
++
++    private final UpdateSecSubSecStoragePort storagePort;
++    private final PosDepartmentPersistencePort persistencePort;
++    private final ActiveStoreQueryPort storeQueryPort;
++    private final SynchroControllerPublisherPort synchroPublisher;
++    private final UpdateSecSubSecProperties properties;
++    private final LegacyUpdateSecSubSecProperties legacyProperties;
++
++    public UpdateSecSubSecService(
++            UpdateSecSubSecStoragePort storagePort,
++            PosDepartmentPersistencePort persistencePort,
++            ActiveStoreQueryPort storeQueryPort,
++            SynchroControllerPublisherPort synchroPublisher,
++            UpdateSecSubSecProperties properties,
++            LegacyUpdateSecSubSecProperties legacyProperties) {
++        this.storagePort = storagePort;
++        this.persistencePort = persistencePort;
++        this.storeQueryPort = storeQueryPort;
++        this.synchroPublisher = synchroPublisher;
++        this.properties = properties;
++        this.legacyProperties = legacyProperties;
++    }
++
++    @Override
++    public void processPendingFiles() {
++        if (!properties.enabled()) {
++            log.atDebug().setMessage("UpdateSecSubSec deshabilitado por configuracion").log();
++            return;
++        }
++
++        List<SecSubSecFile> pendingFiles;
++        try {
++            pendingFiles = storagePort.listPendingFiles();
++        } catch (RuntimeException e) {
++            log.atError()
++                    .setMessage("Error listando archivos UpdateSecSubSec en GCS")
++                    .addKeyValue("process", PROCESS_CODE)
++                    .setCause(e)
++                    .log();
++            return;
++        }
++
++        if (pendingFiles.isEmpty()) {
++            log.atDebug()
++                    .setMessage("Sin archivos UpdateSecSubSec pendientes en GCS")
++                    .addKeyValue("process", PROCESS_CODE)
++                    .log();
++            return;
++        }
++
++        log.atInfo()
++                .setMessage("Archivos UpdateSecSubSec pendientes detectados")
++                .addKeyValue("process", PROCESS_CODE)
++                .addKeyValue("count", pendingFiles.size())
++                .log();
++
++        boolean anyProcessed = false;
++        for (SecSubSecFile file : pendingFiles) {
++            boolean ok = processWithRetry(file);
++            if (ok) {
++                anyProcessed = true;
++            }
++        }
++
++        if (anyProcessed) {
++            log.atInfo()
++                    .setMessage("Iniciando generacion de archivos para controlador")
++                    .addKeyValue("process", PROCESS_CODE)
++                    .log();
++            boolean created = createAndPublishControllerFiles();
++            if (created) {
++                log.atInfo()
++                        .setMessage("Archivos de controlador creados y eventos Pub/Sub publicados")
++                        .addKeyValue("process", PROCESS_CODE)
++                        .log();
++            } else {
++                log.atWarn()
++                        .setMessage("No se pudieron generar archivos de controlador (sin departamentos)")
++                        .addKeyValue("process", PROCESS_CODE)
++                        .log();
++            }
++        }
++    }
++
++    private boolean processWithRetry(SecSubSecFile file) {
++        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
++            try {
++                log.atInfo()
++                        .setMessage("Procesando archivo SecSubSec")
++                        .addKeyValue("process", PROCESS_CODE)
++                        .addKeyValue("fileName", file.fileName())
++                        .addKeyValue("type", file.type())
++                        .addKeyValue("attempt", attempt)
++                        .log();
++
++                if (file.type() == SecSubSecFileType.SEC) {
++                    processSecFile(file);
++                } else {
++                    processSubSecFile(file);
++                }
++
++                storagePort.moveToBackup(file);
++
++                log.atInfo()
++                        .setMessage("Archivo SecSubSec procesado y movido a backup")
++                        .addKeyValue("process", PROCESS_CODE)
++                        .addKeyValue("fileName", file.fileName())
++                        .log();
++                return true;
++            } catch (Exception e) {
++                log.atError()
++                        .setMessage("Error procesando archivo SecSubSec")
++                        .addKeyValue("process", PROCESS_CODE)
++                        .addKeyValue("fileName", file.fileName())
++                        .addKeyValue("attempt", attempt)
++                        .setCause(e)
++                        .log();
++            }
++        }
++        log.atError()
++                .setMessage("Archivo SecSubSec descartado por maximo de reintentos alcanzado")
++                .addKeyValue("process", PROCESS_CODE)
++                .addKeyValue("fileName", file.fileName())
++                .addKeyValue("maxAttempts", MAX_ATTEMPTS)
++                .log();
++        return false;
++    }
++
++    // Procesa archivo SEC (secciones/departamentos). Cada lÃ­nea es de 72 caracteres.
++    private void processSecFile(SecSubSecFile file) throws IOException {
++        try (BufferedReader reader = storagePort.openReader(file)) {
++            String line;
++            while ((line = reader.readLine()) != null) {
++                if (line.trim().length() != 72) continue;
++
++                String codDptoCer     = line.substring(0, 4);
++                String name           = line.substring(4, 54);
++                String codNegocio     = line.substring(54, 58);
++                int    porcRecargo    = Integer.parseInt(line.substring(58, 62).trim());
++                String flagDscEmp     = line.substring(62, 63);
++                String flagBonSol     = line.substring(63, 64);
++                String rawPorcDscEmp  = line.substring(64, 68);
++                String rawPorcBonSol  = line.substring(68, 72);
++
++                int porcDscEmp = resolvePercent(flagDscEmp, rawPorcDscEmp, legacyProperties.pctEmpDefault());
++                int porcBonSol = resolvePercent(flagBonSol, rawPorcBonSol, legacyProperties.pctSolDefault());
++
++                PosDepartment existing = persistencePort.findByCodDptoCer(codDptoCer)
++                        .orElse(new PosDepartment(null, codDptoCer, "", "", 0, 0, 0, 0));
++
++                PosDepartment updated = new PosDepartment(
++                        existing.id(),
++                        codDptoCer,
++                        name,
++                        codNegocio,
++                        porcRecargo,
++                        porcDscEmp,
++                        porcBonSol,
++                        existing.qtyFlias());
++
++                persistencePort.save(updated);
++            }
++        }
++    }
++
++    // Procesa archivo SUBSEC (subsecciones/familias). Cada lÃ­nea es de 61 caracteres.
++    private void processSubSecFile(SecSubSecFile file) throws IOException {
++        try (BufferedReader reader = storagePort.openReader(file)) {
++            String line;
++            while ((line = reader.readLine()) != null) {
++                if (line.trim().length() != 61) continue;
++
++                String codDptoCer  = line.substring(0, 4);
++                String codMrhCer   = line.substring(4, 7);
++                String name        = line.substring(7, 57);
++                int    porcRecargo = Integer.parseInt(line.substring(57, 61).trim());
++
++                PosDepartment dept = persistencePort.findByCodDptoCer(codDptoCer).orElse(null);
++                if (dept == null) {
++                    log.atWarn()
++                            .setMessage("Departamento no encontrado para subseccion; linea ignorada")
++                            .addKeyValue("process", PROCESS_CODE)
++                            .addKeyValue("codDptoCer", codDptoCer)
++                            .addKeyValue("codMrhCer", codMrhCer)
++                            .log();
++                    continue;
++                }
++
++                MerchandiseHierarchyGroup existing = persistencePort
++                        .findMhgByCodAndDept(codMrhCer, dept.id())
++                        .orElse(new MerchandiseHierarchyGroup(null, null, codMrhCer, "", "", dept.id(), 0));
++
++                Integer code = existing.code();
++                if (code == null) {
++                    int nextCode = dept.qtyFlias() + 1;
++                    code = nextCode;
++                    PosDepartment updatedDept = dept.withQtyFlias(nextCode);
++                    persistencePort.save(updatedDept);
++                }
++
++                MerchandiseHierarchyGroup updated = new MerchandiseHierarchyGroup(
++                        existing.id(),
++                        code,
++                        codMrhCer,
++                        name,
++                        name,
++                        dept.id(),
++                        porcRecargo);
++
++                persistencePort.saveMhg(updated);
++            }
++        }
++    }
++
++    private boolean createAndPublishControllerFiles() {
++        List<PosDepartment> deptos = persistencePort.findAllOrderById();
++        if (deptos == null || deptos.isEmpty()) {
++            return false;
++        }
++
++        String controllerName = legacyProperties.controllerName();
++        String guiName        = legacyProperties.guiName();
++        String targetDir      = legacyProperties.targetDir();
++        String cmdLine        = legacyProperties.cmdLine();
++
++        // Genera contenido {controllerName}.DAT con datos de secciones
++        StringBuilder controllerDat = new StringBuilder();
++        StringBuilder guiDat        = new StringBuilder();
++
++        for (int i = 0; i < deptos.size(); i++) {
++            PosDepartment dept = deptos.get(i);
++            String codDepto    = leftPad(String.valueOf(dept.id()), 4);
++            String porcRecFinal = leftPad(String.valueOf(dept.porcentajeRecargo() / 100), 2);
++            String flDscEmp    = dept.porcentajeDscEmp() > 0 ? "1" : "0";
++            String flBonSol    = dept.porcentajeBonSol() > 0 ? "1" : "0";
++
++            // SecciÃ³n base (cÃ³digo familia 0000)
++            controllerDat.append(codDepto).append("0000").append(porcRecFinal)
++                    .append(flDscEmp).append(flBonSol).append("\n");
++
++            // GUI: codDptoCer-nombre separados por |
++            guiDat.append(dept.codDptoCer()).append("-").append(dept.name().trim());
++            if (i < deptos.size() - 1) {
++                guiDat.append("|");
++            }
++        }
++
++        // Agrega datos de familias (MerchandiseHierarchyGroup) al controllerDat
++        List<Object[]> mhgData = persistencePort.findAllMhgWithDeptData();
++        if (mhgData != null) {
++            for (Object[] row : mhgData) {
++                String codDepto = leftPad(row[0].toString(), 4);
++                String codFlia  = leftPad(row[1].toString(), 4);
++                String porcRec  = row[2].toString();
++                // Toma primeros 2 dÃ­gitos del porcentaje de recargo de familia
++                String porcRecFinal = porcRec.length() >= 2
++                        ? porcRec.substring(0, 2)
++                        : leftPad(porcRec, 2);
++                int porcDesEmp = Integer.parseInt(row[3].toString());
++                int porcBonSol = Integer.parseInt(row[4].toString());
++                String flDscEmp = porcDesEmp > 0 ? "1" : "0";
++                String flBonSol = porcBonSol > 0 ? "1" : "0";
++
++                controllerDat.append(codDepto).append(codFlia).append(porcRecFinal)
++                        .append(flDscEmp).append(flBonSol).append("\n");
++            }
++        }
++
++        // Genera contenido de archivos .CMD (instrucciones para el controlador)
++        String controllerCmd = cmdLine + "\n" + cmdLine + "\n";
++        String guiCmd        = targetDir + "\n";
++
++        // Sube los 4 archivos a GCS
++        GcsObjectReference controllerDatRef = storagePort.uploadControllerFile(
++                controllerName + ".DAT", controllerDat.toString().getBytes(StandardCharsets.UTF_8));
++        GcsObjectReference controllerCmdRef = storagePort.uploadControllerFile(
++                controllerName + ".CMD", controllerCmd.getBytes(StandardCharsets.UTF_8));
++        GcsObjectReference guiDatRef = storagePort.uploadControllerFile(
++                guiName + ".DAT", guiDat.toString().getBytes(StandardCharsets.UTF_8));
++        GcsObjectReference guiCmdRef = storagePort.uploadControllerFile(
++                guiName + ".CMD", guiCmd.getBytes(StandardCharsets.UTF_8));
++
++        // Publica evento Pub/Sub por cada tienda activa con servidor local
++        List<ActiveStoreInfo> stores = storeQueryPort.findActiveStoresWithLocalServer();
++        String bucket = controllerDatRef.bucket();
++
++        for (ActiveStoreInfo store : stores) {
++            synchroPublisher.publishFileReady(
++                    store.desClave(), bucket, controllerDatRef.objectName(), controllerName + ".DAT", targetDir);
++            synchroPublisher.publishFileReady(
++                    store.desClave(), bucket, controllerCmdRef.objectName(), controllerName + ".CMD", targetDir);
++            synchroPublisher.publishFileReady(
++                    store.desClave(), bucket, guiDatRef.objectName(), guiName + ".DAT", targetDir);
++            synchroPublisher.publishFileReady(
++                    store.desClave(), bucket, guiCmdRef.objectName(), guiName + ".CMD", targetDir);
++        }
++
++        log.atInfo()
++                .setMessage("Eventos Pub/Sub publicados al topic synchro-controller")
++                .addKeyValue("process", PROCESS_CODE)
++                .addKeyValue("stores", stores.size())
++                .addKeyValue("filesPerStore", 4)
++                .log();
++
++        return true;
++    }
++
++    private int resolvePercent(String flag, String rawValue, String defaultValue) {
++        if ("1".equals(flag)) {
++            return "0000".equals(rawValue) ? parseIntSafe(defaultValue) : parseIntSafe(rawValue);
++        }
++        return 0;
++    }
++
++    private int parseIntSafe(String val) {
++        try {
++            return Integer.parseInt(val == null ? "0" : val.trim());
++        } catch (NumberFormatException e) {
++            return 0;
++        }
++    }
++
++    private String leftPad(String value, int length) {
++        String result = value;
++        while (result.length() < length) {
++            result = "0" + result;
++        }
++        return result;
++    }
++}
+
+
+--- Diff for /src/main/resources/application-local.yml ---
+--- a//src/main/resources/application-local.yml
++++ b//src/main/resources/application-local.yml
+@@ -97,9 +97,12 @@
+     batch-size: 500
+     gcs:
+       error-uri: gs://gcs-cer-suite-core-files/eyes/arsap/in/cedpadruc-error
++  update-sec-sub-sec:
++    enabled: false
+   gcp:
+     pubsub:
+       topic-distributor: retail.local.distributor.request.v1
++      topic-synchro-controller: retail.local.synchro.controller.v1
+     firestore:
+       collection: frames
+       collection-repro: frames_repro
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/UpdateSecSubSecSchedulerAdapterTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/UpdateSecSubSecSchedulerAdapterTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/UpdateSecSubSecSchedulerAdapterTest.java
+@@ -0,0 +1,37 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.scheduler;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.UpdateSecSubSecUseCase;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.InjectMocks;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import static org.mockito.Mockito.doThrow;
++import static org.mockito.Mockito.verify;
++
++@ExtendWith(MockitoExtension.class)
++class UpdateSecSubSecSchedulerAdapterTest {
++
++    @Mock
++    UpdateSecSubSecUseCase useCase;
++
++    @InjectMocks
++    UpdateSecSubSecSchedulerAdapter scheduler;
++
++    @Test
++    void poll_invocaUseCase() {
++        scheduler.poll();
++
++        verify(useCase).processPendingFiles();
++    }
++
++    @Test
++    void poll_errorUseCase_noPropagaExcepcion() {
++        doThrow(new IllegalStateException("GCS unavailable")).when(useCase).processPendingFiles();
++
++        scheduler.poll();
++
++        verify(useCase).processPendingFiles();
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsStorageHelperTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsStorageHelperTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsStorageHelperTest.java
+@@ -0,0 +1,140 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.storage;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.google.api.gax.paging.Page;
++import com.google.cloud.storage.Blob;
++import com.google.cloud.storage.BlobId;
++import com.google.cloud.storage.BlobInfo;
++import com.google.cloud.storage.CopyWriter;
++import com.google.cloud.storage.Storage;
++import com.google.cloud.storage.Storage.CopyRequest;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.ArgumentCaptor;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.io.BufferedReader;
++import java.io.IOException;
++import java.nio.channels.Channels;
++import java.nio.channels.ReadableByteChannel;
++import java.util.List;
++import java.util.stream.Stream;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.assertj.core.api.Assertions.assertThatThrownBy;
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.ArgumentMatchers.anyString;
++import static org.mockito.ArgumentMatchers.eq;
++import static org.mockito.Mockito.*;
++
++@ExtendWith(MockitoExtension.class)
++class GcsStorageHelperTest {
++
++    @Mock Storage storage;
++    @Mock Blob blob;
++    @Mock CopyWriter copyWriter;
++    @Mock Page<Blob> blobPage;
++
++    GcsStorageHelper helper;
++
++    private static final GcsObjectReference SOURCE = new GcsObjectReference("bucket", "prefix/file.txt");
++    private static final GcsObjectReference FOLDER = new GcsObjectReference("bucket", "bkp");
++
++    @BeforeEach
++    void setUp() {
++        helper = new GcsStorageHelper(storage);
++    }
++
++    // --- openReader ---
++
++    @Test
++    void openReader_blobExiste_retornaReader() throws IOException {
++        ReadableByteChannel channel = mock(ReadableByteChannel.class);
++        when(storage.get(BlobId.of("bucket", "prefix/file.txt"))).thenReturn(blob);
++        when(blob.reader()).thenReturn(mock(com.google.cloud.ReadChannel.class));
++
++        // No lanza excepciÃ³n â el lector se crea
++        assertThat(helper.openReader(SOURCE)).isNotNull();
++    }
++
++    @Test
++    void openReader_blobNoExiste_lanzaIllegalArgument() {
++        when(storage.get(BlobId.of("bucket", "prefix/file.txt"))).thenReturn(null);
++
++        assertThatThrownBy(() -> helper.openReader(SOURCE))
++                .isInstanceOf(IllegalArgumentException.class)
++                .hasMessageContaining("gs://bucket/prefix/file.txt");
++    }
++
++    // --- moveBlob ---
++
++    @Test
++    void moveBlob_copiaYEliminaFuente() {
++        when(storage.copy(any(CopyRequest.class))).thenReturn(copyWriter);
++        // delete se llama 2 veces: primero el target (bkp/file.txt), luego el source (prefix/file.txt)
++        when(storage.delete(any(BlobId.class))).thenReturn(true);
++
++        GcsObjectReference result = helper.moveBlob(SOURCE, FOLDER);
++
++        assertThat(result.objectName()).isEqualTo("bkp/file.txt");
++        verify(storage).copy(any(CopyRequest.class));
++        verify(storage, times(2)).delete(any(BlobId.class));
++    }
++
++    @Test
++    void moveBlob_eliminarFuenteFalla_noLanzaExcepcion() {
++        when(storage.copy(any(CopyRequest.class))).thenReturn(copyWriter);
++        // Primera llamada (target) devuelve true; segunda (source) devuelve false
++        when(storage.delete(any(BlobId.class))).thenReturn(true, false);
++
++        // No lanza excepciÃ³n â solo hace WARN en log
++        GcsObjectReference result = helper.moveBlob(SOURCE, FOLDER);
++
++        assertThat(result).isNotNull();
++    }
++
++    // --- upload ---
++
++    @Test
++    void upload_creaBlob() {
++        byte[] content = "datos".getBytes();
++        when(storage.create(any(BlobInfo.class), eq(content))).thenReturn(blob);
++
++        GcsObjectReference target = new GcsObjectReference("bucket", "out/file.dat");
++        GcsObjectReference result = helper.upload(target, content, "application/octet-stream");
++
++        assertThat(result).isEqualTo(target);
++        ArgumentCaptor<BlobInfo> captor = ArgumentCaptor.forClass(BlobInfo.class);
++        verify(storage).create(captor.capture(), eq(content));
++        assertThat(captor.getValue().getContentType()).isEqualTo("application/octet-stream");
++        assertThat(captor.getValue().getBlobId().getName()).isEqualTo("out/file.dat");
++    }
++
++    // --- streamBlobs ---
++
++    @Test
++    void streamBlobs_filtraDirectoriosYretornaBlobs() {
++        Blob regular = mock(Blob.class);
++        Blob directory = mock(Blob.class);
++        when(regular.isDirectory()).thenReturn(false);
++        when(directory.isDirectory()).thenReturn(true);
++        when(blobPage.iterateAll()).thenReturn(List.of(regular, directory));
++        when(storage.list(eq("bucket"), any())).thenReturn(blobPage);
++
++        GcsObjectReference folder = new GcsObjectReference("bucket", "prefix");
++        Stream<Blob> result = helper.streamBlobs(folder);
++
++        assertThat(result.toList()).containsExactly(regular);
++    }
++
++    @Test
++    void streamBlobs_sinArchivos_retornaStreamVacio() {
++        when(blobPage.iterateAll()).thenReturn(List.of());
++        when(storage.list(anyString(), any())).thenReturn(blobPage);
++
++        GcsObjectReference folder = new GcsObjectReference("bucket", "vacio");
++        assertThat(helper.streamBlobs(folder).toList()).isEmpty();
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/UpdateSecSubSecServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/UpdateSecSubSecServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/UpdateSecSubSecServiceTest.java
+@@ -0,0 +1,346 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.ActiveStoreInfo;
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.MerchandiseHierarchyGroup;
++import com.elrosado.cersuitecloudlocalcore.domain.model.PosDepartment;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SecSubSecFile;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SecSubSecFile.SecSubSecFileType;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.ActiveStoreQueryPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.PosDepartmentPersistencePort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.SynchroControllerPublisherPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.UpdateSecSubSecStoragePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.LegacyUpdateSecSubSecProperties;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.LegacyUpdateSecSubSecProperties.LegacyFolder;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.LegacyUpdateSecSubSecProperties.LegacyRoute;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.UpdateSecSubSecProperties;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.io.BufferedReader;
++import java.io.StringReader;
++import java.util.List;
++import java.util.Optional;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.ArgumentMatchers.anyByte;
++import static org.mockito.ArgumentMatchers.anyString;
++import static org.mockito.ArgumentMatchers.eq;
++import static org.mockito.Mockito.*;
++
++@ExtendWith(MockitoExtension.class)
++class UpdateSecSubSecServiceTest {
++
++    @Mock UpdateSecSubSecStoragePort storagePort;
++    @Mock PosDepartmentPersistencePort persistencePort;
++    @Mock ActiveStoreQueryPort storeQueryPort;
++    @Mock SynchroControllerPublisherPort synchroPublisher;
++
++    private static final LegacyUpdateSecSubSecProperties LEGACY_PROPS = new LegacyUpdateSecSubSecProperties(
++            new LegacyRoute(new LegacyFolder("gs://bucket/EYES/ARSAP/IN")),
++            new LegacyRoute(new LegacyFolder("gs://bucket/EYES/ARSAP/BKP")),
++            30_000L, "ACEDEPTS", "C:\\ADX_UDT1", "C:\\ADX_IPGM\\ACEDEPTS.286", "0", "0", "SECLIST"
++    );
++
++    UpdateSecSubSecService service;
++
++    @BeforeEach
++    void setUp() {
++        service = new UpdateSecSubSecService(
++                storagePort, persistencePort, storeQueryPort, synchroPublisher,
++                new UpdateSecSubSecProperties(true),
++                LEGACY_PROPS
++        );
++    }
++
++    // --- disabled ---
++
++    @Test
++    void processPendingFiles_disabled_noInteraction() {
++        UpdateSecSubSecService disabled = new UpdateSecSubSecService(
++                storagePort, persistencePort, storeQueryPort, synchroPublisher,
++                new UpdateSecSubSecProperties(false),
++                LEGACY_PROPS
++        );
++
++        disabled.processPendingFiles();
++
++        verifyNoInteractions(storagePort, persistencePort, storeQueryPort, synchroPublisher);
++    }
++
++    // --- no files ---
++
++    @Test
++    void processPendingFiles_noFiles_noPersistence() {
++        when(storagePort.listPendingFiles()).thenReturn(List.of());
++
++        service.processPendingFiles();
++
++        verifyNoInteractions(persistencePort, storeQueryPort, synchroPublisher);
++    }
++
++    // --- SEC file processing ---
++
++    @Test
++    void processPendingFiles_secFile_nuevoDepartamento_guardaCorrectamente() throws Exception {
++        SecSubSecFile file = secFile("SEC0001201701010000001");
++        String line = buildSecLine("0001", "NOMBRE DPTO", "0000", 1200, "0", "0", "0000", "0000");
++        when(storagePort.listPendingFiles()).thenReturn(List.of(file));
++        when(storagePort.openReader(file)).thenReturn(reader(line));
++        when(persistencePort.findByCodDptoCer("0001")).thenReturn(Optional.empty());
++        when(persistencePort.save(any())).thenAnswer(inv -> inv.getArgument(0));
++        when(storagePort.moveToBackup(file)).thenReturn(new GcsObjectReference("bucket", "bkp/f"));
++        // crearArchivos â no depts at query time for simplicity
++        when(persistencePort.findAllOrderById()).thenReturn(List.of());
++
++        service.processPendingFiles();
++
++        verify(persistencePort).save(argThat(d ->
++                "0001".equals(d.codDptoCer()) && "NOMBRE DPTO".equals(d.name().trim())));
++        verify(storagePort).moveToBackup(file);
++    }
++
++    @Test
++    void processPendingFiles_secFile_lineaLongitudInvalida_seIgnora() throws Exception {
++        SecSubSecFile file = secFile("SEC0001201701010000001");
++        String lineCorta = "LINEA_CORTA";
++        when(storagePort.listPendingFiles()).thenReturn(List.of(file));
++        when(storagePort.openReader(file)).thenReturn(reader(lineCorta));
++        when(storagePort.moveToBackup(file)).thenReturn(new GcsObjectReference("bucket", "bkp/f"));
++        when(persistencePort.findAllOrderById()).thenReturn(List.of());
++
++        service.processPendingFiles();
++
++        verify(persistencePort, never()).save(any());
++    }
++
++    @Test
++    void processPendingFiles_secFile_flag1_rawCero_usaDefault() throws Exception {
++        SecSubSecFile file = secFile("SEC0001201701010000001");
++        // flag='1' rawPorcDscEmp='0000' â debe usar pctEmpDefault (0 en este test)
++        String line = buildSecLine("0002", "OTRO DPTO  ", "0001", 500, "1", "0", "0000", "0000");
++        when(storagePort.listPendingFiles()).thenReturn(List.of(file));
++        when(storagePort.openReader(file)).thenReturn(reader(line));
++        when(persistencePort.findByCodDptoCer("0002")).thenReturn(Optional.empty());
++        when(persistencePort.save(any())).thenAnswer(inv -> inv.getArgument(0));
++        when(storagePort.moveToBackup(file)).thenReturn(new GcsObjectReference("bucket", "bkp/f"));
++        when(persistencePort.findAllOrderById()).thenReturn(List.of());
++
++        service.processPendingFiles();
++
++        verify(persistencePort).save(argThat(d -> d.porcentajeDscEmp() == 0));
++    }
++
++    @Test
++    void processPendingFiles_secFile_flag0_porcDscEmpEsCero() throws Exception {
++        SecSubSecFile file = secFile("SEC0001201701010000001");
++        // flag='0' â porcDscEmp debe ser 0 aunque rawValue tenga datos
++        String line = buildSecLine("0003", "DPTO TRES  ", "0002", 300, "0", "0", "0500", "0800");
++        when(storagePort.listPendingFiles()).thenReturn(List.of(file));
++        when(storagePort.openReader(file)).thenReturn(reader(line));
++        when(persistencePort.findByCodDptoCer("0003")).thenReturn(Optional.empty());
++        when(persistencePort.save(any())).thenAnswer(inv -> inv.getArgument(0));
++        when(storagePort.moveToBackup(file)).thenReturn(new GcsObjectReference("bucket", "bkp/f"));
++        when(persistencePort.findAllOrderById()).thenReturn(List.of());
++
++        service.processPendingFiles();
++
++        verify(persistencePort).save(argThat(d -> d.porcentajeDscEmp() == 0 && d.porcentajeBonSol() == 0));
++    }
++
++    @Test
++    void processPendingFiles_secFile_flag1_rawValido_usaRaw() throws Exception {
++        SecSubSecFile file = secFile("SEC0001201701010000001");
++        // flag='1' rawPorcDscEmp='0500' â debe usar 500
++        String line = buildSecLine("0004", "DPTO CUATRO", "0003", 100, "1", "1", "0500", "0800");
++        when(storagePort.listPendingFiles()).thenReturn(List.of(file));
++        when(storagePort.openReader(file)).thenReturn(reader(line));
++        when(persistencePort.findByCodDptoCer("0004")).thenReturn(Optional.empty());
++        when(persistencePort.save(any())).thenAnswer(inv -> inv.getArgument(0));
++        when(storagePort.moveToBackup(file)).thenReturn(new GcsObjectReference("bucket", "bkp/f"));
++        when(persistencePort.findAllOrderById()).thenReturn(List.of());
++
++        service.processPendingFiles();
++
++        verify(persistencePort).save(argThat(d -> d.porcentajeDscEmp() == 500 && d.porcentajeBonSol() == 800));
++    }
++
++    // --- SUBSEC file processing ---
++
++    @Test
++    void processPendingFiles_subsecFile_deptNoEncontrado_logsWarnContinua() throws Exception {
++        SecSubSecFile file = subsecFile("SUBSEC0001201701010000001");
++        String line = buildSubsecLine("0099", "001", "FAMILIA SIN PADRE", 200);
++        when(storagePort.listPendingFiles()).thenReturn(List.of(file));
++        when(storagePort.openReader(file)).thenReturn(reader(line));
++        when(persistencePort.findByCodDptoCer("0099")).thenReturn(Optional.empty());
++        when(storagePort.moveToBackup(file)).thenReturn(new GcsObjectReference("bucket", "bkp/f"));
++        when(persistencePort.findAllOrderById()).thenReturn(List.of());
++
++        service.processPendingFiles();
++
++        verify(persistencePort, never()).saveMhg(any());
++    }
++
++    @Test
++    void processPendingFiles_subsecFile_mhgNuevo_autoIncrementaQtyFlias() throws Exception {
++        SecSubSecFile file = subsecFile("SUBSEC0001201701010000001");
++        String line = buildSubsecLine("0001", "001", "NUEVA FAMILIA  ", 100);
++        PosDepartment dept = new PosDepartment(10, "0001", "DPTO", "0", 0, 0, 0, 2);
++        when(storagePort.listPendingFiles()).thenReturn(List.of(file));
++        when(storagePort.openReader(file)).thenReturn(reader(line));
++        when(persistencePort.findByCodDptoCer("0001")).thenReturn(Optional.of(dept));
++        when(persistencePort.findMhgByCodAndDept("001", 10)).thenReturn(Optional.empty());
++        when(persistencePort.save(any())).thenAnswer(inv -> inv.getArgument(0));
++        when(persistencePort.saveMhg(any())).thenAnswer(inv -> inv.getArgument(0));
++        when(storagePort.moveToBackup(file)).thenReturn(new GcsObjectReference("bucket", "bkp/f"));
++        when(persistencePort.findAllOrderById()).thenReturn(List.of());
++
++        service.processPendingFiles();
++
++        // qtyFlias debe ser dept.qtyFlias()+1 = 3
++        verify(persistencePort).save(argThat(d -> d.qtyFlias() == 3));
++        // code del MHG debe ser 3
++        verify(persistencePort).saveMhg(argThat(m -> m.code() == 3 && m.porcentajeRecargo() == 100));
++    }
++
++    @Test
++    void processPendingFiles_subsecFile_mhgExistente_noIncrementaQtyFlias() throws Exception {
++        SecSubSecFile file = subsecFile("SUBSEC0001201701010000001");
++        String line = buildSubsecLine("0001", "001", "FAMILIA EXIST ", 50);
++        PosDepartment dept = new PosDepartment(10, "0001", "DPTO", "0", 0, 0, 0, 3);
++        MerchandiseHierarchyGroup existingMhg = new MerchandiseHierarchyGroup(5, 3, "001", "OLD", "OLD", 10, 0);
++        when(storagePort.listPendingFiles()).thenReturn(List.of(file));
++        when(storagePort.openReader(file)).thenReturn(reader(line));
++        when(persistencePort.findByCodDptoCer("0001")).thenReturn(Optional.of(dept));
++        when(persistencePort.findMhgByCodAndDept("001", 10)).thenReturn(Optional.of(existingMhg));
++        when(persistencePort.saveMhg(any())).thenAnswer(inv -> inv.getArgument(0));
++        when(storagePort.moveToBackup(file)).thenReturn(new GcsObjectReference("bucket", "bkp/f"));
++        when(persistencePort.findAllOrderById()).thenReturn(List.of());
++
++        service.processPendingFiles();
++
++        // NO debe actualizar dept cuando MHG ya existe
++        verify(persistencePort, never()).save(any());
++        // MHG actualizado con nuevo porcentajeRecargo=50
++        verify(persistencePort).saveMhg(argThat(m -> m.code() == 3 && m.porcentajeRecargo() == 50));
++    }
++
++    // --- reintentos ---
++
++    @Test
++    void processPendingFiles_errorEnProceso_reintentaYEventualmenteDescarta() throws Exception {
++        SecSubSecFile file = secFile("SEC0001201701010000001");
++        when(storagePort.listPendingFiles()).thenReturn(List.of(file));
++        when(storagePort.openReader(file)).thenThrow(new RuntimeException("Error GCS"));
++
++        service.processPendingFiles();
++
++        verify(storagePort, times(3)).openReader(file);
++        verify(storagePort, never()).moveToBackup(file);
++    }
++
++    // --- crearArchivosParaControlador ---
++
++    @Test
++    void processPendingFiles_conDeptsProcesados_publicaEventosPorTienda() throws Exception {
++        SecSubSecFile file = secFile("SEC0001201701010000001");
++        String line = buildSecLine("0001", "DPTO UNO    ", "0001", 100, "0", "0", "0000", "0000");
++        PosDepartment dept = new PosDepartment(1, "0001", "DPTO UNO", "1", 100, 0, 0, 0);
++        GcsObjectReference fakeRef = new GcsObjectReference("bucket", "EYES/ARSAP/IN/ACEDEPTS.DAT");
++
++        when(storagePort.listPendingFiles()).thenReturn(List.of(file));
++        when(storagePort.openReader(file)).thenReturn(reader(line));
++        lenient().when(persistencePort.findByCodDptoCer(anyString())).thenReturn(Optional.empty());
++        lenient().when(persistencePort.save(any())).thenAnswer(inv -> inv.getArgument(0));
++        when(storagePort.moveToBackup(file)).thenReturn(new GcsObjectReference("bucket", "bkp/f"));
++        when(persistencePort.findAllOrderById()).thenReturn(List.of(dept));
++        when(persistencePort.findAllMhgWithDeptData()).thenReturn(List.of());
++        when(storagePort.uploadControllerFile(anyString(), any(byte[].class))).thenReturn(fakeRef);
++        when(storeQueryPort.findActiveStoresWithLocalServer()).thenReturn(
++                List.of(new ActiveStoreInfo(5, "10.0.0.5"), new ActiveStoreInfo(10, "10.0.0.10")));
++
++        service.processPendingFiles();
++
++        // 2 tiendas Ã 4 archivos = 8 eventos
++        verify(synchroPublisher, times(8)).publishFileReady(anyInt(), anyString(), anyString(), anyString(), anyString());
++    }
++
++    @Test
++    void processPendingFiles_sinDeptosBD_noPublicaEventos() throws Exception {
++        SecSubSecFile file = secFile("SEC0001201701010000001");
++        String line = buildSecLine("0001", "DPTO UNO    ", "0001", 100, "0", "0", "0000", "0000");
++        when(storagePort.listPendingFiles()).thenReturn(List.of(file));
++        when(storagePort.openReader(file)).thenReturn(reader(line));
++        lenient().when(persistencePort.findByCodDptoCer(anyString())).thenReturn(Optional.empty());
++        lenient().when(persistencePort.save(any())).thenAnswer(inv -> inv.getArgument(0));
++        when(storagePort.moveToBackup(file)).thenReturn(new GcsObjectReference("bucket", "bkp/f"));
++        when(persistencePort.findAllOrderById()).thenReturn(List.of());
++
++        service.processPendingFiles();
++
++        verifyNoInteractions(synchroPublisher);
++    }
++
++    // --- helpers ---
++
++    private SecSubSecFile secFile(String name) {
++        long sortKey = Long.parseLong(name.substring(name.length() - 14));
++        return new SecSubSecFile(new GcsObjectReference("bucket", "EYES/ARSAP/IN/" + name),
++                name, SecSubSecFileType.SEC, sortKey);
++    }
++
++    private SecSubSecFile subsecFile(String name) {
++        long sortKey = Long.parseLong(name.substring(name.length() - 14));
++        return new SecSubSecFile(new GcsObjectReference("bucket", "EYES/ARSAP/IN/" + name),
++                name, SecSubSecFileType.SUBSEC, sortKey);
++    }
++
++    private BufferedReader reader(String content) {
++        return new BufferedReader(new StringReader(content));
++    }
++
++    /**
++     * Construye una lÃ­nea SEC de exactamente 72 caracteres.
++     * Formato: code(4)+name(50)+negocio(4)+porcRec(4)+flagDsc(1)+flagBon(1)+porcDscRaw(4)+porcBonRaw(4)
++     */
++    private String buildSecLine(String code, String name, String negocio,
++                                int porcRec, String flagDsc, String flagBon,
++                                String porcDscRaw, String porcBonRaw) {
++        return padRight(code, 4)
++                + padRight(name, 50)
++                + padRight(negocio, 4)
++                + leftPad(String.valueOf(porcRec), 4)
++                + flagDsc
++                + flagBon
++                + porcDscRaw
++                + porcBonRaw;
++    }
++
++    /**
++     * Construye una lÃ­nea SUBSEC de exactamente 61 caracteres.
++     * Formato: codDpto(4)+codMhg(3)+name(50)+porcRec(4)
++     */
++    private String buildSubsecLine(String codDpto, String codMhg, String name, int porcRec) {
++        return padRight(codDpto, 4)
++                + padRight(codMhg, 3)
++                + padRight(name, 50)
++                + leftPad(String.valueOf(porcRec), 4);
++    }
++
++    private String padRight(String s, int len) {
++        String result = s;
++        while (result.length() < len) result = result + " ";
++        return result.substring(0, len);
++    }
++
++    private String leftPad(String s, int len) {
++        String result = s;
++        while (result.length() < len) result = "0" + result;
++        return result;
++    }
++}
+
+

@@ -1,0 +1,2355 @@
+--- Diff for /.claude_rules/rules_and_prompt.md ---
+--- a//.claude_rules/rules_and_prompt.md
++++ b//.claude_rules/rules_and_prompt.md
+@@ -36,6 +36,28 @@
+ 11. Todo codigo, variables, entidad, dto, interfaces, repository, usecase, etc. Todo codigo escrito debe ser en ingles, codigo limpio y evitando codigo smells, aplicando buenas practicas de codigo, los comentarios deben ser en español.
+ Cuando respondas al usuario, proporciona siempre código limpio, optimizado, con tipado fuerte, utilizando las mejores prácticas de programación funcional (map, flatMap, filter, collect, records, pattern matching) y explicaciones técnicas de alto nivel.
+ 12.- Existe un template en D:\SIPECOM\repository-git\cer-gcp\templates\templates donde se debe seguir la misma estructura para desarrollos y APIs.
++13. Cobertura de código con JaCoCo: Todo proyecto Spring Boot debe incluir el plugin `jacoco-maven-plugin` versión 0.8.13 en el bloque `<build><plugins>` del `pom.xml`, con las dos ejecuciones estándar: `prepare-agent` (sin id explícito, fase por defecto) y `report` (id=report, fase=test). Esta configuración es compatible con Java 25 y genera el reporte en `target/site/jacoco/`. El objetivo mínimo de cobertura es 80% de líneas según estándar SonarQube.
++```xml
++<plugin>
++    <groupId>org.jacoco</groupId>
++    <artifactId>jacoco-maven-plugin</artifactId>
++    <version>0.8.13</version>
++    <executions>
++        <execution>
++            <goals>
++                <goal>prepare-agent</goal>
++            </goals>
++        </execution>
++        <execution>
++            <id>report</id>
++            <phase>test</phase>
++            <goals>
++                <goal>report</goal>
++            </goals>
++        </execution>
++    </executions>
++</plugin>
++```
+ ```
+ 
+ ---
+
+
+--- Diff for /asyncapi.yaml ---
+--- a//asyncapi.yaml
++++ b//asyncapi.yaml
+@@ -0,0 +1,252 @@
++asyncapi: 3.0.0
++
++info:
++  title: cer-suite-cl-local-integration
++  version: 0.0.1-SNAPSHOT
++  description: |
++    Microservicio de integración local CER Suite Cloud.
++    Responsabilidad: generar el archivo DV del proceso de devoluciones del POS retail CER/El Rosado,
++    escribirlo en GCS y transferirlo al POS mediante la API de sincronización.
++
++    **Flujo principal:**
++    1. Recibe solicitud de devolución desde el portal Angular via `retail.local.devolucion.request.v1`
++    2. Ejecuta el caso de uso `ExecuteDevolutionUseCase` (consulta BD, genera DV, escribe en GCS)
++    3. Publica resultado en `retail.local.devolution.processed.v1` para el SincronizadorService
++    4. Recibe el evento publicado via `retail.local.devolution.processed.v1` y transfiere el archivo al POS
++
++    **Política de Ack/Nack:**
++    - `Ack` (true): procesamiento exitoso, error permanente de negocio, mensaje inválido o duplicado
++    - `Nack` (false): error transitorio (BD no disponible, API de transferencia caída) — reintento automático
++
++  contact:
++    name: CER Suite Cloud — SIPECOM
++  license:
++    name: Privado — uso interno SIPECOM
++
++servers:
++  gcp-local:
++    host: pubsub.googleapis.com
++    protocol: googlepubsub
++    description: GCP Pub/Sub — proyecto modern-suite-cloud-inf (entorno local)
++    tags:
++      - name: env:local
++  gcp-prod:
++    host: pubsub.googleapis.com
++    protocol: googlepubsub
++    description: GCP Pub/Sub — proyecto GKE producción (Workload Identity)
++    tags:
++      - name: env:prod
++
++channels:
++
++  devolutionRequest:
++    address: retail.local.devolucion.request.v1
++    description: |
++      Topic de entrada. El backend del portal Angular publica aquí cuando el operador
++      confirma una devolución en el POS. Este microservicio consume la subscription
++      `retail.local.devolution.request.v1-sub`.
++    messages:
++      DevolutionTriggerMessage:
++        $ref: '#/components/messages/DevolutionTriggerMessage'
++    bindings:
++      googlepubsub:
++        topic: retail.local.devolucion.request.v1
++        subscription: retail.local.devolution.request.v1-sub
++
++  devolutionProcessed:
++    address: retail.local.devolution.processed.v1
++    description: |
++      Topic de salida y de entrada.
++      - **Publicación (OUT):** este microservicio publica aquí el evento `DevolutionProcessedEvent`
++        tras generar el archivo DV y escribirlo en GCS. El SincronizadorService lo consume para
++        entregar el archivo al POS.
++      - **Suscripción (IN):** este mismo microservicio también consume la subscription
++        `retail.local.devolution.processed.v1-sub` para ejecutar la transferencia HTTP del archivo DV
++        a la API del sincronizador local.
++    messages:
++      DevolutionProcessedEvent:
++        $ref: '#/components/messages/DevolutionProcessedEvent'
++    bindings:
++      googlepubsub:
++        topic: retail.local.devolution.processed.v1
++        subscription: retail.local.devolution.processed.v1-sub
++
++operations:
++
++  receiveDevolutionRequest:
++    action: receive
++    channel:
++      $ref: '#/channels/devolutionRequest'
++    title: Recibir solicitud de devolución desde el portal
++    summary: |
++      Desencadena la ejecución de `ExecuteDevolutionUseCase`: consulta BD (DEVS_EC, ARTS_EC, SAADMIN),
++      genera el archivo DV en formato de ancho fijo ISO-8859-1, lo escribe en GCS y publica el evento
++      de resultado en `retail.local.devolution.processed.v1`.
++    description: |
++      **Handler:** `DevolutionCreationMessageHandler`
++
++      **Política de Ack/Nack:**
++      | Situación | Resultado |
++      |-----------|-----------|
++      | Procesamiento exitoso | Ack |
++      | JSON inválido o payload nulo | Ack (descarte) |
++      | `devolutionId` ausente | Ack (descarte) |
++      | `DevolutionAlreadyProcessedException` | Ack (duplicado) |
++      | `DevolutionValidationException` | Ack (regla de negocio) |
++      | `CreditNoteNotEligibleException` | Ack (regla de negocio) |
++      | `NoSuchElementException` (sesión no encontrada) | Nack → reintento |
++      | Error inesperado | Nack → reintento |
++    messages:
++      - $ref: '#/channels/devolutionRequest/messages/DevolutionTriggerMessage'
++    bindings:
++      googlepubsub:
++        clientId: DevolutionPubSubSubscriber
++
++  publishDevolutionProcessed:
++    action: send
++    channel:
++      $ref: '#/channels/devolutionProcessed'
++    title: Publicar evento de devolución procesada
++    summary: |
++      Se publica tras confirmar la escritura del archivo DV en GCS. El SincronizadorService
++      lo consume para descargar el archivo de GCS y entregarlo al POS.
++    description: |
++      **Publisher:** `DevolutionEventAdapter` → `IMessagePublisher.publishAsync()`
++
++      El mensaje se serializa a JSON con Jackson. El campo `gcsPath` contiene la ruta completa
++      en formato `gs://{bucket}/{storeId}/{fileName}`.
++    messages:
++      - $ref: '#/channels/devolutionProcessed/messages/DevolutionProcessedEvent'
++
++  receiveDevolutionProcessed:
++    action: receive
++    channel:
++      $ref: '#/channels/devolutionProcessed'
++    title: Recibir evento de devolución procesada para transferencia HTTP
++    summary: |
++      Descarga el archivo DV desde GCS y lo transfiere mediante HTTP a la API del sincronizador
++      local (`SecureFileTransferAdapter`). La autenticación usa un Bearer token obtenido desde
++      GCP Secret Manager con caché TTL configurable.
++    description: |
++      **Handler:** `DevolutionTransferMessageHandler`
++
++      **Política de Ack/Nack:**
++      | Situación | Resultado |
++      |-----------|-----------|
++      | Transferencia exitosa | Ack |
++      | JSON inválido o payload nulo | Ack (descarte) |
++      | `devolutionId` o `gcsPath` ausente | Ack (descarte) |
++      | Transferencia deshabilitada (`FILE_TRANSFER_ENABLED=false`) | Ack (skip) |
++      | `FileTransferPermanentException` (400, 401, 403, 404) | Ack + auditoría |
++      | `FileTransferTransientException` (500, timeout, red) | Nack → reintento |
++      | Error inesperado | Nack → reintento |
++    messages:
++      - $ref: '#/channels/devolutionProcessed/messages/DevolutionProcessedEvent'
++    bindings:
++      googlepubsub:
++        clientId: DevolutionPubSubSubscriber
++
++components:
++
++  messages:
++
++    DevolutionTriggerMessage:
++      name: DevolutionTriggerMessage
++      title: Solicitud de ejecución de devolución
++      summary: Publicado por el backend del portal Angular cuando el operador confirma la devolución.
++      contentType: application/json
++      payload:
++        $ref: '#/components/schemas/DevolutionTriggerMessagePayload'
++      examples:
++        - name: Devolución estándar con código de operador
++          payload:
++            devolutionId: 12345
++            operatorCode: "001234567"
++        - name: Devolución sin operador (operatorCode opcional)
++          payload:
++            devolutionId: 99001
++            operatorCode: null
++
++    DevolutionProcessedEvent:
++      name: DevolutionProcessedEvent
++      title: Evento de devolución procesada
++      summary: |
++        Publicado por este microservicio tras generar el archivo DV y escribirlo en GCS.
++        Consumido por el SincronizadorService y también por este mismo microservicio
++        para ejecutar la transferencia HTTP al POS.
++      contentType: application/json
++      payload:
++        $ref: '#/components/schemas/DevolutionProcessedEventPayload'
++      examples:
++        - name: Devolución con nota de crédito generada
++          payload:
++            devolutionId: 12345
++            numNc: 87
++            creditNoteNumber: "NC-2026-0087"
++            gcsPath: "gs://gcs-cer-syncrhonization-files-dev/001/DV_20260612_12345.txt"
++            processedAt: "2026-06-12T14:35:22.123Z"
++
++  schemas:
++
++    DevolutionTriggerMessagePayload:
++      type: object
++      required:
++        - devolutionId
++      properties:
++        devolutionId:
++          type: integer
++          format: int32
++          description: |
++            Identificador de la sesión de devolución en DEVS_EC.DV_TICKET.
++            Corresponde al campo ID_DEV de la tabla.
++          minimum: 1
++          example: 12345
++        operatorCode:
++          type: string
++          description: |
++            Código del operador que ejecuta la devolución. Formato: 9 dígitos numéricos.
++            Corresponde a PaOprEntity.codOpr. Puede ser null si la devolución no requiere operador.
++          pattern: '^\d{9}$'
++          nullable: true
++          example: "001234567"
++
++    DevolutionProcessedEventPayload:
++      type: object
++      required:
++        - devolutionId
++        - gcsPath
++        - processedAt
++      properties:
++        devolutionId:
++          type: integer
++          format: int32
++          description: Identificador de la sesión de devolución. Mismo valor que en `DevolutionTriggerMessage`.
++          minimum: 1
++          example: 12345
++        numNc:
++          type: integer
++          format: int32
++          description: |
++            Número de secuencia de la nota de crédito generada por el POS (campo NUM_NC).
++            Null para devoluciones en modo 80 (devolución sin nota de crédito).
++          nullable: true
++          example: 87
++        creditNoteNumber:
++          type: string
++          description: |
++            Número de nota de crédito formateado para visualización.
++            Null para modo 80.
++          nullable: true
++          example: "NC-2026-0087"
++        gcsPath:
++          type: string
++          description: |
++            Ruta completa del archivo DV en Google Cloud Storage.
++            Formato: `gs://{bucket}/{storeId}/{fileName}`.
++            El SincronizadorService descarga el archivo desde esta ruta para entregarlo al POS.
++          example: "gs://gcs-cer-syncrhonization-files-dev/001/DV_20260612_12345.txt"
++        processedAt:
++          type: string
++          format: date-time
++          description: Timestamp UTC del momento en que el archivo DV fue generado y escrito en GCS.
++          example: "2026-06-12T14:35:22.123Z"
+
+
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -4,8 +4,21 @@
+   name: cer-suite-cl-local-integration-config
+   namespace: ns-cer-suite-dev
+ data:
+-  SPRING_PROFILES_ACTIVE: "prod"
++  SPRING_PROFILES_ACTIVE: "dev"
+   SERVER_PORT: "8080"
+-  GOOGLE_CLOUD_PROJECT: "your-gcp-project-id"
+-  GCS_BUCKET_DEVS: "suite-devoluciones"
+-  PUBSUB_SUBSCRIPTION_DEVOLUCION: "retail.local.devolucion.request.v1-sub"
++  GOOGLE_CLOUD_PROJECT: "modern-suite-cloud-inf"
++  GCS_BUCKET_DEVS: "gcs-cer-syncrhonization-files-dev"
++  PUBSUB_TOPIC_DEVOLUTION: "retail.local.devolution.request.v1"
++  PUBSUB_SUBSCRIPTION_DEVOLUTION: "retail.local.devolution.request.v1-sub"
++  PUBSUB_TOPIC_PROCESSED_DEVOLUTION: "retail.local.devolution.processed.v1"
++  PUBSUB_SUBSCRIPTION_DEVOLUTION_PROCESSED: "retail.local.devolution.processed.v1-sub"
++  FILE_TRANSFER_ENABLED: "true"
++  FILE_TRANSFER_BASE_URL: "https://10.1.4.57:8033/api/v1"
++  FILE_TRANSFER_FILES_PATH: "/files"
++  FILE_TRANSFER_TARGET_DIR: "f:/ALLC_DAT/IN/devs"
++  FILE_TRANSFER_TIMEOUT_SECONDS: "30"
++  FILE_TRANSFER_BEARER_TOKEN_SECRET_ID: "integration-file-transfer-bearer-token"
++  FILE_TRANSFER_BEARER_TOKEN_SECRET_VERSION: "latest"
++  FILE_TRANSFER_BEARER_TOKEN_CACHE_TTL_SECONDS: "300"
++  PARAM_NUM_POS_DEVOL: "NUMPOSDEVOL"
++  PARAM_REGION_FRECUENTO: "COD_REGION_FRECUENTO"
+
+
+--- Diff for /k8s/deployment.yaml ---
+--- a//k8s/deployment.yaml
++++ b//k8s/deployment.yaml
+@@ -1,8 +1,10 @@
+ apiVersion: apps/v1
+ kind: Deployment
+ metadata:
+-  name: cer-suite-cl-local-integration
++  name: cer-suite-cl-local-integration-deployment
+   namespace: ns-cer-suite-dev
++  labels:
++    app: cer-suite-cl-local-integration
+ spec:
+   replicas: 1
+   selector:
+@@ -16,23 +18,41 @@
+       securityContext:
+         runAsNonRoot: true
+         runAsUser: 10001
++        fsGroup: 10001
+       containers:
+         - name: cer-suite-cl-local-integration
+-          image: localhost:30500/cer-suite-cl-local-integration:0.0.1-SNAPSHOT
++          image: localhost:30500/cer-suite-cl-local-integration:latest
++          imagePullPolicy: Always
+           ports:
+             - containerPort: 8080
++              name: http
+           resources:
+             limits:
+               cpu: "1"
+-              memory: "512Mi"
++              memory: 512Mi
+             requests:
+-              cpu: "500m"
+-              memory: "256Mi"
++              cpu: 500m
++              memory: 256Mi
+           envFrom:
+             - configMapRef:
+                 name: cer-suite-cl-local-integration-config
+             - secretRef:
+                 name: cer-suite-cl-local-integration-secrets
++          env:
++            - name: SPRING_THREADS_VIRTUAL_ENABLED
++              value: "true"
++            - name: GOOGLE_APPLICATION_CREDENTIALS
++              value: /var/secrets/google/key.json
++          volumeMounts:
++            - name: gcp-credentials
++              mountPath: /var/secrets/google
++              readOnly: true
++          securityContext:
++            allowPrivilegeEscalation: false
++            readOnlyRootFilesystem: false
++            capabilities:
++              drop:
++                - ALL
+           startupProbe:
+             httpGet:
+               path: /actuator/health/liveness
+@@ -54,3 +74,7 @@
+             initialDelaySeconds: 30
+             periodSeconds: 10
+             failureThreshold: 3
++      volumes:
++        - name: gcp-credentials
++          secret:
++            secretName: gcp-credentials
+
+
+--- Diff for /k8s/namespace.yaml ---
+--- a//k8s/namespace.yaml
++++ b//k8s/namespace.yaml
+@@ -1,4 +0,0 @@
+-apiVersion: v1
+-kind: Namespace
+-metadata:
+-  name: ns-cer-suite-dev
+
+
+--- Diff for /k8s/secret-gcp.yaml ---
+--- a//k8s/secret-gcp.yaml
++++ b//k8s/secret-gcp.yaml
+@@ -0,0 +1,8 @@
++apiVersion: v1
++kind: Secret
++metadata:
++  name: gcp-credentials
++  namespace: ns-cer-suite-dev
++type: Opaque
++data:
++  key.json: "ewogICJ0eXBlIjogInNlcnZpY2VfYWNjb3VudCIsCiAgInByb2plY3RfaWQiOiAibW9kZXJuLXN1aXRlLWNsb3VkLXBlci1iNTViMCIsCiAgInByaXZhdGVfa2V5X2lkIjogIjAxZmRmMzYyYmEzMmU2OWNhZjYyMDMzMWYyY2ZjYTIyY2IxMGZlZDYiLAogICJwcml2YXRlX2tleSI6ICItLS0tLUJFR0lOIFBSSVZBVEUgS0VZLS0tLS1cbk1JSUV2Z0lCQURBTkJna3Foa2lHOXcwQkFRRUZBQVNDQktnd2dnU2tBZ0VBQW9JQkFRRFRpckNKRmJoQkUrNytcbkEwMFVMTWYwNFVEWUswclBYai9pZFNoL3IwVHg5ZVpqckhHNlNJajlZd2tiRGFoMC9QMUVXRmk4N1EzVDEzNlVcbkd5VUhGNU92QUorTUFQSUtPMXVMU0ZHU00xdk9aeFM2N2Fwa0pSdFRURDFTSFVxTEtoUUZlUStrUjAzNnFDdnNcbmF4MjZyMzdKWk4yR1JyT3lQZW5jRHI5OTRoaWp2eXpPZDk5WC9mMkV5NXI1RFE0OXQ2QVdUQTQ1N2ZBcDA0RlFcbnV6cWt5ZWsvT09LRDdTOVdIcGlzMCt5cjVRU1BqSVVJNWdPWnRsbTlKRmlnVnY1ZUNIcVdTdEZEVnNmZnJyVjZcbjZPSkZDQkFMU25xdzBwNzUvUHFwQ25uWmp4cm1vZkoyZm52eFlZK1IycGRQUDRjY0xqUDZTaStYZk1hdzB4cC9cbi9EYjRKdEZqQWdNQkFBRUNnZ0VBVTRXQk1RYlIwbVAvNnV1N3ZaajJzK0ZSM0dldmFGT1NqcU5xUTR1Y2dabndcbmhtOGFFZzQ4aENyYmVBSjYvZ0c3TDRaZ051dXpsMjRRYklLUktvMHRBcDRRNEZLcFBjLzAwM2ZRdVJRdERiL1dcblIvMjVWa1B1VjRPVS9IeFRKOElMMktOVlFTdmtCbkRxc3JRU0wxakdDdGNYdmNIaGhpRDYyaWM2aFFYRmE3VEJcbjc5VmJvSkFVRnVuSFJJczg1b2MxQ0pVZ0JuS2hhb3duV00xZGhKVmdSNmVXdVg3Y096b2hLY1RRckREaUpCWHRcbmw4WS9SdjJEdTVTa29EYzF4T3hFbzkzY2F1OTFEcUxSdGtMTnU1OE5WMHdWdUFBYmVPWXpiWTV6alZ1a0RmVDZcbjBlNDVoSkdoNElxUlh4Z01XcUxOTU5udGR1MEhjM1lxNHZyaEN6dWEwUUtCZ1FEM0xianJ0RmpXdTRXNEFvSjhcbjZrRXBpUWk4ek9JVU1vUDVtQjZBWGo4a01KcWhYYko4dmc1VXp3Y011ZE4vMHNRaVI3WitDMjBjZERacWl4bWlcbmYwQWgycWg1M2lXcEg3Sk02SmQrNGViRHV3bU5hYmpQeG9vNWlGVGV1Vmp1cUNKZmdrQTQ4SlhOaUpjTmdaTTZcbmk4WmdlK2JaVEJLdExwUmhyamVNbS9oVk1RS0JnUURiRjJHWXhkMWp4NmdlSFA5VG95SmZWL3JUdmlncE9RMXVcbnV3T2xsL2pJUGhWc1dUMU9xZDVKL2ROcmdPNHd2SnFmR1NRRDJDYzZhakZUMzdvcWR6RXB1UFovZE1rS1R4b2VcbnlPcEs4M0cwQTVXZXlWMmRiVE0wZlJ4M3lIZ012THJDWTdWTkdmdTkrbVk3RnNIZ20ra0RPbnpSMTJyM2I0QWpcbnMrTWJqUU82MHdLQmdRREl2VEU0K3paSzdmQWpDS2JBbTk1ZnhSSjdna2o0N2kyUVBxSkd6a09wT0cvY0xTUVBcbmVxcFk1ZWxyeEY2bnFKdncyeHl5TU1Wa0hsMHpHZFN2eTNoaUJocGRIclNuTFQ2NGh3ekIxdVI2Z1NPNDNPdGlcbmtuTWZWa0RXd09BZ3NodDRSV2V5MW5CU2cyTnBiSm9OS2dicHhMWXVNMEhYczhSOXIrY2RJbTREZ1FLQmdDYk9cblJXTWg2TXk3bUhOOC8xeDVFS1dDbDlMWlk1T3BuMDkxb0hlOEt6eU1nbzdtWDQySFdQQVNIVmgxUmJzc0xOYnhcblJRZkpTV2wzVmJWZGMwUUNTSnJ6UC9YallaaUoyajZKcDdZTzJKemg1YVp5VkRxR0ZRTy9CVVBTSmpGYlhGa0NcbkFDTGY3MDcvQXd5RVEyTGRPckJ2czV3WFk4TGY1UHB0NmxQKzdpSXhBb0dCQU9ob0V4SEFLbWt6TnpjNWtwTW9cbnJJSXNSRWdBTHNtRW5MZ1JVZ3dJaEw4Mjh1Mzh5ZktsSWNZeDkvYzFhR1hqWU5MOWdBRkh6RGc2N09mODBESkZcbnByNWIyQUw5Y09lWWozZVJoOW0xQnZqNEswTXc4eEh0VFBaalhKbHZyTXVCRyt2NUhrNXpXc0M3MmcycUUxYnlcbk9CUzdmQVJadGdMVVlDY3pXMDA1ZzFtcVxuLS0tLS1FTkQgUFJJVkFURSBLRVktLS0tLVxuIiwKICAiY2xpZW50X2VtYWlsIjogImZpcmViYXNlLWFkbWluc2RrLWZic3ZjQG1vZGVybi1zdWl0ZS1jbG91ZC1wZXItYjU1YjAuaWFtLmdzZXJ2aWNlYWNjb3VudC5jb20iLAogICJjbGllbnRfaWQiOiAiMTExODE5OTg2MTI1MjE2MTQ0NDE1IiwKICAiYXV0aF91cmkiOiAiaHR0cHM6Ly9hY2NvdW50cy5nb29nbGUuY29tL28vb2F1dGgyL2F1dGgiLAogICJ0b2tlbl91cmkiOiAiaHR0cHM6Ly9vYXV0aDIuZ29vZ2xlYXBpcy5jb20vdG9rZW4iLAogICJhdXRoX3Byb3ZpZGVyX3g1MDlfY2VydF91cmwiOiAiaHR0cHM6Ly93d3cuZ29vZ2xlYXBpcy5jb20vb2F1dGgyL3YxL2NlcnRzIiwKICAiY2xpZW50X3g1MDlfY2VydF91cmwiOiAiaHR0cHM6Ly93d3cuZ29vZ2xlYXBpcy5jb20vcm9ib3QvdjEvbWV0YWRhdGEveDUwOS9maXJlYmFzZS1hZG1pbnNkay1mYnN2YyU0MG1vZGVybi1zdWl0ZS1jbG91ZC1wZXItYjU1YjAuaWFtLmdzZXJ2aWNlYWNjb3VudC5jb20iLAogICJ1bml2ZXJzZV9kb21haW4iOiAiZ29vZ2xlYXBpcy5jb20iCn0="
+
+
+--- Diff for /k8s/secret.yaml ---
+--- a//k8s/secret.yaml
++++ b//k8s/secret.yaml
+@@ -3,14 +3,16 @@
+ metadata:
+   name: cer-suite-cl-local-integration-secrets
+   namespace: ns-cer-suite-dev
++  labels:
++    app: cer-suite-cl-local-integration
+ type: Opaque
+ stringData:
+-  DB_DEVS_EC_URL: "jdbc:sqlserver://localhost:1433;databaseName=DEVS_EC"
+-  DB_DEVS_EC_USER: "sa"
+-  DB_DEVS_EC_PASSWORD: "changeme"
+-  DB_ARTS_EC_URL: "jdbc:sqlserver://localhost:1433;databaseName=ARTS_EC"
+-  DB_ARTS_EC_USER: "sa"
+-  DB_ARTS_EC_PASSWORD: "changeme"
+-  DB_SAADMIN_URL: "jdbc:sqlserver://localhost:1433;databaseName=SAADMIN"
+-  DB_SAADMIN_USER: "sa"
+-  DB_SAADMIN_PASSWORD: "changeme"
++  DB_DEVS_EC_URL: "amRiYzpzcWxzZXJ2ZXI6Ly8xMC4yLjcuMjM6MTQzMztkYXRhYmFzZU5hbWU9REVWU19FQztlbmNyeXB0PWZhbHNlO3RydXN0U2VydmVyQ2VydGlmaWNhdGU9dHJ1ZQ=="
++  DB_DEVS_EC_USER: "YWxsaWFuY2Vz"
++  DB_DEVS_EC_PASSWORD: "QUxMQ18wMTgw"
++  DB_ARTS_EC_URL: "amRiYzpzcWxzZXJ2ZXI6Ly8xMC4yLjcuMjM6MTQzMztkYXRhYmFzZU5hbWU9QVJUU19FQztlbmNyeXB0PWZhbHNlO3RydXN0U2VydmVyQ2VydGlmaWNhdGU9dHJ1ZQ=="
++  DB_ARTS_EC_USER: "YWxsaWFuY2Vz"
++  DB_ARTS_EC_PASSWORD: "QUxMQ18wMTgw"
++  DB_SAADMIN_URL: "amRiYzpzcWxzZXJ2ZXI6Ly8xMC4yLjcuMjM6MTQzMztkYXRhYmFzZU5hbWU9U0FBRE1JTjtlbmNyeXB0PWZhbHNlO3RydXN0U2VydmVyQ2VydGlmaWNhdGU9dHJ1ZQ=="
++  DB_SAADMIN_USER: "YWxsaWFuY2Vz"
++  DB_SAADMIN_PASSWORD: "QUxMQ18wMTgw"
+
+
+--- Diff for /pom.xml ---
+--- a//pom.xml
++++ b//pom.xml
+@@ -20,6 +20,7 @@
+         <spring-cloud-gcp.version>8.0.2</spring-cloud-gcp.version>
+         <jlib.version>1.0.0</jlib.version>
+         <jlib.infrastructure.version>1.0.1</jlib.infrastructure.version>
++        <jlib.secretmanager.version>1.0.3</jlib.secretmanager.version>
+         <springdoc.version>2.8.5</springdoc.version>
+     </properties>
+ 
+@@ -66,6 +67,20 @@
+             <groupId>com.elrosado</groupId>
+             <artifactId>jlib-storage</artifactId>
+             <version>${jlib.infrastructure.version}</version>
++        </dependency>
++
++        <dependency>
++            <groupId>com.elrosado</groupId>
++            <artifactId>jlib-secretmanager</artifactId>
++            <version>${jlib.secretmanager.version}</version>
++            <exclusions>
++                <!-- Este microservicio no cifra secretos con KMS; excluir evita que
++                     KmsAutoConfiguration intente crear un cliente KMS sin credenciales ADC. -->
++                <exclusion>
++                    <groupId>com.elrosado</groupId>
++                    <artifactId>jlib-kms</artifactId>
++                </exclusion>
++            </exclusions>
+         </dependency>
+ 
+         <dependency>
+@@ -139,6 +154,25 @@
+                     </excludes>
+                 </configuration>
+             </plugin>
++            <plugin>
++                <groupId>org.jacoco</groupId>
++                <artifactId>jacoco-maven-plugin</artifactId>
++                <version>0.8.13</version>
++                <executions>
++                    <execution>
++                        <goals>
++                            <goal>prepare-agent</goal>
++                        </goals>
++                    </execution>
++                    <execution>
++                        <id>report</id>
++                        <phase>test</phase>
++                        <goals>
++                            <goal>report</goal>
++                        </goals>
++                    </execution>
++                </executions>
++            </plugin>
+         </plugins>
+     </build>
+ </project>
+
+
+--- Diff for /src/main/java/com/elrosado/integration/application/command/TransferDevolutionFileCommand.java ---
+--- a//src/main/java/com/elrosado/integration/application/command/TransferDevolutionFileCommand.java
++++ b//src/main/java/com/elrosado/integration/application/command/TransferDevolutionFileCommand.java
+@@ -0,0 +1,11 @@
++package com.elrosado.integration.application.command;
++
++import java.time.Instant;
++
++public record TransferDevolutionFileCommand(
++        Integer devolutionId,
++        Integer numNc,
++        String creditNoteNumber,
++        String gcsPath,
++        Instant processedAt
++) {}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/application/service/TransferDevolutionFileService.java ---
+--- a//src/main/java/com/elrosado/integration/application/service/TransferDevolutionFileService.java
++++ b//src/main/java/com/elrosado/integration/application/service/TransferDevolutionFileService.java
+@@ -0,0 +1,56 @@
++package com.elrosado.integration.application.service;
++
++import com.elrosado.integration.application.command.TransferDevolutionFileCommand;
++import com.elrosado.integration.domain.model.FileTransferResult;
++import com.elrosado.integration.domain.port.in.TransferDevolutionFileUseCase;
++import com.elrosado.integration.domain.port.out.DvFileReaderPort;
++import com.elrosado.integration.domain.port.out.FileTransferPort;
++import lombok.RequiredArgsConstructor;
++import lombok.extern.slf4j.Slf4j;
++import org.springframework.stereotype.Service;
++
++import java.net.URI;
++
++@Service
++@RequiredArgsConstructor
++@Slf4j
++public class TransferDevolutionFileService implements TransferDevolutionFileUseCase {
++
++    private final DvFileReaderPort dvFileReaderPort;
++    private final FileTransferPort fileTransferPort;
++
++    @Override
++    public FileTransferResult transfer(TransferDevolutionFileCommand command) {
++        String fileName = extractFileName(command.gcsPath());
++        byte[] content = dvFileReaderPort.read(command.gcsPath());
++        FileTransferResult result = fileTransferPort.transfer(fileName, content);
++
++        log.atInfo()
++                .setMessage("Archivo DV transferido exitosamente")
++                .addKeyValue("devolutionId", command.devolutionId())
++                .addKeyValue("fileName", result.fileName())
++                .addKeyValue("endpoint", result.endpoint())
++                .addKeyValue("statusCode", result.statusCode())
++                .log();
++
++        return result;
++    }
++
++    private String extractFileName(String gcsPath) {
++        if (gcsPath == null || gcsPath.isBlank()) {
++            throw new IllegalArgumentException("gcsPath es requerido para transferir el archivo DV");
++        }
++
++        String normalized = gcsPath.strip();
++        if (normalized.startsWith("gs://")) {
++            normalized = URI.create(normalized).getPath();
++        }
++
++        int index = normalized.lastIndexOf('/');
++        String fileName = index >= 0 ? normalized.substring(index + 1) : normalized;
++        if (fileName.isBlank()) {
++            throw new IllegalArgumentException("No se pudo obtener el nombre del archivo desde gcsPath=" + gcsPath);
++        }
++        return fileName;
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/domain/exception/FileTransferPermanentException.java ---
+--- a//src/main/java/com/elrosado/integration/domain/exception/FileTransferPermanentException.java
++++ b//src/main/java/com/elrosado/integration/domain/exception/FileTransferPermanentException.java
+@@ -0,0 +1,12 @@
++package com.elrosado.integration.domain.exception;
++
++public class FileTransferPermanentException extends RuntimeException {
++
++    public FileTransferPermanentException(String message) {
++        super(message);
++    }
++
++    public FileTransferPermanentException(String message, Throwable cause) {
++        super(message, cause);
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/domain/exception/FileTransferTransientException.java ---
+--- a//src/main/java/com/elrosado/integration/domain/exception/FileTransferTransientException.java
++++ b//src/main/java/com/elrosado/integration/domain/exception/FileTransferTransientException.java
+@@ -0,0 +1,12 @@
++package com.elrosado.integration.domain.exception;
++
++public class FileTransferTransientException extends RuntimeException {
++
++    public FileTransferTransientException(String message) {
++        super(message);
++    }
++
++    public FileTransferTransientException(String message, Throwable cause) {
++        super(message, cause);
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/domain/model/FileTransferResult.java ---
+--- a//src/main/java/com/elrosado/integration/domain/model/FileTransferResult.java
++++ b//src/main/java/com/elrosado/integration/domain/model/FileTransferResult.java
+@@ -0,0 +1,10 @@
++package com.elrosado.integration.domain.model;
++
++import java.time.Instant;
++
++public record FileTransferResult(
++        String fileName,
++        String endpoint,
++        int statusCode,
++        Instant transferredAt
++) {}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/domain/port/in/TransferDevolutionFileUseCase.java ---
+--- a//src/main/java/com/elrosado/integration/domain/port/in/TransferDevolutionFileUseCase.java
++++ b//src/main/java/com/elrosado/integration/domain/port/in/TransferDevolutionFileUseCase.java
+@@ -0,0 +1,9 @@
++package com.elrosado.integration.domain.port.in;
++
++import com.elrosado.integration.application.command.TransferDevolutionFileCommand;
++import com.elrosado.integration.domain.model.FileTransferResult;
++
++public interface TransferDevolutionFileUseCase {
++
++    FileTransferResult transfer(TransferDevolutionFileCommand command);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/domain/port/out/DvFileReaderPort.java ---
+--- a//src/main/java/com/elrosado/integration/domain/port/out/DvFileReaderPort.java
++++ b//src/main/java/com/elrosado/integration/domain/port/out/DvFileReaderPort.java
+@@ -0,0 +1,6 @@
++package com.elrosado.integration.domain.port.out;
++
++public interface DvFileReaderPort {
++
++    byte[] read(String gcsPath);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/domain/port/out/FileTransferPort.java ---
+--- a//src/main/java/com/elrosado/integration/domain/port/out/FileTransferPort.java
++++ b//src/main/java/com/elrosado/integration/domain/port/out/FileTransferPort.java
+@@ -0,0 +1,8 @@
++package com.elrosado.integration.domain.port.out;
++
++import com.elrosado.integration.domain.model.FileTransferResult;
++
++public interface FileTransferPort {
++
++    FileTransferResult transfer(String fileName, byte[] content);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionCreationMessageHandler.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionCreationMessageHandler.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionCreationMessageHandler.java
+@@ -0,0 +1,103 @@
++package com.elrosado.integration.infrastructure.adapter.in.pubsub;
++
++import com.elrosado.integration.application.command.ExecuteDevolutionCommand;
++import com.elrosado.integration.domain.exception.CreditNoteNotEligibleException;
++import com.elrosado.integration.domain.exception.DevolutionAlreadyProcessedException;
++import com.elrosado.integration.domain.exception.DevolutionValidationException;
++import com.elrosado.integration.domain.port.in.ExecuteDevolutionUseCase;
++import lombok.RequiredArgsConstructor;
++import lombok.extern.slf4j.Slf4j;
++import org.slf4j.MDC;
++import org.springframework.stereotype.Component;
++import tools.jackson.databind.ObjectMapper;
++
++import java.util.NoSuchElementException;
++
++@Component
++@RequiredArgsConstructor
++@Slf4j
++public class DevolutionCreationMessageHandler {
++
++    private final ExecuteDevolutionUseCase executeDevolutionUseCase;
++    private final ObjectMapper objectMapper;
++
++    public boolean handle(String subscriptionId, String body) {
++        DevolutionTriggerMessage message;
++        try {
++            message = objectMapper.readValue(body, DevolutionTriggerMessage.class);
++        } catch (Exception ex) {
++            log.atWarn()
++                    .setMessage("Mensaje Pub/Sub descartado: JSON invalido")
++                    .addKeyValue("subscriptionId", subscriptionId)
++                    .setCause(ex)
++                    .log();
++            return true;
++        }
++
++        if (message == null) {
++            log.atWarn()
++                    .setMessage("Mensaje Pub/Sub descartado: payload nulo")
++                    .addKeyValue("subscriptionId", subscriptionId)
++                    .log();
++            return true;
++        }
++
++        try {
++            if (message.devolutionId() == null) {
++                log.atWarn()
++                        .setMessage("Mensaje Pub/Sub descartado: devolutionId ausente")
++                        .addKeyValue("subscriptionId", subscriptionId)
++                        .log();
++                return true;
++            }
++
++            MDC.put("devolutionId", String.valueOf(message.devolutionId()));
++
++            executeDevolutionUseCase.execute(
++                    new ExecuteDevolutionCommand(message.devolutionId(), message.operatorCode())
++            );
++
++            log.atInfo()
++                    .setMessage("Devolucion procesada exitosamente via Pub/Sub")
++                    .addKeyValue("subscriptionId", subscriptionId)
++                    .addKeyValue("devolutionId", message.devolutionId())
++                    .log();
++
++            return true;
++        } catch (DevolutionAlreadyProcessedException ex) {
++            log.atWarn()
++                    .setMessage("Devolucion ya procesada - descartando mensaje duplicado")
++                    .addKeyValue("subscriptionId", subscriptionId)
++                    .addKeyValue("devolutionId", message != null ? message.devolutionId() : null)
++                    .setCause(ex)
++                    .log();
++            return true;
++        } catch (DevolutionValidationException | CreditNoteNotEligibleException ex) {
++            log.atWarn()
++                    .setMessage("Devolucion rechazada por regla de negocio - descartando mensaje")
++                    .addKeyValue("subscriptionId", subscriptionId)
++                    .addKeyValue("devolutionId", message != null ? message.devolutionId() : null)
++                    .setCause(ex)
++                    .log();
++            return true;
++        } catch (NoSuchElementException ex) {
++            log.atError()
++                    .setMessage("Sesion de devolucion no encontrada - reintentando via Nack")
++                    .addKeyValue("subscriptionId", subscriptionId)
++                    .addKeyValue("devolutionId", message != null ? message.devolutionId() : null)
++                    .setCause(ex)
++                    .log();
++            return false;
++        } catch (Exception ex) {
++            log.atError()
++                    .setMessage("Error inesperado procesando devolucion - reintentando via Nack")
++                    .addKeyValue("subscriptionId", subscriptionId)
++                    .addKeyValue("devolutionId", message.devolutionId())
++                    .setCause(ex)
++                    .log();
++            return false;
++        } finally {
++            MDC.remove("devolutionId");
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionPubSubSubscriber.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionPubSubSubscriber.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionPubSubSubscriber.java
+@@ -1,28 +1,16 @@
+ package com.elrosado.integration.infrastructure.adapter.in.pubsub;
+ 
+-import com.elrosado.integration.application.command.ExecuteDevolutionCommand;
+-import com.elrosado.integration.domain.exception.CreditNoteNotEligibleException;
+-import com.elrosado.integration.domain.exception.DevolutionAlreadyProcessedException;
+-import com.elrosado.integration.domain.exception.DevolutionValidationException;
+-import com.elrosado.integration.domain.port.in.ExecuteDevolutionUseCase;
++import com.elrosado.integration.infrastructure.config.PubSubRoutingProperties;
+ import com.elrosado.jlib_pubsub.interfaces.IMessageSubscriber;
+ import jakarta.annotation.PostConstruct;
+ import lombok.RequiredArgsConstructor;
+ import lombok.extern.slf4j.Slf4j;
+-import org.slf4j.MDC;
+ import org.springframework.stereotype.Component;
+-import tools.jackson.databind.ObjectMapper;
+ 
+-import java.util.NoSuchElementException;
+ import java.util.concurrent.CompletableFuture;
+ import java.util.concurrent.ExecutorService;
+ import java.util.concurrent.Executors;
+ 
+-/**
+- * Adaptador de entrada: suscriptor al topic retail.local.devolucion.request.v1.
+- * Cada mensaje recibido dispara la generaciÃ³n del archivo DV de forma asÃ­ncrona
+- * en un virtual thread independiente.
+- */
+ @Component
+ @RequiredArgsConstructor
+ @Slf4j
+@@ -32,94 +20,40 @@
+             Executors.newVirtualThreadPerTaskExecutor();
+ 
+     private final IMessageSubscriber messageSubscriber;
+-    private final ExecuteDevolutionUseCase executeDevolutionUseCase;
+-    private final ObjectMapper objectMapper;
++    private final DevolutionCreationMessageHandler creationMessageHandler;
++    private final DevolutionTransferMessageHandler transferMessageHandler;
++    private final PubSubRoutingProperties routingProperties;
+ 
+     @PostConstruct
+     public void startSubscription() {
+         messageSubscriber.startListening(this::handleMessage);
+         log.atInfo()
+                 .setMessage("Suscriptor Pub/Sub de devoluciones iniciado")
+-                .addKeyValue("topic", "retail.local.devolucion.request.v1")
++                .addKeyValue("requestSubscription", routingProperties.getSubscriptionDevolutionRequest())
++                .addKeyValue("processedSubscription", routingProperties.getSubscriptionDevolutionProcessed())
+                 .log();
+     }
+ 
+     private CompletableFuture<Boolean> handleMessage(String subscriptionId, String body) {
+         return CompletableFuture.supplyAsync(
+-                () -> processMessage(subscriptionId, body),
++                () -> routeMessage(subscriptionId, body),
+                 VIRTUAL_EXECUTOR
+         );
+     }
+ 
+-    private boolean processMessage(String subscriptionId, String body) {
+-        DevolutionTriggerMessage message = null;
+-        try {
+-            message = objectMapper.readValue(body, DevolutionTriggerMessage.class);
++    private boolean routeMessage(String subscriptionId, String body) {
++        if (routingProperties.isRequestSubscription(subscriptionId)) {
++            return creationMessageHandler.handle(subscriptionId, body);
++        }
+ 
+-            if (message.devolutionId() == null) {
+-                log.atWarn()
+-                        .setMessage("Mensaje Pub/Sub descartado: devolutionId ausente")
+-                        .addKeyValue("subscriptionId", subscriptionId)
+-                        .log();
+-                return true;
+-            }
++        if (routingProperties.isProcessedSubscription(subscriptionId)) {
++            return transferMessageHandler.handle(subscriptionId, body);
++        }
+ 
+-            MDC.put("devolutionId", String.valueOf(message.devolutionId()));
+-
+-            executeDevolutionUseCase.execute(
+-                    new ExecuteDevolutionCommand(message.devolutionId(), message.operatorCode())
+-            );
+-
+-            log.atInfo()
+-                    .setMessage("Devolucion procesada exitosamente via Pub/Sub")
+-                    .addKeyValue("subscriptionId", subscriptionId)
+-                    .addKeyValue("devolutionId", message.devolutionId())
+-                    .log();
+-
+-            return true;
+-
+-        } catch (DevolutionAlreadyProcessedException ex) {
+-            // Ack: ya fue procesado previamente, el reintento no ayuda
+-            log.atWarn()
+-                    .setMessage("Devolucion ya procesada â descartando mensaje duplicado")
+-                    .addKeyValue("subscriptionId", subscriptionId)
+-                    .addKeyValue("devolutionId", message != null ? message.devolutionId() : null)
+-                    .setCause(ex)
+-                    .log();
+-            return true;
+-
+-        } catch (DevolutionValidationException | CreditNoteNotEligibleException ex) {
+-            // Ack: regla de negocio violada, el reintento no cambia el resultado
+-            log.atWarn()
+-                    .setMessage("Devolucion rechazada por regla de negocio â descartando mensaje")
+-                    .addKeyValue("subscriptionId", subscriptionId)
+-                    .addKeyValue("devolutionId", message != null ? message.devolutionId() : null)
+-                    .setCause(ex)
+-                    .log();
+-            return true;
+-
+-        } catch (NoSuchElementException ex) {
+-            // Nack: sesiÃ³n no encontrada â posible retraso de escritura, reintento puede resolver
+-            log.atError()
+-                    .setMessage("Sesion de devolucion no encontrada â reintentando via Nack")
+-                    .addKeyValue("subscriptionId", subscriptionId)
+-                    .addKeyValue("devolutionId", message != null ? message.devolutionId() : null)
+-                    .setCause(ex)
+-                    .log();
+-            return false;
+-
+-        } catch (Exception ex) {
+-            // Nack: error transitorio desconocido, reintento puede resolver
+-            log.atError()
+-                    .setMessage("Error inesperado procesando devolucion â reintentando via Nack")
+-                    .addKeyValue("subscriptionId", subscriptionId)
+-                    .addKeyValue("devolutionId", message != null ? message.devolutionId() : null)
+-                    .setCause(ex)
+-                    .log();
+-            return false;
+-
+-        } finally {
+-            MDC.remove("devolutionId");
+-        }
++        log.atWarn()
++                .setMessage("Mensaje Pub/Sub descartado: subscriptionId no configurado para este servicio")
++                .addKeyValue("subscriptionId", subscriptionId)
++                .log();
++        return true;
+     }
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionTransferMessageHandler.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionTransferMessageHandler.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionTransferMessageHandler.java
+@@ -0,0 +1,127 @@
++package com.elrosado.integration.infrastructure.adapter.in.pubsub;
++
++import com.elrosado.integration.application.command.TransferDevolutionFileCommand;
++import com.elrosado.integration.domain.exception.FileTransferPermanentException;
++import com.elrosado.integration.domain.exception.FileTransferTransientException;
++import com.elrosado.integration.domain.port.in.TransferDevolutionFileUseCase;
++import com.elrosado.integration.domain.port.out.DevolutionAuditPort;
++import com.elrosado.integration.infrastructure.adapter.out.pubsub.DevolutionProcessedEvent;
++import com.elrosado.integration.infrastructure.config.FileTransferProperties;
++import lombok.RequiredArgsConstructor;
++import lombok.extern.slf4j.Slf4j;
++import org.slf4j.MDC;
++import org.springframework.stereotype.Component;
++import tools.jackson.databind.ObjectMapper;
++
++@Component
++@RequiredArgsConstructor
++@Slf4j
++public class DevolutionTransferMessageHandler {
++
++    private final TransferDevolutionFileUseCase transferDevolutionFileUseCase;
++    private final DevolutionAuditPort devolutionAuditPort;
++    private final FileTransferProperties fileTransferProperties;
++    private final ObjectMapper objectMapper;
++
++    public boolean handle(String subscriptionId, String body) {
++        DevolutionProcessedEvent event;
++        try {
++            event = objectMapper.readValue(body, DevolutionProcessedEvent.class);
++        } catch (Exception ex) {
++            log.atWarn()
++                    .setMessage("Evento de transferencia descartado: JSON invalido")
++                    .addKeyValue("subscriptionId", subscriptionId)
++                    .setCause(ex)
++                    .log();
++            return true;
++        }
++
++        if (event == null) {
++            log.atWarn()
++                    .setMessage("Evento de transferencia descartado: payload nulo")
++                    .addKeyValue("subscriptionId", subscriptionId)
++                    .log();
++            return true;
++        }
++
++        try {
++            if (event.devolutionId() == null || event.gcsPath() == null || event.gcsPath().isBlank()) {
++                log.atWarn()
++                        .setMessage("Evento de transferencia descartado por datos incompletos")
++                        .addKeyValue("subscriptionId", subscriptionId)
++                        .addKeyValue("devolutionId", event.devolutionId())
++                        .log();
++                return true;
++            }
++
++            MDC.put("devolutionId", String.valueOf(event.devolutionId()));
++
++            if (!fileTransferProperties.isEnabled()) {
++                log.atWarn()
++                        .setMessage("Transferencia de archivo DV deshabilitada por configuracion")
++                        .addKeyValue("subscriptionId", subscriptionId)
++                        .addKeyValue("devolutionId", event.devolutionId())
++                        .log();
++                return true;
++            }
++
++            transferDevolutionFileUseCase.transfer(new TransferDevolutionFileCommand(
++                    event.devolutionId(),
++                    event.numNc(),
++                    event.creditNoteNumber(),
++                    event.gcsPath(),
++                    event.processedAt()
++            ));
++
++            log.atInfo()
++                    .setMessage("Transferencia de devolucion procesada exitosamente via Pub/Sub")
++                    .addKeyValue("subscriptionId", subscriptionId)
++                    .addKeyValue("devolutionId", event.devolutionId())
++                    .log();
++
++            return true;
++        } catch (FileTransferPermanentException | IllegalArgumentException ex) {
++            audit(event, "file_transfer_permanent_error", ex.getMessage());
++            log.atError()
++                    .setMessage("Error permanente en transferencia de devolucion - descartando mensaje")
++                    .addKeyValue("subscriptionId", subscriptionId)
++                    .addKeyValue("devolutionId", event.devolutionId())
++                    .setCause(ex)
++                    .log();
++            return true;
++        } catch (FileTransferTransientException ex) {
++            log.atError()
++                    .setMessage("Error transitorio en transferencia de devolucion - reintentando via Nack")
++                    .addKeyValue("subscriptionId", subscriptionId)
++                    .addKeyValue("devolutionId", event.devolutionId())
++                    .setCause(ex)
++                    .log();
++            return false;
++        } catch (Exception ex) {
++            log.atError()
++                    .setMessage("Error inesperado procesando evento de transferencia - reintentando via Nack")
++                    .addKeyValue("subscriptionId", subscriptionId)
++                    .addKeyValue("devolutionId", event.devolutionId())
++                    .setCause(ex)
++                    .log();
++            return false;
++        } finally {
++            MDC.remove("devolutionId");
++        }
++    }
++
++    private void audit(DevolutionProcessedEvent event, String reason, String message) {
++        if (event == null || event.devolutionId() == null) {
++            return;
++        }
++        try {
++            devolutionAuditPort.log(event.devolutionId(), reason, message);
++        } catch (Exception auditEx) {
++            log.atWarn()
++                    .setMessage("No se pudo auditar error de transferencia")
++                    .addKeyValue("devolutionId", event.devolutionId())
++                    .setCause(auditEx)
++                    .log();
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/adapter/out/db/adapter/StoreQueryAdapter.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/adapter/out/db/adapter/StoreQueryAdapter.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/adapter/out/db/adapter/StoreQueryAdapter.java
+@@ -7,6 +7,7 @@
+ import com.elrosado.integration.infrastructure.adapter.out.db.repository.artsec.PaStrRtlJpaRepository;
+ import com.elrosado.integration.infrastructure.adapter.out.db.repository.saadmin.MnTiendaJpaRepository;
+ import com.elrosado.integration.infrastructure.adapter.out.db.repository.saadmin.PmParamJpaRepository;
++import com.elrosado.integration.infrastructure.config.FileTransferProperties;
+ import lombok.RequiredArgsConstructor;
+ import org.springframework.stereotype.Component;
+ 
+@@ -16,13 +17,12 @@
+ @RequiredArgsConstructor
+ public class StoreQueryAdapter implements StoreQueryPort {
+ 
+-    private static final String PARAM_NUM_POS_DEVOL = "NUMPOSDEVOL";
+-    private static final String PARAM_REGION_FRECUENTO = "COD_REGION_FRECUENTO";
+     private static final int ACTIVE = 1;
+ 
+     private final PaStrRtlJpaRepository paStrRtlRepository;
+     private final MnTiendaJpaRepository mnTiendaRepository;
+     private final PmParamJpaRepository pmParamRepository;
++    private final FileTransferProperties properties;
+ 
+     @Override
+     public StoreData findByBusinessUnitId(Integer idBsnDev) {
+@@ -36,8 +36,8 @@
+                 .orElseThrow(() -> new NoSuchElementException("MN_TIENDA no encontrada para tienda=" + storeKey));
+ 
+         String posDevolution = pmParamRepository
+-                .findFirstActiveValueByVarParamAndStore(PARAM_NUM_POS_DEVOL, storeCode)
+-                .or(() -> pmParamRepository.findFirstValueByVarParam(PARAM_NUM_POS_DEVOL))
++                .findFirstActiveValueByVarParamAndStore(properties.getParamNumPosDevol(), storeCode)
++                .or(() -> pmParamRepository.findFirstValueByVarParam(properties.getParamNumPosDevol()))
+                 .orElseThrow(() -> new NoSuchElementException("Parametro NUMPOSDEVOL no configurado"));
+ 
+         return new StoreData(
+@@ -52,7 +52,7 @@
+     public boolean isFrecuentoStore(Integer storeCode) {
+         String storeKey = String.valueOf(storeCode);
+         return pmParamRepository
+-                .findFirstActiveValueByVarParamAndStore(PARAM_REGION_FRECUENTO, storeCode)
++                .findFirstActiveValueByVarParamAndStore(properties.getParamRegionFrecuento(), storeCode)
+                 .map(regionFrecuento -> mnTiendaRepository.findByDesClaveAndIndActivo(storeKey, ACTIVE)
+                         .map(store -> trim(regionFrecuento).equals(trim(store.getCodRegion())))
+                         .orElse(false))
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/adapter/out/storage/GcsDvFileReaderAdapter.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/adapter/out/storage/GcsDvFileReaderAdapter.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/adapter/out/storage/GcsDvFileReaderAdapter.java
+@@ -0,0 +1,65 @@
++package com.elrosado.integration.infrastructure.adapter.out.storage;
++
++import com.elrosado.integration.domain.port.out.DvFileReaderPort;
++import com.elrosado.jlib_storage.interfaces.IGoogleCloudStorageService;
++import lombok.RequiredArgsConstructor;
++import lombok.extern.slf4j.Slf4j;
++import org.springframework.beans.factory.annotation.Value;
++import org.springframework.stereotype.Component;
++
++import java.net.URI;
++
++@Component
++@RequiredArgsConstructor
++@Slf4j
++public class GcsDvFileReaderAdapter implements DvFileReaderPort {
++
++    private final IGoogleCloudStorageService googleCloudStorageService;
++
++    @Value("${app.gcp.storage.bucket-name}")
++    private String defaultBucketName;
++
++    @Override
++    public byte[] read(String gcsPath) {
++        GcsObjectLocation location = resolveLocation(gcsPath);
++        byte[] content = googleCloudStorageService.downloadFile(location.bucketName(), location.objectName());
++
++        log.atInfo()
++                .setMessage("Archivo DV leido desde GCS")
++                .addKeyValue("bucketName", location.bucketName())
++                .addKeyValue("objectName", location.objectName())
++                .addKeyValue("size", content.length)
++                .log();
++
++        return content;
++    }
++
++    private GcsObjectLocation resolveLocation(String gcsPath) {
++        if (gcsPath == null || gcsPath.isBlank()) {
++            throw new IllegalArgumentException("gcsPath es requerido para leer el archivo DV");
++        }
++
++        String bucketName = defaultBucketName;
++        String objectName = gcsPath.strip();
++        if (objectName.startsWith("gs://")) {
++            URI uri = URI.create(objectName);
++            bucketName = uri.getHost();
++            objectName = uri.getPath();
++        }
++
++        while (objectName.startsWith("/")) {
++            objectName = objectName.substring(1);
++        }
++
++        if (bucketName == null || bucketName.isBlank()) {
++            throw new IllegalArgumentException("bucketName es requerido para leer gcsPath=" + gcsPath);
++        }
++        if (objectName.isBlank()) {
++            throw new IllegalArgumentException("objectName es requerido para leer gcsPath=" + gcsPath);
++        }
++
++        return new GcsObjectLocation(bucketName, objectName);
++    }
++
++    private record GcsObjectLocation(String bucketName, String objectName) {}
++}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/adapter/out/transfer/SecureFileTransferAdapter.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/adapter/out/transfer/SecureFileTransferAdapter.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/adapter/out/transfer/SecureFileTransferAdapter.java
+@@ -0,0 +1,108 @@
++package com.elrosado.integration.infrastructure.adapter.out.transfer;
++
++import com.elrosado.integration.domain.exception.FileTransferPermanentException;
++import com.elrosado.integration.domain.exception.FileTransferTransientException;
++import com.elrosado.integration.domain.model.FileTransferResult;
++import com.elrosado.integration.domain.port.out.FileTransferPort;
++import com.elrosado.integration.infrastructure.config.FileTransferProperties;
++import com.elrosado.integration.infrastructure.security.BearerTokenProvider;
++import lombok.RequiredArgsConstructor;
++import lombok.extern.slf4j.Slf4j;
++import org.springframework.beans.factory.annotation.Qualifier;
++import org.springframework.http.HttpHeaders;
++import org.springframework.http.MediaType;
++import org.springframework.http.ResponseEntity;
++import org.springframework.http.client.SimpleClientHttpRequestFactory;
++import org.springframework.stereotype.Component;
++import org.springframework.web.client.*;
++
++import java.time.Duration;
++import java.time.Instant;
++import java.util.Base64;
++
++@Component
++@Slf4j
++@RequiredArgsConstructor
++public class SecureFileTransferAdapter implements FileTransferPort {
++
++    @Qualifier("fileTransferRestClient")
++    private final RestClient restClient;
++    private final FileTransferProperties properties;
++    private final BearerTokenProvider bearerTokenProvider;
++
++    @Override
++    public FileTransferResult transfer(String fileName, byte[] content) {
++        validateRequest(fileName, content);
++
++        FileTransferRequestBody body = new FileTransferRequestBody(
++                fileName,
++                normalizeTargetDir(properties.getTargetDir()),
++                Base64.getEncoder().encodeToString(content)
++        );
++
++        try {
++            ResponseEntity<Void> response = restClient.post()
++                    .uri(properties.normalizedFilesPath())
++                    .header(HttpHeaders.AUTHORIZATION, bearerTokenProvider.authorizationHeader())
++                    .contentType(MediaType.APPLICATION_JSON)
++                    .body(body)
++                    .retrieve()
++                    .toBodilessEntity();
++
++            int statusCode = response.getStatusCode().value();
++            if (statusCode != 201) {
++                log.atWarn()
++                        .setMessage("API de transferencia respondio con codigo 2xx distinto de 201")
++                        .addKeyValue("fileName", fileName)
++                        .addKeyValue("statusCode", statusCode)
++                        .log();
++            }
++
++            return new FileTransferResult(fileName, properties.endpoint(), statusCode, Instant.now());
++        } catch (HttpClientErrorException ex) {
++            throw new FileTransferPermanentException(
++                    "Error permanente transfiriendo archivo DV. statusCode=" + ex.getStatusCode().value(),
++                    ex
++            );
++        } catch (HttpServerErrorException | ResourceAccessException ex) {
++            throw new FileTransferTransientException("Error transitorio transfiriendo archivo DV", ex);
++        } catch (RestClientException ex) {
++            throw new FileTransferTransientException("Error HTTP inesperado transfiriendo archivo DV", ex);
++        }
++    }
++
++    private void validateRequest(String fileName, byte[] content) {
++        if (fileName == null || fileName.isBlank()) {
++            throw new FileTransferPermanentException("fileName es requerido para transferir archivo DV");
++        }
++        if (content == null) {
++            throw new FileTransferPermanentException("content es requerido para transferir archivo DV");
++        }
++    }
++
++    private String normalizeTargetDir(String targetDir) {
++        if (targetDir == null || targetDir.isBlank()) {
++            throw new FileTransferPermanentException("FILE_TRANSFER_TARGET_DIR no esta configurado");
++        }
++
++        String normalized = targetDir.strip();
++        while (normalized.endsWith("/") || normalized.endsWith("\\")) {
++            normalized = normalized.substring(0, normalized.length() - 1);
++        }
++        if (normalized.isBlank()) {
++            throw new FileTransferPermanentException("FILE_TRANSFER_TARGET_DIR no puede quedar vacio");
++        }
++        return normalized;
++    }
++
++    private SimpleClientHttpRequestFactory requestFactory(FileTransferProperties properties) {
++        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
++        Duration timeout = Duration.ofSeconds(Math.max(1, properties.getTimeoutSeconds()));
++        requestFactory.setConnectTimeout(timeout);
++        requestFactory.setReadTimeout(timeout);
++        return requestFactory;
++    }
++
++    private record FileTransferRequestBody(String file, String dir, String content) {
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/config/FileTransferProperties.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/config/FileTransferProperties.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/config/FileTransferProperties.java
+@@ -0,0 +1,37 @@
++package com.elrosado.integration.infrastructure.config;
++
++import lombok.Data;
++import org.springframework.boot.context.properties.ConfigurationProperties;
++import org.springframework.stereotype.Component;
++
++@Component
++@ConfigurationProperties(prefix = "app.file-transfer")
++@Data
++public class FileTransferProperties {
++
++    private boolean enabled = true;
++    private String baseUrl = "https://10.1.4.57:8033/api/v1";
++    private String filesPath = "/files";
++    private String targetDir = "f:/ALLC_DAT/IN/devs";
++    private int timeoutSeconds = 30;
++    private String bearerTokenSecretId;
++    private String bearerTokenSecretVersion = "latest";
++    private long bearerTokenCacheTtlSeconds = 300;
++    private String paramNumPosDevol = "NUMPOSDEVOL";
++    private String paramRegionFrecuento = "COD_REGION_FRECUENTO";
++
++    public String normalizedFilesPath() {
++        if (filesPath == null || filesPath.isBlank()) {
++            return "/files";
++        }
++        return filesPath.startsWith("/") ? filesPath : "/" + filesPath;
++    }
++
++    public String endpoint() {
++        String normalizedBaseUrl = baseUrl == null ? "" : baseUrl.strip();
++        while (normalizedBaseUrl.endsWith("/")) {
++            normalizedBaseUrl = normalizedBaseUrl.substring(0, normalizedBaseUrl.length() - 1);
++        }
++        return normalizedBaseUrl + normalizedFilesPath();
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/config/HttpProperties.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/config/HttpProperties.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/config/HttpProperties.java
+@@ -0,0 +1,14 @@
++package com.elrosado.integration.infrastructure.config;
++
++import lombok.Data;
++import org.springframework.boot.context.properties.ConfigurationProperties;
++import org.springframework.stereotype.Component;
++
++@Component
++@ConfigurationProperties(prefix = "app.http")
++@Data
++public class HttpProperties {
++
++    private long connectTimeoutMs = 10000;
++    private long readTimeoutMs = 30000;
++}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/config/PubSubRoutingProperties.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/config/PubSubRoutingProperties.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/config/PubSubRoutingProperties.java
+@@ -0,0 +1,23 @@
++package com.elrosado.integration.infrastructure.config;
++
++import lombok.Data;
++import org.springframework.boot.context.properties.ConfigurationProperties;
++import org.springframework.stereotype.Component;
++
++@Component
++@ConfigurationProperties(prefix = "app.gcp.pubsub")
++@Data
++public class PubSubRoutingProperties {
++
++    private String topicDevolution = "retail.local.devolution.processed.v1";
++    private String subscriptionDevolutionRequest = "retail.local.devolution.request.v1-sub";
++    private String subscriptionDevolutionProcessed = "retail.local.devolution.processed.v1-sub";
++
++    public boolean isRequestSubscription(String subscriptionId) {
++        return subscriptionDevolutionRequest != null && subscriptionDevolutionRequest.equals(subscriptionId);
++    }
++
++    public boolean isProcessedSubscription(String subscriptionId) {
++        return subscriptionDevolutionProcessed != null && subscriptionDevolutionProcessed.equals(subscriptionId);
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/config/ResTemplateConfig.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/config/ResTemplateConfig.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/config/ResTemplateConfig.java
+@@ -0,0 +1,38 @@
++package com.elrosado.integration.infrastructure.config;
++
++import lombok.RequiredArgsConstructor;
++import org.springframework.context.annotation.Bean;
++import org.springframework.context.annotation.Configuration;
++import org.springframework.http.client.ClientHttpRequestFactory;
++import org.springframework.http.client.SimpleClientHttpRequestFactory;
++import org.springframework.web.client.RestClient;
++
++import java.time.Duration;
++
++@Configuration
++@RequiredArgsConstructor
++public class ResTemplateConfig {
++
++    private final HttpProperties properties;
++    private final FileTransferProperties fileProperties;
++
++    @Bean
++    public ClientHttpRequestFactory clientHttpRequestFactory() {
++        var factory = new SimpleClientHttpRequestFactory();
++        factory.setConnectTimeout(
++                Duration.ofMillis(properties.getConnectTimeoutMs()));
++        factory.setReadTimeout(
++                Duration.ofMillis(properties.getReadTimeoutMs()));
++        return factory;
++    }
++
++    @Bean("fileTransferRestClient")
++    public RestClient sriAuthRestClient(ClientHttpRequestFactory factory) {
++        return RestClient.builder()
++                .requestFactory(factory)
++                .baseUrl(fileProperties.getBaseUrl())
++                .defaultHeader("Accept", "application/json")
++                .build();
++    }
++
++}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/security/BearerTokenProvider.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/security/BearerTokenProvider.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/security/BearerTokenProvider.java
+@@ -0,0 +1,6 @@
++package com.elrosado.integration.infrastructure.security;
++
++public interface BearerTokenProvider {
++
++    String authorizationHeader();
++}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/security/SecretManagerBearerTokenProvider.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/security/SecretManagerBearerTokenProvider.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/security/SecretManagerBearerTokenProvider.java
+@@ -0,0 +1,117 @@
++package com.elrosado.integration.infrastructure.security;
++
++import com.elrosado.integration.domain.exception.FileTransferPermanentException;
++import com.elrosado.integration.domain.exception.FileTransferTransientException;
++import com.elrosado.integration.infrastructure.config.FileTransferProperties;
++import com.google.api.gax.rpc.ApiException;
++import com.google.api.gax.rpc.StatusCode;
++import com.google.cloud.secretmanager.v1.AccessSecretVersionResponse;
++import com.google.cloud.secretmanager.v1.SecretManagerServiceClient;
++import com.google.cloud.secretmanager.v1.SecretVersionName;
++import org.springframework.beans.factory.annotation.Value;
++import org.springframework.stereotype.Component;
++
++import java.time.Duration;
++
++@Component
++public class SecretManagerBearerTokenProvider implements BearerTokenProvider {
++
++    private final SecretManagerServiceClient secretManagerServiceClient;
++    private final FileTransferProperties properties;
++    private final String projectId;
++
++    private volatile CachedAuthorizationHeader cachedAuthorizationHeader;
++
++    public SecretManagerBearerTokenProvider(
++            SecretManagerServiceClient secretManagerServiceClient,
++            FileTransferProperties properties,
++            @Value("${spring.cloud.gcp.project-id:}") String projectId
++    ) {
++        this.secretManagerServiceClient = secretManagerServiceClient;
++        this.properties = properties;
++        this.projectId = projectId;
++    }
++
++    @Override
++    public String authorizationHeader() {
++        long nowNanos = System.nanoTime();
++        CachedAuthorizationHeader header = cachedAuthorizationHeader;
++        if (isCacheValid(header, nowNanos)) {
++            return header.value();
++        }
++
++        synchronized (this) {
++            header = cachedAuthorizationHeader;
++            if (!isCacheValid(header, nowNanos)) {
++                header = new CachedAuthorizationHeader(buildAuthorizationHeader(), System.nanoTime());
++                cachedAuthorizationHeader = header;
++            }
++            return header.value();
++        }
++    }
++
++    private String buildAuthorizationHeader() {
++        String secretId = required(properties.getBearerTokenSecretId(), "FILE_TRANSFER_BEARER_TOKEN_SECRET_ID");
++        String version = defaultIfBlank(properties.getBearerTokenSecretVersion(), "latest");
++        String resolvedProjectId = required(projectId, "spring.cloud.gcp.project-id");
++
++        try {
++            SecretVersionName secretVersionName = SecretVersionName.of(resolvedProjectId, secretId, version);
++            AccessSecretVersionResponse response = secretManagerServiceClient.accessSecretVersion(secretVersionName);
++            String token = response.getPayload().getData().toStringUtf8();
++            if (token == null || token.isBlank()) {
++                throw new FileTransferPermanentException("El bearer token obtenido desde Secret Manager esta vacio");
++            }
++            return token.regionMatches(true, 0, "Bearer ", 0, "Bearer ".length())
++                    ? token.strip()
++                    : "Bearer " + token.strip();
++        } catch (FileTransferPermanentException ex) {
++            throw ex;
++        } catch (ApiException ex) {
++            if (isPermanentSecretManagerError(ex)) {
++                throw new FileTransferPermanentException(
++                        "No se pudo leer bearer token desde Secret Manager. statusCode="
++                                + ex.getStatusCode().getCode(),
++                        ex
++                );
++            }
++            throw new FileTransferTransientException("Error transitorio leyendo bearer token desde Secret Manager", ex);
++        } catch (Exception ex) {
++            throw new FileTransferTransientException("No se pudo leer bearer token desde Secret Manager", ex);
++        }
++    }
++
++    private boolean isCacheValid(CachedAuthorizationHeader header, long nowNanos) {
++        if (header == null) {
++            return false;
++        }
++        long ttlSeconds = properties.getBearerTokenCacheTtlSeconds();
++        if (ttlSeconds <= 0) {
++            return false;
++        }
++        long ttlNanos = Duration.ofSeconds(ttlSeconds).toNanos();
++        return nowNanos - header.loadedAtNanos() < ttlNanos;
++    }
++
++    private String required(String value, String propertyName) {
++        if (value == null || value.isBlank()) {
++            throw new FileTransferPermanentException(propertyName + " no esta configurado");
++        }
++        return value.strip();
++    }
++
++    private String defaultIfBlank(String value, String defaultValue) {
++        return value == null || value.isBlank() ? defaultValue : value.strip();
++    }
++
++    private boolean isPermanentSecretManagerError(ApiException ex) {
++        StatusCode.Code code = ex.getStatusCode().getCode();
++        return code == StatusCode.Code.NOT_FOUND
++                || code == StatusCode.Code.PERMISSION_DENIED
++                || code == StatusCode.Code.UNAUTHENTICATED
++                || code == StatusCode.Code.INVALID_ARGUMENT
++                || code == StatusCode.Code.FAILED_PRECONDITION;
++    }
++
++    private record CachedAuthorizationHeader(String value, long loadedAtNanos) {}
++}
+
+
+--- Diff for /src/main/resources/application-dev.yaml ---
+--- a//src/main/resources/application-dev.yaml
++++ b//src/main/resources/application-dev.yaml
+@@ -0,0 +1,78 @@
++spring:
++  jpa:
++    show-sql: true
++    properties:
++      hibernate:
++        format_sql: true
++  cloud:
++    gcp:
++      project-id: ${GCP_PROJECT_ID}
++      credentials:
++        location:
++      storage:
++        enabled: true
++      pubsub:
++        enabled: true
++
++logging:
++  level:
++    com.elrosado: DEBUG
++    org.hibernate.SQL: DEBUG
++  pattern:
++    console: "%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %clr(%5p) %clr(${PID:- }){magenta} %clr(---){faint} %clr([%15.15t]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n"
++
++management:
++  health:
++    db:
++      enabled: false
++
++multi-sql:
++  datasources:
++    devs-ec:
++      url: ${DB_DEVS_EC_URL}
++      username: ${DB_DEVS_EC_USER}
++      password: ${DB_DEVS_EC_PASSWORD}
++      entity-packages:
++        - com.elrosado.integration.infrastructure.adapter.out.db.entity.devsec
++    arts-ec:
++      url: ${DB_ARTS_EC_URL}
++      username: ${DB_ARTS_EC_USER}
++      password: ${DB_ARTS_EC_PASSWORD}
++      entity-packages:
++        - com.elrosado.integration.infrastructure.adapter.out.db.entity.artsec
++    saadmin:
++      url: ${DB_SAADMIN_URL}
++      username: ${DB_SAADMIN_USER}
++      password: ${DB_SAADMIN_PASSWORD}
++      entity-packages:
++        - com.elrosado.integration.infrastructure.adapter.out.db.entity.saadmin
++
++pubsub:
++  subscriptions:
++    - topic-id: ${PUBSUB_TOPIC_DEVOLUTION}
++      subscription-id: ${PUBSUB_SUBSCRIPTION_DEVOLUTION}
++    - topic-id: ${PUBSUB_TOPIC_PROCESSED_DEVOLUTION}
++      subscription-id: ${PUBSUB_SUBSCRIPTION_DEVOLUTION_PROCESSED}
++
++app:
++  file-transfer:
++    enabled: ${FILE_TRANSFER_ENABLED}
++    base-url: ${FILE_TRANSFER_BASE_URL}
++    files-path: ${FILE_TRANSFER_FILES_PATH}
++    target-dir: ${FILE_TRANSFER_TARGET_DIR}
++    timeout-seconds: ${FILE_TRANSFER_TIMEOUT_SECONDS}
++    bearer-token-secret-id: ${FILE_TRANSFER_BEARER_TOKEN_SECRET_ID}
++    bearer-token-secret-version: ${FILE_TRANSFER_BEARER_TOKEN_SECRET_VERSION}
++    bearer-token-cache-ttl-seconds: ${FILE_TRANSFER_BEARER_TOKEN_CACHE_TTL_SECONDS}
++    param-num-pos-devol: ${PARAM_NUM_POS_DEVOL}
++    param-region-frecuento: ${PARAM_REGION_FRECUENTO}
++  gcp:
++    storage:
++      bucket-name: ${GCS_BUCKET_DEVS}
++    pubsub:
++      topic-devolution: ${PUBSUB_TOPIC_DEVOLUTION}
++      subscription-devolution-request: ${PUBSUB_SUBSCRIPTION_DEVOLUCION}
++      subscription-devolution-processed: ${PUBSUB_SUBSCRIPTION_DEVOLUTION_PROCESSED}
++  http:
++    connect-timeout-ms: 10000
++    read-timeout-ms: 30000
+
+--- Diff for /src/main/resources/application-local.yaml ---
+--- a//src/main/resources/application-local.yaml
++++ b//src/main/resources/application-local.yaml
+@@ -51,10 +51,28 @@
+   subscriptions:
+     - topic-id: retail.local.devolucion.request.v1
+       subscription-id: ${PUBSUB_SUBSCRIPTION_DEVOLUCION:retail.local.devolution.request.v1-sub}
++    - topic-id: retail.local.devolution.processed.v1
++      subscription-id: ${PUBSUB_SUBSCRIPTION_DEVOLUTION_PROCESSED:retail.local.devolution.processed.v1-sub}
+ 
+ app:
++  file-transfer:
++    enabled: ${FILE_TRANSFER_ENABLED:true}
++    base-url: ${FILE_TRANSFER_BASE_URL:https://10.1.4.57:8033/api/v1}
++    files-path: ${FILE_TRANSFER_FILES_PATH:/files}
++    target-dir: ${FILE_TRANSFER_TARGET_DIR:f:/ALLC_DAT/IN/devs}
++    timeout-seconds: ${FILE_TRANSFER_TIMEOUT_SECONDS:30}
++    bearer-token-secret-id: ${FILE_TRANSFER_BEARER_TOKEN_SECRET_ID:integration-file-transfer-bearer-token}
++    bearer-token-secret-version: ${FILE_TRANSFER_BEARER_TOKEN_SECRET_VERSION:latest}
++    bearer-token-cache-ttl-seconds: ${FILE_TRANSFER_BEARER_TOKEN_CACHE_TTL_SECONDS:300}
++    param-num-pos-devol: ${PARAM_NUM_POS_DEVOL:NUMPOSDEVOL}
++    param-region-frecuento: ${PARAM_REGION_FRECUENTO:COD_REGION_FRECUENTO}
+   gcp:
+     storage:
+       bucket-name: ${GCS_BUCKET_DEVS:gcs-cer-syncrhonization-files-dev}
+     pubsub:
+       topic-devolution: ${PUBSUB_TOPIC_DEVOLUTION:retail.local.devolution.processed.v1}
++      subscription-devolution-request: ${PUBSUB_SUBSCRIPTION_DEVOLUCION:retail.local.devolution.request.v1-sub}
++      subscription-devolution-processed: ${PUBSUB_SUBSCRIPTION_DEVOLUTION_PROCESSED:retail.local.devolution.processed.v1-sub}
++  http:
++    connect-timeout-ms: 10000
++    read-timeout-ms: 30000
+
+--- Diff for /src/main/resources/application-prod.yaml ---
+--- a//src/main/resources/application-prod.yaml
++++ b//src/main/resources/application-prod.yaml
+@@ -47,10 +47,26 @@
+   subscriptions:
+     - topic-id: retail.local.devolucion.request.v1
+       subscription-id: ${PUBSUB_SUBSCRIPTION_DEVOLUCION}
++    - topic-id: retail.local.devolution.processed.v1
++      subscription-id: ${PUBSUB_SUBSCRIPTION_DEVOLUTION_PROCESSED}
+ 
+ app:
++  file-transfer:
++    enabled: ${FILE_TRANSFER_ENABLED:true}
++    base-url: ${FILE_TRANSFER_BASE_URL}
++    files-path: ${FILE_TRANSFER_FILES_PATH:/files}
++    target-dir: ${FILE_TRANSFER_TARGET_DIR}
++    timeout-seconds: ${FILE_TRANSFER_TIMEOUT_SECONDS:30}
++    bearer-token-secret-id: ${FILE_TRANSFER_BEARER_TOKEN_SECRET_ID}
++    bearer-token-secret-version: ${FILE_TRANSFER_BEARER_TOKEN_SECRET_VERSION:latest}
++    bearer-token-cache-ttl-seconds: ${FILE_TRANSFER_BEARER_TOKEN_CACHE_TTL_SECONDS:300}
+   gcp:
+     storage:
+       bucket-name: ${GCS_BUCKET_DEVS}
+     pubsub:
+       topic-devolution: ${PUBSUB_TOPIC_DEVOLUTION}
++      subscription-devolution-request: ${PUBSUB_SUBSCRIPTION_DEVOLUCION}
++      subscription-devolution-processed: ${PUBSUB_SUBSCRIPTION_DEVOLUTION_PROCESSED}
++  http:
++    connect-timeout-ms: 10000
++    read-timeout-ms: 30000
+
+--- Diff for /src/test/java/com/elrosado/integration/application/service/TransferDevolutionFileServiceTest.java ---
+--- a//src/test/java/com/elrosado/integration/application/service/TransferDevolutionFileServiceTest.java
++++ b//src/test/java/com/elrosado/integration/application/service/TransferDevolutionFileServiceTest.java
+@@ -0,0 +1,52 @@
++package com.elrosado.integration.application.service;
++
++import com.elrosado.integration.application.command.TransferDevolutionFileCommand;
++import com.elrosado.integration.domain.model.FileTransferResult;
++import com.elrosado.integration.domain.port.out.DvFileReaderPort;
++import com.elrosado.integration.domain.port.out.FileTransferPort;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.time.Instant;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.when;
++
++@ExtendWith(MockitoExtension.class)
++class TransferDevolutionFileServiceTest {
++
++    @Mock
++    private DvFileReaderPort dvFileReaderPort;
++
++    @Mock
++    private FileTransferPort fileTransferPort;
++
++    private TransferDevolutionFileService service;
++
++    @BeforeEach
++    void setUp() {
++        service = new TransferDevolutionFileService(dvFileReaderPort, fileTransferPort);
++    }
++
++    @Test
++    void readsFileFromGcsAndTransfersItUsingFileNameFromPath() {
++        String gcsPath = "gs://bucket/devs/005/DV000123.005";
++        byte[] content = "demo".getBytes();
++        FileTransferResult expected = new FileTransferResult(
++                "DV000123.005", "https://host/api/v1/files", 201, Instant.now());
++
++        when(dvFileReaderPort.read(gcsPath)).thenReturn(content);
++        when(fileTransferPort.transfer("DV000123.005", content)).thenReturn(expected);
++
++        FileTransferResult result = service.transfer(new TransferDevolutionFileCommand(
++                123, 1, "012007000000001", gcsPath, Instant.now()));
++
++        assertThat(result).isEqualTo(expected);
++        verify(dvFileReaderPort).read(gcsPath);
++        verify(fileTransferPort).transfer("DV000123.005", content);
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionCreationMessageHandlerTest.java ---
+--- a//src/test/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionCreationMessageHandlerTest.java
++++ b//src/test/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionCreationMessageHandlerTest.java
+@@ -0,0 +1,124 @@
++package com.elrosado.integration.infrastructure.adapter.in.pubsub;
++
++import com.elrosado.integration.application.command.ExecuteDevolutionCommand;
++import com.elrosado.integration.application.result.DevolutionResult;
++import com.elrosado.integration.domain.exception.CreditNoteNotEligibleException;
++import com.elrosado.integration.domain.exception.DevolutionAlreadyProcessedException;
++import com.elrosado.integration.domain.exception.DevolutionValidationException;
++import com.elrosado.integration.domain.port.in.ExecuteDevolutionUseCase;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++import tools.jackson.databind.ObjectMapper;
++
++import java.time.Instant;
++import java.util.NoSuchElementException;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.Mockito.doThrow;
++import static org.mockito.Mockito.verifyNoInteractions;
++import static org.mockito.Mockito.when;
++
++@ExtendWith(MockitoExtension.class)
++class DevolutionCreationMessageHandlerTest {
++
++    private static final String SUBSCRIPTION_ID = "retail.local.devolution.request.v1-sub";
++    private static final String VALID_BODY = """
++            {"devolutionId":123,"operatorCode":"000000001"}
++            """;
++    private static final String NULL_ID_BODY = """
++            {"devolutionId":null,"operatorCode":"000000001"}
++            """;
++    private static final String INVALID_JSON = "not-json";
++
++    @Mock
++    private ExecuteDevolutionUseCase executeDevolutionUseCase;
++
++    private DevolutionCreationMessageHandler handler;
++
++    @BeforeEach
++    void setUp() {
++        handler = new DevolutionCreationMessageHandler(executeDevolutionUseCase, new ObjectMapper());
++    }
++
++    @Test
++    void returnsAckWhenMessageProcessedSuccessfully() {
++        when(executeDevolutionUseCase.execute(any())).thenReturn(
++                new DevolutionResult(123, "PROCESSED", "012007000000001",
++                        "DV000123.005", "devs/005/DV000123.005", Instant.now(), "msg-1")
++        );
++
++        boolean result = handler.handle(SUBSCRIPTION_ID, VALID_BODY);
++
++        assertThat(result).isTrue();
++    }
++
++    @Test
++    void returnsAckWhenDevolutionAlreadyProcessed() {
++        doThrow(new DevolutionAlreadyProcessedException(123))
++                .when(executeDevolutionUseCase).execute(any(ExecuteDevolutionCommand.class));
++
++        boolean result = handler.handle(SUBSCRIPTION_ID, VALID_BODY);
++
++        assertThat(result).isTrue();
++    }
++
++    @Test
++    void returnsAckWhenValidationFails() {
++        doThrow(new DevolutionValidationException("totales invalidos"))
++                .when(executeDevolutionUseCase).execute(any(ExecuteDevolutionCommand.class));
++
++        boolean result = handler.handle(SUBSCRIPTION_ID, VALID_BODY);
++
++        assertThat(result).isTrue();
++    }
++
++    @Test
++    void returnsAckWhenCreditNoteNotEligible() {
++        doThrow(new CreditNoteNotEligibleException("consumidor final"))
++                .when(executeDevolutionUseCase).execute(any(ExecuteDevolutionCommand.class));
++
++        boolean result = handler.handle(SUBSCRIPTION_ID, VALID_BODY);
++
++        assertThat(result).isTrue();
++    }
++
++    @Test
++    void returnsNackWhenDevolutionSessionNotFound() {
++        doThrow(new NoSuchElementException("no encontrado"))
++                .when(executeDevolutionUseCase).execute(any(ExecuteDevolutionCommand.class));
++
++        boolean result = handler.handle(SUBSCRIPTION_ID, VALID_BODY);
++
++        assertThat(result).isFalse();
++    }
++
++    @Test
++    void returnsAckWhenJsonIsInvalid() {
++        boolean result = handler.handle(SUBSCRIPTION_ID, INVALID_JSON);
++
++        assertThat(result).isTrue();
++        verifyNoInteractions(executeDevolutionUseCase);
++    }
++
++    @Test
++    void returnsAckWhenDevolutionIdIsNull() {
++        boolean result = handler.handle(SUBSCRIPTION_ID, NULL_ID_BODY);
++
++        assertThat(result).isTrue();
++        verifyNoInteractions(executeDevolutionUseCase);
++    }
++
++    @Test
++    void returnsNackWhenUnexpectedErrorOccurs() {
++        doThrow(new RuntimeException("BD no disponible"))
++                .when(executeDevolutionUseCase).execute(any(ExecuteDevolutionCommand.class));
++
++        boolean result = handler.handle(SUBSCRIPTION_ID, VALID_BODY);
++
++        assertThat(result).isFalse();
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionPubSubSubscriberTest.java ---
+--- a//src/test/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionPubSubSubscriberTest.java
++++ b//src/test/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionPubSubSubscriberTest.java
+@@ -1,13 +1,7 @@
+ package com.elrosado.integration.infrastructure.adapter.in.pubsub;
+ 
+-import com.elrosado.integration.application.command.ExecuteDevolutionCommand;
+-import com.elrosado.integration.application.result.DevolutionResult;
+-import com.elrosado.integration.domain.exception.CreditNoteNotEligibleException;
+-import com.elrosado.integration.domain.exception.DevolutionAlreadyProcessedException;
+-import com.elrosado.integration.domain.exception.DevolutionValidationException;
+-import com.elrosado.integration.domain.port.in.ExecuteDevolutionUseCase;
++import com.elrosado.integration.infrastructure.config.PubSubRoutingProperties;
+ import com.elrosado.jlib_pubsub.interfaces.IMessageSubscriber;
+-import com.fasterxml.jackson.databind.ObjectMapper;
+ import org.junit.jupiter.api.BeforeEach;
+ import org.junit.jupiter.api.Test;
+ import org.junit.jupiter.api.extension.ExtendWith;
+@@ -15,42 +9,44 @@
+ import org.mockito.Mock;
+ import org.mockito.junit.jupiter.MockitoExtension;
+ 
+-import java.time.Instant;
+-import java.util.NoSuchElementException;
+ import java.util.concurrent.CompletableFuture;
+ import java.util.concurrent.TimeUnit;
+ import java.util.function.BiFunction;
+ 
+ import static org.assertj.core.api.Assertions.assertThat;
+-import static org.mockito.ArgumentMatchers.any;
+-import static org.mockito.Mockito.doThrow;
+ import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.verifyNoInteractions;
+ import static org.mockito.Mockito.when;
+ 
+ @ExtendWith(MockitoExtension.class)
+ class DevolutionPubSubSubscriberTest {
+ 
++    private static final String REQUEST_SUBSCRIPTION = "retail.local.devolution.request.v1-sub";
++    private static final String PROCESSED_SUBSCRIPTION = "retail.local.devolution.processed.v1-sub";
++    private static final String BODY = "{}";
++
+     @Mock
+     private IMessageSubscriber messageSubscriber;
+ 
+     @Mock
+-    private ExecuteDevolutionUseCase executeDevolutionUseCase;
++    private DevolutionCreationMessageHandler creationMessageHandler;
++
++    @Mock
++    private DevolutionTransferMessageHandler transferMessageHandler;
+ 
+     private DevolutionPubSubSubscriber subscriber;
+ 
+-    private static final String SUBSCRIPTION_ID = "retail.local.devolucion.request.v1-sub";
+-    private static final String VALID_BODY = """
+-            {"devolutionId":123,"operatorCode":"000000001"}
+-            """;
+-    private static final String NULL_ID_BODY = """
+-            {"devolutionId":null,"operatorCode":"000000001"}
+-            """;
+-    private static final String INVALID_JSON = "not-json";
+-
+     @BeforeEach
+     void setUp() {
++        PubSubRoutingProperties routingProperties = new PubSubRoutingProperties();
++        routingProperties.setSubscriptionDevolutionRequest(REQUEST_SUBSCRIPTION);
++        routingProperties.setSubscriptionDevolutionProcessed(PROCESSED_SUBSCRIPTION);
++
+         subscriber = new DevolutionPubSubSubscriber(
+-                messageSubscriber, executeDevolutionUseCase, new ObjectMapper()
++                messageSubscriber,
++                creationMessageHandler,
++                transferMessageHandler,
++                routingProperties
+         );
+     }
+ 
+@@ -64,94 +60,38 @@
+     }
+ 
+     @Test
+-    void returnsAckWhenMessageProcessedSuccessfully() throws Exception {
+-        when(executeDevolutionUseCase.execute(any())).thenReturn(
+-                new DevolutionResult(123, "PROCESSED", "012007000000001",
+-                        "DV000123.005", "devs/005/DV000123.005", Instant.now(), "msg-1")
+-        );
++    void routesRequestSubscriptionToCreationHandler() throws Exception {
++        when(creationMessageHandler.handle(REQUEST_SUBSCRIPTION, BODY)).thenReturn(true);
+ 
+         boolean result = captureHandler()
+-                .apply(SUBSCRIPTION_ID, VALID_BODY)
++                .apply(REQUEST_SUBSCRIPTION, BODY)
+                 .get(5, TimeUnit.SECONDS);
+ 
+         assertThat(result).isTrue();
++        verify(creationMessageHandler).handle(REQUEST_SUBSCRIPTION, BODY);
++        verifyNoInteractions(transferMessageHandler);
+     }
+ 
+     @Test
+-    void returnsAckWhenDevolutionAlreadyProcessed() throws Exception {
+-        doThrow(new DevolutionAlreadyProcessedException(123))
+-                .when(executeDevolutionUseCase).execute(any(ExecuteDevolutionCommand.class));
++    void routesProcessedSubscriptionToTransferHandler() throws Exception {
++        when(transferMessageHandler.handle(PROCESSED_SUBSCRIPTION, BODY)).thenReturn(false);
+ 
+         boolean result = captureHandler()
+-                .apply(SUBSCRIPTION_ID, VALID_BODY)
++                .apply(PROCESSED_SUBSCRIPTION, BODY)
++                .get(5, TimeUnit.SECONDS);
++
++        assertThat(result).isFalse();
++        verify(transferMessageHandler).handle(PROCESSED_SUBSCRIPTION, BODY);
++        verifyNoInteractions(creationMessageHandler);
++    }
++
++    @Test
++    void returnsAckForUnknownSubscription() throws Exception {
++        boolean result = captureHandler()
++                .apply("unknown-subscription", BODY)
+                 .get(5, TimeUnit.SECONDS);
+ 
+         assertThat(result).isTrue();
+-    }
+-
+-    @Test
+-    void returnsAckWhenValidationFails() throws Exception {
+-        doThrow(new DevolutionValidationException("totales invalidos"))
+-                .when(executeDevolutionUseCase).execute(any(ExecuteDevolutionCommand.class));
+-
+-        boolean result = captureHandler()
+-                .apply(SUBSCRIPTION_ID, VALID_BODY)
+-                .get(5, TimeUnit.SECONDS);
+-
+-        assertThat(result).isTrue();
+-    }
+-
+-    @Test
+-    void returnsAckWhenCreditNoteNotEligible() throws Exception {
+-        doThrow(new CreditNoteNotEligibleException("consumidor final"))
+-                .when(executeDevolutionUseCase).execute(any(ExecuteDevolutionCommand.class));
+-
+-        boolean result = captureHandler()
+-                .apply(SUBSCRIPTION_ID, VALID_BODY)
+-                .get(5, TimeUnit.SECONDS);
+-
+-        assertThat(result).isTrue();
+-    }
+-
+-    @Test
+-    void returnsNackWhenDevolutionSessionNotFound() throws Exception {
+-        doThrow(new NoSuchElementException("no encontrado"))
+-                .when(executeDevolutionUseCase).execute(any(ExecuteDevolutionCommand.class));
+-
+-        boolean result = captureHandler()
+-                .apply(SUBSCRIPTION_ID, VALID_BODY)
+-                .get(5, TimeUnit.SECONDS);
+-
+-        assertThat(result).isFalse();
+-    }
+-
+-    @Test
+-    void returnsAckWhenJsonIsInvalid() throws Exception {
+-        boolean result = captureHandler()
+-                .apply(SUBSCRIPTION_ID, INVALID_JSON)
+-                .get(5, TimeUnit.SECONDS);
+-
+-        assertThat(result).isTrue();
+-    }
+-
+-    @Test
+-    void returnsAckWhenDevolutionIdIsNull() throws Exception {
+-        boolean result = captureHandler()
+-                .apply(SUBSCRIPTION_ID, NULL_ID_BODY)
+-                .get(5, TimeUnit.SECONDS);
+-
+-        assertThat(result).isTrue();
+-    }
+-
+-    @Test
+-    void returnsNackWhenUnexpectedErrorOccurs() throws Exception {
+-        doThrow(new RuntimeException("BD no disponible"))
+-                .when(executeDevolutionUseCase).execute(any(ExecuteDevolutionCommand.class));
+-
+-        boolean result = captureHandler()
+-                .apply(SUBSCRIPTION_ID, VALID_BODY)
+-                .get(5, TimeUnit.SECONDS);
+-
+-        assertThat(result).isFalse();
++        verifyNoInteractions(creationMessageHandler, transferMessageHandler);
+     }
+ }
+
+
+--- Diff for /src/test/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionTransferMessageHandlerTest.java ---
+--- a//src/test/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionTransferMessageHandlerTest.java
++++ b//src/test/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionTransferMessageHandlerTest.java
+@@ -0,0 +1,121 @@
++package com.elrosado.integration.infrastructure.adapter.in.pubsub;
++
++import com.elrosado.integration.application.command.TransferDevolutionFileCommand;
++import com.elrosado.integration.domain.exception.FileTransferPermanentException;
++import com.elrosado.integration.domain.exception.FileTransferTransientException;
++import com.elrosado.integration.domain.model.FileTransferResult;
++import com.elrosado.integration.domain.port.in.TransferDevolutionFileUseCase;
++import com.elrosado.integration.domain.port.out.DevolutionAuditPort;
++import com.elrosado.integration.infrastructure.config.FileTransferProperties;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.ArgumentCaptor;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++import tools.jackson.databind.ObjectMapper;
++
++import java.time.Instant;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.Mockito.doThrow;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.verifyNoInteractions;
++import static org.mockito.Mockito.when;
++
++@ExtendWith(MockitoExtension.class)
++class DevolutionTransferMessageHandlerTest {
++
++    private static final String SUBSCRIPTION_ID = "retail.local.devolution.processed.v1-sub";
++    private static final String VALID_BODY = """
++            {"devolutionId":123,"numNc":1,"creditNoteNumber":"012007000000001","gcsPath":"gs://bucket/devs/005/DV000123.005"}
++            """;
++    private static final String NULL_ID_BODY = """
++            {"devolutionId":null,"numNc":1,"creditNoteNumber":"012007000000001","gcsPath":"gs://bucket/devs/005/DV000123.005"}
++            """;
++    private static final String INVALID_JSON = "not-json";
++
++    @Mock
++    private TransferDevolutionFileUseCase transferDevolutionFileUseCase;
++
++    @Mock
++    private DevolutionAuditPort devolutionAuditPort;
++
++    private FileTransferProperties properties;
++    private DevolutionTransferMessageHandler handler;
++
++    @BeforeEach
++    void setUp() {
++        properties = new FileTransferProperties();
++        handler = new DevolutionTransferMessageHandler(
++                transferDevolutionFileUseCase,
++                devolutionAuditPort,
++                properties,
++                new ObjectMapper()
++        );
++    }
++
++    @Test
++    void returnsAckWhenTransferSucceeds() {
++        when(transferDevolutionFileUseCase.transfer(any())).thenReturn(
++                new FileTransferResult("DV000123.005", "https://host/api/v1/files", 201, Instant.now())
++        );
++
++        boolean result = handler.handle(SUBSCRIPTION_ID, VALID_BODY);
++
++        assertThat(result).isTrue();
++        ArgumentCaptor<TransferDevolutionFileCommand> captor =
++                ArgumentCaptor.forClass(TransferDevolutionFileCommand.class);
++        verify(transferDevolutionFileUseCase).transfer(captor.capture());
++        assertThat(captor.getValue().devolutionId()).isEqualTo(123);
++        assertThat(captor.getValue().gcsPath()).isEqualTo("gs://bucket/devs/005/DV000123.005");
++    }
++
++    @Test
++    void returnsAckAndAuditsWhenPermanentErrorOccurs() {
++        doThrow(new FileTransferPermanentException("payload invalido"))
++                .when(transferDevolutionFileUseCase).transfer(any());
++
++        boolean result = handler.handle(SUBSCRIPTION_ID, VALID_BODY);
++
++        assertThat(result).isTrue();
++        verify(devolutionAuditPort).log(123, "file_transfer_permanent_error", "payload invalido");
++    }
++
++    @Test
++    void returnsNackWhenTransientErrorOccurs() {
++        doThrow(new FileTransferTransientException("timeout"))
++                .when(transferDevolutionFileUseCase).transfer(any());
++
++        boolean result = handler.handle(SUBSCRIPTION_ID, VALID_BODY);
++
++        assertThat(result).isFalse();
++    }
++
++    @Test
++    void returnsAckWhenTransferIsDisabled() {
++        properties.setEnabled(false);
++
++        boolean result = handler.handle(SUBSCRIPTION_ID, VALID_BODY);
++
++        assertThat(result).isTrue();
++        verifyNoInteractions(transferDevolutionFileUseCase, devolutionAuditPort);
++    }
++
++    @Test
++    void returnsAckWhenJsonIsInvalid() {
++        boolean result = handler.handle(SUBSCRIPTION_ID, INVALID_JSON);
++
++        assertThat(result).isTrue();
++        verifyNoInteractions(transferDevolutionFileUseCase, devolutionAuditPort);
++    }
++
++    @Test
++    void returnsAckWhenDevolutionIdIsNull() {
++        boolean result = handler.handle(SUBSCRIPTION_ID, NULL_ID_BODY);
++
++        assertThat(result).isTrue();
++        verifyNoInteractions(transferDevolutionFileUseCase, devolutionAuditPort);
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/integration/infrastructure/security/SecretManagerBearerTokenProviderTest.java ---
+--- a//src/test/java/com/elrosado/integration/infrastructure/security/SecretManagerBearerTokenProviderTest.java
++++ b//src/test/java/com/elrosado/integration/infrastructure/security/SecretManagerBearerTokenProviderTest.java
+@@ -0,0 +1,117 @@
++package com.elrosado.integration.infrastructure.security;
++
++import com.elrosado.integration.domain.exception.FileTransferPermanentException;
++import com.elrosado.integration.domain.exception.FileTransferTransientException;
++import com.elrosado.integration.infrastructure.config.FileTransferProperties;
++import com.google.cloud.secretmanager.v1.AccessSecretVersionResponse;
++import com.google.cloud.secretmanager.v1.SecretManagerServiceClient;
++import com.google.cloud.secretmanager.v1.SecretPayload;
++import com.google.cloud.secretmanager.v1.SecretVersionName;
++import com.google.protobuf.ByteString;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.ArgumentCaptor;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.assertj.core.api.Assertions.assertThatThrownBy;
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.verifyNoInteractions;
++import static org.mockito.Mockito.verifyNoMoreInteractions;
++import static org.mockito.Mockito.when;
++
++@ExtendWith(MockitoExtension.class)
++class SecretManagerBearerTokenProviderTest {
++
++    @Mock
++    private SecretManagerServiceClient secretManagerServiceClient;
++
++    private FileTransferProperties properties;
++    private SecretManagerBearerTokenProvider provider;
++
++    @BeforeEach
++    void setUp() {
++        properties = new FileTransferProperties();
++        properties.setBearerTokenSecretId("integration-file-transfer-bearer-token");
++        properties.setBearerTokenSecretVersion("latest");
++        properties.setBearerTokenCacheTtlSeconds(300);
++        provider = new SecretManagerBearerTokenProvider(secretManagerServiceClient, properties, "test-project");
++    }
++
++    @Test
++    void readsSecretAndBuildsBearerHeader() {
++        when(secretManagerServiceClient.accessSecretVersion(any(SecretVersionName.class)))
++                .thenReturn(secretResponse("token-value"));
++
++        String header = provider.authorizationHeader();
++
++        assertThat(header).isEqualTo("Bearer token-value");
++        ArgumentCaptor<SecretVersionName> captor = ArgumentCaptor.forClass(SecretVersionName.class);
++        verify(secretManagerServiceClient).accessSecretVersion(captor.capture());
++        assertThat(captor.getValue().toString())
++                .isEqualTo("projects/test-project/secrets/integration-file-transfer-bearer-token/versions/latest");
++    }
++
++    @Test
++    void preservesBearerPrefixWhenSecretAlreadyContainsIt() {
++        when(secretManagerServiceClient.accessSecretVersion(any(SecretVersionName.class)))
++                .thenReturn(secretResponse("Bearer token-value"));
++
++        String header = provider.authorizationHeader();
++
++        assertThat(header).isEqualTo("Bearer token-value");
++    }
++
++    @Test
++    void cachesHeaderWithinConfiguredTtl() {
++        when(secretManagerServiceClient.accessSecretVersion(any(SecretVersionName.class)))
++                .thenReturn(secretResponse("token-value"));
++
++        assertThat(provider.authorizationHeader()).isEqualTo("Bearer token-value");
++        assertThat(provider.authorizationHeader()).isEqualTo("Bearer token-value");
++
++        verify(secretManagerServiceClient).accessSecretVersion(any(SecretVersionName.class));
++        verifyNoMoreInteractions(secretManagerServiceClient);
++    }
++
++    @Test
++    void throwsPermanentExceptionWhenSecretIdIsMissing() {
++        properties.setBearerTokenSecretId(" ");
++
++        assertThatThrownBy(() -> provider.authorizationHeader())
++                .isInstanceOf(FileTransferPermanentException.class)
++                .hasMessageContaining("FILE_TRANSFER_BEARER_TOKEN_SECRET_ID");
++        verifyNoInteractions(secretManagerServiceClient);
++    }
++
++    @Test
++    void throwsPermanentExceptionWhenSecretPayloadIsBlank() {
++        when(secretManagerServiceClient.accessSecretVersion(any(SecretVersionName.class)))
++                .thenReturn(secretResponse(" "));
++
++        assertThatThrownBy(() -> provider.authorizationHeader())
++                .isInstanceOf(FileTransferPermanentException.class)
++                .hasMessageContaining("esta vacio");
++    }
++
++    @Test
++    void wrapsUnexpectedSecretManagerErrorsAsTransient() {
++        when(secretManagerServiceClient.accessSecretVersion(any(SecretVersionName.class)))
++                .thenThrow(new RuntimeException("secret manager unavailable"));
++
++        assertThatThrownBy(() -> provider.authorizationHeader())
++                .isInstanceOf(FileTransferTransientException.class)
++                .hasMessageContaining("Secret Manager");
++    }
++
++    private AccessSecretVersionResponse secretResponse(String value) {
++        return AccessSecretVersionResponse.newBuilder()
++                .setPayload(SecretPayload.newBuilder()
++                        .setData(ByteString.copyFromUtf8(value))
++                        .build())
++                .build();
++    }
++}
+
+

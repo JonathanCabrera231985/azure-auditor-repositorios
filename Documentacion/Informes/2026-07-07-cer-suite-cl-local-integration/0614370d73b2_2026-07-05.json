@@ -1,0 +1,7 @@
+{
+    "commit_id": "0614370d73b204c3571ac598d37067ffb50c10b3",
+    "author": "Ricardo Mu\u00f1oz",
+    "message": "Solicitud de incorporaci\u00f3n de cambios fusionados 11525: update path dev\n\n- feature: rules_and_prompt.md\n- feature: delete event process\n- feature: up integration/application/service/ExecuteDevolutionService.java\n- feature: process integration Devolution\n- FEATURE: update path dev\n\nElementos de trabajo relacionados: #10290",
+    "date": "2026-07-05T15:34:37Z",
+    "work_items": []
+}

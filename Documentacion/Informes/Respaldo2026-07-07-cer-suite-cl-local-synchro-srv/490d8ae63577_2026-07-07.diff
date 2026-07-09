@@ -1,0 +1,397 @@
+--- Diff for /CLAUDE.md ---
+--- a//CLAUDE.md
++++ b//CLAUDE.md
+@@ -0,0 +1,125 @@
++# CLAUDE.md
++
++This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
++
++## What this service does
++
++`cer-suite-cl-local-synchro-srv` is a Java 25 / Spring Boot 4 service with a single responsibility: consume a Pub/Sub
++event describing a file sitting in GCS, look up the destination POS controller for a store, download the file, and
++push it to that controller's TCx Sky API. It is intentionally generic/domain-agnostic — it used to be coupled to
++"devoluciones" (returns) but was decoupled so any producer can use it (see `INTEGRACION_SYNCHRO_CONTROLLER.md`).
++
++Flow:
++
++```
++Producer service
++  -> uploads file to GCS
++  -> publishes TransferEvent to Pub/Sub topic retail.local.synchro.controller.v1
++
++cer-suite-cl-local-synchro-srv
++  -> SynchroControllerSubscriber consumes retail.local.synchro.controller.v1-sub (routed by subscriptionId,
++     see PubSubRoutingProperties)
++  -> TransferMessageHandler deserializes TransferEvent, validates required fields, sets MDC (eventId/codStore/
++     correlationId), maps to TransferCommand
++  -> TransferFileUseCase.transfer(TransferCommand) -> TransferFileService
++       1. StoreQueryPort.findByCode(codStore)   -> queries MN_TIENDA (SAADMIN DB) for controller IP
++       2. GcsFileDownloadPort.download(bucket, path) -> downloads file bytes from GCS
++       3. FileTransferPort.transfer(storeConfig, targetDir, fileName, content)
++  -> TcxSkyFileTransferAdapter POSTs to https://{controllerIp}:8033/api/v1/files
++       body: { file, dir, content (base64) }, Authorization: Bearer <token from Secret Manager, cached>
++```
++
++Ack/Nack semantics matter here: `TransferMessageHandler.handle` returns `true` (ack, drop message) for invalid
++payloads, `StoreNotFoundException`, and `FileTransferPermanentException`/`IllegalArgumentException` (4xx-class,
++non-retryable errors). It returns `false` (nack, retry) for `FileTransferTransientException` and any unexpected
++exception (5xx/timeout-class, transient errors). When adding new failure modes, classify them into the permanent vs.
++transient exception hierarchy correctly — miscategorizing silently drops messages or causes infinite redelivery.
++
++## Architecture (hexagonal)
++
++Source under `src/main/java/com/elrosado/synchrosrv`:
++
++- `domain/model` — records: `TransferCommand`, `TransferResult`, `StoreTransferConfig`.
++- `domain/exception` — `StoreNotFoundException`, `FileTransferPermanentException`, `FileTransferTransientException`.
++- `domain/port/in` — `TransferFileUseCase` (the one inbound use case).
++- `domain/port/out` — `StoreQueryPort`, `GcsFileDownloadPort`, `FileTransferPort`, `BearerTokenPort`.
++- `application/service` — `TransferFileService`, the sole orchestrator implementing the use case; it only calls
++  ports, never infrastructure directly.
++- `infrastructure/adapter/in/event` — Pub/Sub inbound: `SynchroControllerSubscriber` (subscribes, routes by
++  subscriptionId, dispatches onto a virtual-thread executor), `TransferMessageHandler` (JSON parsing, validation,
++  MDC, exception-to-ack/nack mapping), `TransferEvent` (wire record).
++- `infrastructure/adapter/out/db` — `StoreQueryAdapter` (implements `StoreQueryPort`) + `MnTiendaEntity` +
++  `JpaMnTiendaRepository`, all scoped to the SAADMIN datasource.
++- `infrastructure/adapter/out/storage` — `GcsFileDownloadAdapter`, wraps `jlib-storage`'s
++  `IGoogleCloudStorageService`.
++- `infrastructure/adapter/out/transfer` — `TcxSkyFileTransferAdapter`, builds the TCx Sky request and maps HTTP
++  client/server errors to the permanent/transient exception pair.
++- `infrastructure/adapter/out/security` — `SecretManagerBearerTokenProvider`, fetches and caches (TTL-based,
++  double-checked locking) the TCx Sky bearer token from Secret Manager.
++- `infrastructure/config` — `PubSubRoutingProperties` (`app.pubsub.*`), `TransferProperties` (`app.transfer.*`,
++  also builds the TCx Sky URL), `MultiSqlSharedConfig`/`SaadminDataSourceConfig` (wires the `jlib-multisql` SAADMIN
++  datasource + JPA repositories), `HttpClientConfig` (trust-all SSL `RestClient` for TCx Sky — controllers use
++  self-signed certs on an internal network, this is intentional), `ThreadConfig` (virtual-thread executor).
++- `infrastructure/exception/GlobalExceptionHandler` — `@RestControllerAdvice` for the (minimal) web surface;
++  the actual business/domain never goes through it, since the entry point is Pub/Sub, not HTTP.
++
++Tests in `src/test/java` mirror this package structure 1:1.
++
++### Naming convention
++
++Keep names generic/domain-agnostic (`TransferFileService`, `TransferEvent`, `SynchroControllerSubscriber`, etc.) —
++do not reintroduce domain-specific naming like "devoluciones"/"returns". Input ports go in `domain.port.in`, output
++ports in `domain.port.out`, orchestration in `application.service`, adapters in `infrastructure.adapter`.
++
++## Event contract
++
++Producers publish to Pub/Sub topic `retail.local.synchro.controller.v1`; this service consumes from
++`retail.local.synchro.controller.v1-sub`. Required fields: `codStore`, `gcsBucket`, `gcsPath`, `fileName`,
++`targetDir`. Recommended: `eventId`, `eventType`, `source`, `createdAt`. Full contract, rules, and a sample payload
++are in `INTEGRACION_SYNCHRO_CONTROLLER.md` — read it before changing `TransferEvent`/`TransferCommand` or the
++validation in `TransferMessageHandler.isEventValid`.
++
++Key rules: `targetDir` and the GCS location are event data (per-message), never static service configuration —
++there is intentionally no `app.transfer.pos-target-dir` property. `gcsPath` should be relative (no leading `/`);
++the adapter strips leading slashes defensively but producers should avoid sending them.
++
++## Build, test, and run
++
++- `.\mvnw.cmd clean package` (Windows) / `./mvnw clean package` (Unix) — build + run tests. Use the Maven wrapper,
++  not a system Maven install.
++- `.\mvnw.cmd test` — run unit tests and generate the JaCoCo report (`jacoco-maven-plugin` runs on the `test` phase).
++- `.\mvnw.cmd test -Dtest=TransferFileServiceTest` — run a single test class.
++- `.\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=local"` — run locally against the `local` profile
++  (`application-local.yaml`), which points at a real SAADMIN SQL Server instance and local GCP credentials
++  (`credentials_cer.json`, path is machine-specific — expect to need your own).
++- `bash build.sh` — builds a Podman image via `docker/dev/Dockerfile` and pushes it to the local dev registry
++  `localhost:30500`; also participates in Skaffold's dynamic tagging via the `$IMAGE` env var.
++- Deployment manifests live in `k8s/` (Deployment, HPA, ConfigMap, Secret, Service, Namespace); `skaffold.yaml`
++  ties the build and k8s deploy together for local dev loops.
++
++There is no separate lint command; rely on the compiler/tests.
++
++## Configuration
++
++Two Spring profiles: `local` (`application-local.yaml`) and `prod` (`application-prod.yaml`), selected via
++`SPRING_PROFILES_ACTIVE` (defaults to `local`). Notable property groups:
++
++- `app.pubsub.subscription-synchro-controller` — must match the Pub/Sub `subscription-id` under `pubsub.subscriptions`
++  for `SynchroControllerSubscriber` to route messages correctly; both are driven by the same
++  `PUBSUB_SUBSCRIPTION_SYNCHRO_CONTROLLER` env var in `prod`.
++- `app.transfer.*` — `enabled` (kill switch, event is acked-and-dropped when false), `api-port`/`files-path`
++  (used to build the TCx Sky URL), `timeout-seconds`, `bearer-token-secret-id`/`-version`/`-cache-ttl-seconds`
++  (Secret Manager token caching).
++- `multi-sql.datasources.saadmin.*` — SQL Server connection to SAADMIN, `entity-packages` scoped to
++  `infrastructure.adapter.out.db.entity.saadmin`.
++
++Dependencies come from private internal `jlib-*` shared libraries (logging, health, pubsub-logging, storage,
++multisql, secretmanager) resolved from the `SUITE-CLOUD` Azure DevOps Maven feed in `pom.xml` — these provide the
++Pub/Sub subscriber (`IMessageSubscriber`), GCS client (`IGoogleCloudStorageService`), and multi-datasource wiring
++used throughout `infrastructure/`.
++
++## Commit conventions
++
++Use concise imperative messages with optional prefixes like `feature:`, `fix:`, or `test:` (Spanish descriptions
++are common in this repo's history). PRs should describe the behavior changed, list configuration/deployment
++impacts, include test evidence, and link related work items when available.
+
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -8,6 +8,7 @@
+   SERVER_PORT: "8080"
+ 
+   # Pub/Sub - subscription del evento generico de sincronizacion al controlador POS
++  PUBSUB_SYNCHRO_CONTROLLER: "retail.local.synchro.controller.v1"
+   PUBSUB_SUBSCRIPTION_SYNCHRO_CONTROLLER: "retail.local.synchro.controller.v1-sub"
+ 
+   # API TCx Sky - configuracion de transferencia al controlador POS
+@@ -21,3 +22,10 @@
+   # Nombre del secreto en GCP Secret Manager que contiene el Bearer token del API TCx Sky
+   # El valor del token se obtiene en runtime via Workload Identity + Secret Manager
+   FILE_TRANSFER_BEARER_SECRET_ID: "synchro-srv-tcxsky-bearer-token"
++
++  # Nombres de los secretos en GCP Secret Manager con las credenciales SAADMIN (SQL Server)
++  # Los valores se obtienen en runtime via Workload Identity + Secret Manager
++  DB_SAADMIN_URL_SECRET_ID: "suite-cloud-local-db-saadmin-url"
++  DB_SAADMIN_USER_SECRET_ID: "suite-cloud-local-db-user"
++  DB_SAADMIN_PASSWORD_SECRET_ID: "suite-cloud-local-db-pass"
++  DB_SAADMIN_SECRET_VERSION: "latest"
+
+
+--- Diff for /k8s/deployment.yaml ---
+--- a//k8s/deployment.yaml
++++ b//k8s/deployment.yaml
+@@ -40,21 +40,12 @@
+           env:
+             - name: SPRING_THREADS_VIRTUAL_ENABLED
+               value: "true"
+-            - name: DB_SAADMIN_URL
+-              valueFrom:
+-                secretKeyRef:
+-                  name: cer-suite-cl-local-synchro-srv-secret
+-                  key: DB_SAADMIN_URL
+-            - name: DB_SAADMIN_USER
+-              valueFrom:
+-                secretKeyRef:
+-                  name: cer-suite-cl-local-synchro-srv-secret
+-                  key: DB_SAADMIN_USER
+-            - name: DB_SAADMIN_PASSWORD
+-              valueFrom:
+-                secretKeyRef:
+-                  name: cer-suite-cl-local-synchro-srv-secret
+-                  key: DB_SAADMIN_PASSWORD
++            - name: GOOGLE_APPLICATION_CREDENTIALS
++              value: /var/secrets/google/key.json
++          volumeMounts:
++            - name: gcp-credentials
++              mountPath: /var/secrets/google
++              readOnly: true
+           securityContext:
+             allowPrivilegeEscalation: false
+             readOnlyRootFilesystem: false
+
+
+--- Diff for /k8s/secret.yaml ---
+--- a//k8s/secret.yaml
++++ b//k8s/secret.yaml
+@@ -1,13 +0,0 @@
+-apiVersion: v1
+-kind: Secret
+-metadata:
+-  name: cer-suite-cl-local-synchro-srv-secret
+-  namespace: ns-cer-suite-dev
+-type: Opaque
+-# IMPORTANTE: En producción reemplazar estos valores con referencias a GCP Secret Manager
+-# o inyectarlos mediante External Secrets Operator.
+-# Los valores aquí son placeholders en base64 — NO usar en producción.
+-stringData:
+-  DB_SAADMIN_URL: "jdbc:sqlserver://<host>:1433;databaseName=SAADMIN;encrypt=true;trustServerCertificate=false"
+-  DB_SAADMIN_USER: "<usuario_saadmin>"
+-  DB_SAADMIN_PASSWORD: "<password_saadmin>"
+
+
+--- Diff for /skaffold.yaml ---
+--- a//skaffold.yaml
++++ b//skaffold.yaml
+@@ -12,7 +12,6 @@
+ manifests:
+   rawYaml:
+     - k8s/namespace.yaml
+-    - k8s/secret.yaml
+     - k8s/configmap.yaml
+     - k8s/deployment.yaml
+     - k8s/service.yaml
+
+
+--- Diff for /src/main/java/com/elrosado/synchrosrv/infrastructure/config/SaadminSecretManagerEnvironmentPostProcessor.java ---
+--- a//src/main/java/com/elrosado/synchrosrv/infrastructure/config/SaadminSecretManagerEnvironmentPostProcessor.java
++++ b//src/main/java/com/elrosado/synchrosrv/infrastructure/config/SaadminSecretManagerEnvironmentPostProcessor.java
+@@ -0,0 +1,83 @@
++package com.elrosado.synchrosrv.infrastructure.config;
++
++import com.google.cloud.secretmanager.v1.AccessSecretVersionResponse;
++import com.google.cloud.secretmanager.v1.SecretManagerServiceClient;
++import com.google.cloud.secretmanager.v1.SecretVersionName;
++import org.springframework.boot.SpringApplication;
++import org.springframework.boot.env.EnvironmentPostProcessor;
++import org.springframework.core.Ordered;
++import org.springframework.core.env.ConfigurableEnvironment;
++import org.springframework.core.env.MapPropertySource;
++
++import java.io.IOException;
++import java.util.LinkedHashMap;
++import java.util.Map;
++
++/**
++ * Resuelve las credenciales de SAADMIN (URL, usuario, password) desde GCP Secret Manager antes de
++ * que se cree el ApplicationContext, para que {@code jlib-multisql} las reciba ya resueltas al leer
++ * {@code multi-sql.datasources.saadmin.*} durante el registro de beans del DataSource.
++ * <p>
++ * Se activa solo si {@code app.saadmin-db.*-secret-id} esta configurado (perfil {@code prod}); en
++ * perfiles sin esos IDs (local/dev) no hace nada y se mantienen las credenciales literales existentes.
++ */
++public class SaadminSecretManagerEnvironmentPostProcessor implements EnvironmentPostProcessor, Ordered {
++
++    private static final String URL_SECRET_ID_PROP = "app.saadmin-db.url-secret-id";
++    private static final String USER_SECRET_ID_PROP = "app.saadmin-db.user-secret-id";
++    private static final String PASSWORD_SECRET_ID_PROP = "app.saadmin-db.password-secret-id";
++    private static final String SECRET_VERSION_PROP = "app.saadmin-db.secret-version";
++    private static final String PROJECT_ID_PROP = "spring.cloud.gcp.project-id";
++
++    @Override
++    public int getOrder() {
++        // Debe ejecutarse despues de ConfigDataEnvironmentPostProcessor (que carga application*.yaml)
++        return Ordered.LOWEST_PRECEDENCE;
++    }
++
++    @Override
++    public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
++        String urlSecretId = environment.getProperty(URL_SECRET_ID_PROP);
++        String userSecretId = environment.getProperty(USER_SECRET_ID_PROP);
++        String passwordSecretId = environment.getProperty(PASSWORD_SECRET_ID_PROP);
++
++        if (isBlank(urlSecretId) && isBlank(userSecretId) && isBlank(passwordSecretId)) {
++            return;
++        }
++
++        String projectId = environment.getProperty(PROJECT_ID_PROP);
++        if (isBlank(projectId)) {
++            throw new IllegalStateException(PROJECT_ID_PROP + " es requerido para resolver credenciales SAADMIN desde Secret Manager");
++        }
++        String version = environment.getProperty(SECRET_VERSION_PROP, "latest");
++
++        try (SecretManagerServiceClient client = SecretManagerServiceClient.create()) {
++            Map<String, Object> resolved = new LinkedHashMap<>();
++            resolved.put("DB_SAADMIN_URL", requireSecret(client, projectId, urlSecretId, version, URL_SECRET_ID_PROP));
++            resolved.put("DB_SAADMIN_USER", requireSecret(client, projectId, userSecretId, version, USER_SECRET_ID_PROP));
++            resolved.put("DB_SAADMIN_PASSWORD", requireSecret(client, projectId, passwordSecretId, version, PASSWORD_SECRET_ID_PROP));
++
++            environment.getPropertySources().addFirst(new MapPropertySource("saadminSecretManagerCredentials", resolved));
++        } catch (IOException ex) {
++            throw new IllegalStateException("No se pudo inicializar el cliente de Secret Manager para credenciales SAADMIN", ex);
++        }
++    }
++
++    private String requireSecret(SecretManagerServiceClient client, String projectId, String secretId,
++                                  String version, String propertyName) {
++        if (isBlank(secretId)) {
++            throw new IllegalStateException(propertyName + " no esta configurado");
++        }
++        SecretVersionName secretVersionName = SecretVersionName.of(projectId, secretId, version);
++        AccessSecretVersionResponse response = client.accessSecretVersion(secretVersionName);
++        String value = response.getPayload().getData().toStringUtf8();
++        if (isBlank(value)) {
++            throw new IllegalStateException("El secreto '" + secretId + "' esta vacio en Secret Manager");
++        }
++        return value.strip();
++    }
++
++    private boolean isBlank(String value) {
++        return value == null || value.isBlank();
++    }
++}
+
+
+--- Diff for /src/main/resources/META-INF/spring.factories ---
+--- a//src/main/resources/META-INF/spring.factories
++++ b//src/main/resources/META-INF/spring.factories
+@@ -0,0 +1,2 @@
++org.springframework.boot.env.EnvironmentPostProcessor=\
++com.elrosado.synchrosrv.infrastructure.config.SaadminSecretManagerEnvironmentPostProcessor
+
+
+--- Diff for /src/main/resources/application-dev.yaml ---
+--- a//src/main/resources/application-dev.yaml
++++ b//src/main/resources/application-dev.yaml
+@@ -0,0 +1,58 @@
++spring:
++  jpa:
++    show-sql: true
++    properties:
++      hibernate:
++        format_sql: true
++  cloud:
++    gcp:
++      project-id: ${GCP_PROJECT_ID}
++      credentials:
++        location:
++      storage:
++        enabled: true
++      pubsub:
++        enabled: true
++
++logging:
++  level:
++    root: ${LOGGING_LEVEL_ROOT:INFO}
++    com.elrosado.cersuitecloudlocalcore: ${LOGGING_LEVEL_APPLICATION:INFO}
++    org.springframework: INFO
++    org.hibernate.SQL: WARN
++
++management:
++  health:
++    db:
++      enabled: false
++
++multi-sql:
++  datasources:
++    saadmin:
++      url: ${DB_SAADMIN_URL}
++      username: ${DB_SAADMIN_USER}
++      password: ${DB_SAADMIN_PASSWORD}
++      entity-packages:
++        - com.elrosado.synchrosrv.infrastructure.adapter.out.db.entity.saadmin
++
++pubsub:
++  subscriptions:
++    - topic-id: ${PUBSUB_SYNCHRO_CONTROLLER}
++      subscription-id: ${PUBSUB_SUBSCRIPTION_SYNCHRO_CONTROLLER}
++
++app:
++  pubsub:
++    subscription-synchro-controller: ${PUBSUB_SUBSCRIPTION_SYNCHRO_CONTROLLER}
++  saadmin-db:
++    url-secret-id: ${DB_SAADMIN_URL_SECRET_ID}
++    user-secret-id: ${DB_SAADMIN_USER_SECRET_ID}
++    password-secret-id: ${DB_SAADMIN_PASSWORD_SECRET_ID}
++    secret-version: ${DB_SAADMIN_SECRET_VERSION:latest}
++  transfer:
++    enabled: ${FILE_TRANSFER_ENABLED}
++    api-port: ${FILE_TRANSFER_API_PORT}
++    files-path: ${FILE_TRANSFER_FILES_PATH}
++    timeout-seconds: ${FILE_TRANSFER_TIMEOUT_SECONDS}
++    bearer-token-secret-id: ${FILE_TRANSFER_BEARER_SECRET_ID}
++    bearer-token-secret-version: ${FILE_TRANSFER_BEARER_SECRET_VERSION}
++    bearer-token-cache-ttl-seconds: ${FILE_TRANSFER_BEARER_CACHE_TTL}
+
+
+--- Diff for /src/main/resources/application-prod.yaml ---
+--- a//src/main/resources/application-prod.yaml
++++ b//src/main/resources/application-prod.yaml
+@@ -25,6 +25,11 @@
+ app:
+   pubsub:
+     subscription-synchro-controller: ${PUBSUB_SUBSCRIPTION_SYNCHRO_CONTROLLER}
++  saadmin-db:
++    url-secret-id: ${DB_SAADMIN_URL_SECRET_ID}
++    user-secret-id: ${DB_SAADMIN_USER_SECRET_ID}
++    password-secret-id: ${DB_SAADMIN_PASSWORD_SECRET_ID}
++    secret-version: ${DB_SAADMIN_SECRET_VERSION:latest}
+   transfer:
+     enabled: ${FILE_TRANSFER_ENABLED:true}
+     api-port: ${FILE_TRANSFER_API_PORT:8033}
+
+

@@ -1,0 +1,488 @@
+--- Diff for /pom.xml ---
+--- a//pom.xml
++++ b//pom.xml
+@@ -1,144 +1,192 @@
+ <?xml version="1.0" encoding="UTF-8"?>
+ <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+-	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+-	<modelVersion>4.0.0</modelVersion>
+-	<parent>
+-		<groupId>org.springframework.boot</groupId>
+-		<artifactId>spring-boot-starter-parent</artifactId>
+-		<version>4.0.6</version>
+-		<relativePath/>
+-	</parent>
+-	<groupId>com.elrosado</groupId>
+-	<artifactId>distributor-cloud</artifactId>
+-	<version>1.0.0</version>
+-	<name>distributor-cloud</name>
+-	<description>Servicio de distribuciÃ³n de TLOGs hacia SQL Server â migraciÃ³n de cer-local-serv-distributor-db</description>
++         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
++    <modelVersion>4.0.0</modelVersion>
++    <parent>
++        <groupId>org.springframework.boot</groupId>
++        <artifactId>spring-boot-starter-parent</artifactId>
++        <version>4.0.6</version>
++        <relativePath/>
++    </parent>
++    <groupId>com.elrosado</groupId>
++    <artifactId>distributor-cloud</artifactId>
++    <version>1.0.0</version>
++    <name>distributor-cloud</name>
++    <description>Servicio de distribuciÃ³n de TLOGs hacia SQL Server â migraciÃ³n de cer-local-serv-distributor-db
++    </description>
+ 
+-	<properties>
+-		<java.version>25</java.version>
+-	</properties>
++    <properties>
++        <java.version>25</java.version>
++    </properties>
+ 
+-	<repositories>
+-		<repository>
+-			<id>SUITE-CLOUD</id>
+-			<url>https://azdevops1.sipecom.com/SIPEProyectos/CER-SUITE-CLOUD/_packaging/SUITE-CLOUD/maven/v1</url>
+-		</repository>
+-	</repositories>
++    <repositories>
++        <repository>
++            <id>SUITE-CLOUD</id>
++            <url>https://azdevops1.sipecom.com/SIPEProyectos/CER-SUITE-CLOUD/_packaging/SUITE-CLOUD/maven/v1</url>
++        </repository>
++    </repositories>
+ 
+-	<dependencies>
+-		<!-- Web/Core -->
+-		<dependency>
+-			<groupId>org.springframework.boot</groupId>
+-			<artifactId>spring-boot-starter</artifactId>
+-		</dependency>
++    <dependencies>
++        <!-- Web/Core -->
++        <dependency>
++            <groupId>org.springframework.boot</groupId>
++            <artifactId>spring-boot-starter</artifactId>
++        </dependency>
+ 
+-		<!-- JPA -->
+-		<dependency>
+-			<groupId>org.springframework.boot</groupId>
+-			<artifactId>spring-boot-starter-data-jpa</artifactId>
+-		</dependency>
++        <!-- JPA -->
++        <dependency>
++            <groupId>org.springframework.boot</groupId>
++            <artifactId>spring-boot-starter-data-jpa</artifactId>
++        </dependency>
+ 
+-		<!-- SQL Server -->
+-		<dependency>
+-			<groupId>com.microsoft.sqlserver</groupId>
+-			<artifactId>mssql-jdbc</artifactId>
+-			<scope>runtime</scope>
+-		</dependency>
++        <!-- SQL Server -->
++        <dependency>
++            <groupId>com.microsoft.sqlserver</groupId>
++            <artifactId>mssql-jdbc</artifactId>
++            <scope>runtime</scope>
++        </dependency>
+ 
+-		<!-- Lombok -->
+-		<dependency>
+-			<groupId>org.projectlombok</groupId>
+-			<artifactId>lombok</artifactId>
+-			<optional>true</optional>
+-		</dependency>
++        <!-- Lombok -->
++        <dependency>
++            <groupId>org.projectlombok</groupId>
++            <artifactId>lombok</artifactId>
++            <optional>true</optional>
++        </dependency>
+ 
+-		<!-- Actuator (health probes para K8s) -->
+-		<dependency>
+-			<groupId>org.springframework.boot</groupId>
+-			<artifactId>spring-boot-starter-actuator</artifactId>
+-		</dependency>
++        <!-- Actuator (health probes para K8s) -->
++        <dependency>
++            <groupId>org.springframework.boot</groupId>
++            <artifactId>spring-boot-starter-actuator</artifactId>
++        </dependency>
+ 
+-		<!-- Jackson XML (parser de TLOGs) -->
+-		<dependency>
+-			<groupId>com.fasterxml.jackson.dataformat</groupId>
+-			<artifactId>jackson-dataformat-xml</artifactId>
+-		</dependency>
++        <!-- Jackson XML (parser de TLOGs) -->
++        <dependency>
++            <groupId>com.fasterxml.jackson.dataformat</groupId>
++            <artifactId>jackson-dataformat-xml</artifactId>
++        </dependency>
+ 
+-		<!-- Jackson JSR-310 (java.time.*) â requerido por Actuator y no jalado sin spring-boot-starter-web -->
+-		<dependency>
+-			<groupId>com.fasterxml.jackson.datatype</groupId>
+-			<artifactId>jackson-datatype-jsr310</artifactId>
+-		</dependency>
++        <!-- Jackson JSR-310 (java.time.*) â requerido por Actuator y no jalado sin spring-boot-starter-web -->
++        <dependency>
++            <groupId>com.fasterxml.jackson.datatype</groupId>
++            <artifactId>jackson-datatype-jsr310</artifactId>
++        </dependency>
+ 
+-		<!-- Validation (para @ConfigurationProperties) -->
+-		<dependency>
+-			<groupId>org.springframework.boot</groupId>
+-			<artifactId>spring-boot-starter-validation</artifactId>
+-		</dependency>
++        <!-- Validation (para @ConfigurationProperties) -->
++        <dependency>
++            <groupId>org.springframework.boot</groupId>
++            <artifactId>spring-boot-starter-validation</artifactId>
++        </dependency>
+ 
+-		<!-- Firestore (CER Suite Cloud) -->
+-		<dependency>
+-			<groupId>com.elrosado</groupId>
+-			<artifactId>jlib-firestore</artifactId>
+-			<version>1.0.0</version>
+-		</dependency>
++        <!-- Firestore (CER Suite Cloud) -->
++        <dependency>
++            <groupId>com.elrosado</groupId>
++            <artifactId>jlib-firestore</artifactId>
++            <version>1.0.0</version>
++        </dependency>
+ 
+-		<!-- Pub/Sub (CER Suite Cloud) -->
+-		<dependency>
+-			<groupId>com.elrosado</groupId>
+-			<artifactId>jlib-pubsub</artifactId>
+-			<version>1.0.0</version>
+-		</dependency>
++        <!-- Pub/Sub (CER Suite Cloud) -->
++        <dependency>
++            <groupId>com.elrosado</groupId>
++            <artifactId>jlib-pubsub</artifactId>
++            <version>1.0.0</version>
++        </dependency>
+ 
+-		<!-- MDC automÃ¡tico por mensaje Pub/Sub (CER Suite Cloud) -->
+-		<dependency>
+-			<groupId>com.elrosado</groupId>
+-			<artifactId>jlib-pubsub-logging</artifactId>
+-			<version>1.0.0</version>
+-		</dependency>
++        <!-- MDC automÃ¡tico por mensaje Pub/Sub (CER Suite Cloud) -->
++        <dependency>
++            <groupId>com.elrosado</groupId>
++            <artifactId>jlib-pubsub-logging</artifactId>
++            <version>1.0.0</version>
++        </dependency>
+ 
+-		<!-- Multi-datasource SQL Server (CER Suite Cloud) -->
+-		<dependency>
+-			<groupId>com.elrosado</groupId>
+-			<artifactId>jlib-multisql</artifactId>
+-			<version>1.0.1</version>
+-		</dependency>
++        <!-- Multi-datasource SQL Server (CER Suite Cloud) -->
++        <dependency>
++            <groupId>com.elrosado</groupId>
++            <artifactId>jlib-multisql</artifactId>
++            <version>1.0.2</version>
++        </dependency>
+ 
+-		<!-- Tests -->
+-		<dependency>
+-			<groupId>org.springframework.boot</groupId>
+-			<artifactId>spring-boot-starter-test</artifactId>
+-			<scope>test</scope>
+-		</dependency>
+-	</dependencies>
++        <!-- Tests -->
++        <dependency>
++            <groupId>org.springframework.boot</groupId>
++            <artifactId>spring-boot-starter-test</artifactId>
++            <scope>test</scope>
++        </dependency>
++    </dependencies>
+ 
+-	<build>
+-		<plugins>
+-			<plugin>
+-				<groupId>org.springframework.boot</groupId>
+-				<artifactId>spring-boot-maven-plugin</artifactId>
+-				<configuration>
+-					<excludes>
+-						<exclude>
+-							<groupId>org.projectlombok</groupId>
+-							<artifactId>lombok</artifactId>
+-						</exclude>
+-					</excludes>
+-				</configuration>
+-			</plugin>
+-			<plugin>
+-				<groupId>org.apache.maven.plugins</groupId>
+-				<artifactId>maven-compiler-plugin</artifactId>
+-				<configuration>
+-					<annotationProcessorPaths>
+-						<path>
+-							<groupId>org.projectlombok</groupId>
+-							<artifactId>lombok</artifactId>
+-						</path>
+-					</annotationProcessorPaths>
+-				</configuration>
+-			</plugin>
+-		</plugins>
+-	</build>
++    <build>
++        <plugins>
++            <plugin>
++                <groupId>org.springframework.boot</groupId>
++                <artifactId>spring-boot-maven-plugin</artifactId>
++                <configuration>
++                    <excludes>
++                        <exclude>
++                            <groupId>org.projectlombok</groupId>
++                            <artifactId>lombok</artifactId>
++                        </exclude>
++                    </excludes>
++                </configuration>
++            </plugin>
++            <plugin>
++                <groupId>org.apache.maven.plugins</groupId>
++                <artifactId>maven-compiler-plugin</artifactId>
++                <configuration>
++                    <annotationProcessorPaths>
++                        <path>
++                            <groupId>org.projectlombok</groupId>
++                            <artifactId>lombok</artifactId>
++                        </path>
++                    </annotationProcessorPaths>
++                </configuration>
++            </plugin>
++            <plugin>
++                <groupId>org.jacoco</groupId>
++                <artifactId>jacoco-maven-plugin</artifactId>
++                <version>0.8.14</version>
++                <configuration>
++                    <excludes>
++                        <!-- Clase principal: main() no se cubre en tests de Spring -->
++                        <exclude>com/elrosado/distributor_cloud/DistributorCloudApplication.class</exclude>
++                    </excludes>
++                </configuration>
++                <executions>
++                    <execution>
++                        <id>jacoco-prepare-agent</id>
++                        <goals>
++                            <goal>prepare-agent</goal>
++                        </goals>
++                    </execution>
++                    <execution>
++                        <id>jacoco-report</id>
++                        <phase>verify</phase>
++                        <goals>
++                            <goal>report</goal>
++                        </goals>
++                    </execution>
++                    <execution>
++                        <id>jacoco-check</id>
++                        <phase>verify</phase>
++                        <goals>
++                            <goal>check</goal>
++                        </goals>
++                        <configuration>
++                            <rules>
++                                <rule>
++                                    <element>BUNDLE</element>
++                                    <limits>
++                                        <limit>
++                                            <counter>LINE</counter>
++                                            <value>COVEREDRATIO</value>
++                                            <minimum>0.80</minimum>
++                                        </limit>
++                                    </limits>
++                                </rule>
++                            </rules>
++                        </configuration>
++                    </execution>
++                </executions>
++            </plugin>
++        </plugins>
++    </build>
+ 
+ </project>
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/domain/model/xml/InvoiceData.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/domain/model/xml/InvoiceData.java
++++ b//src/main/java/com/elrosado/distributor_cloud/domain/model/xml/InvoiceData.java
+@@ -15,8 +15,9 @@
+     @JacksonXmlProperty(localName = "InvoiceNumber")
+     private String invoiceNumber;
+ 
++    // String para preservar ceros iniciales (ej. "0952317048") â se parsea a Long al guardar ID_CPR
+     @JacksonXmlProperty(localName = "CustomerID")
+-    private Long customerId;
++    private String customerId;
+ 
+     @JacksonXmlProperty(localName = "CustomerType")
+     private String customerType;
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/TransactionPersistenceAdapter.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/TransactionPersistenceAdapter.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/TransactionPersistenceAdapter.java
+@@ -37,6 +37,12 @@
+ 
+     private static final String TENDER_TYPE_RETIRO = "58";
+     private static final BigDecimal IVA5 = new BigDecimal("0.05");
++
++    // CachÃ© en memoria para datos de referencia estÃ¡ticos (storeId y tenderId).
++    // Son datos que rarÃ­simas veces cambian; almacenarlos evita SELECTs repetitivos en cada transacciÃ³n.
++    // ConcurrentHashMap porque el bean es singleton compartido entre virtual threads.
++    private final java.util.concurrent.ConcurrentHashMap<String, Integer> storeIdCache = new java.util.concurrent.ConcurrentHashMap<>();
++    private final java.util.concurrent.ConcurrentHashMap<String, Integer> tenderIdCache = new java.util.concurrent.ConcurrentHashMap<>();
+ 
+     private final TrTrnRepository trTrnRepository;
+     private final TrRtlRepository trRtlRepository;
+@@ -212,9 +218,11 @@
+     // ---------------------------------------------------------------------------
+ 
+     private Integer resolveStoreId(String retailStoreCode) {
+-        return paStrRtlRepository.findByCode(retailStoreCode)
+-                .map(PaStrRtlEntity::getRetailStoreId)
+-                .orElseThrow(() -> new IllegalArgumentException("Tienda no encontrada: " + retailStoreCode));
++        return storeIdCache.computeIfAbsent(retailStoreCode, code ->
++                paStrRtlRepository.findByCode(code)
++                        .map(PaStrRtlEntity::getRetailStoreId)
++                        .orElseThrow(() -> new IllegalArgumentException("Tienda no encontrada: " + code))
++        );
+     }
+ 
+     private Integer resolveWorkstationId(String workstationCode, Integer retailStoreId) {
+@@ -232,16 +240,18 @@
+                 .orElse(null);
+     }
+ 
+-    /** Resuelve ID_TND: usa el del XML si viene; si no, busca en AS_TND por cÃ³digo de tipo de pago. */
++    /** Resuelve ID_TND: usa el del XML si viene; si no, busca en AS_TND por cÃ³digo de tipo de pago (con cachÃ©). */
+     private Integer resolveTenderId(String tenderTypeCode, Integer tenderIdFromXml) {
+         if (tenderIdFromXml != null) return tenderIdFromXml;
+         if (tenderTypeCode == null) return 0;
+-        return asTndRepository.findByTenderTypeCode(tenderTypeCode)
+-                .map(AsTndEntity::getTenderId)
+-                .orElseGet(() -> {
+-                    log.warn("Tipo de tender no encontrado en AS_TND: {}", tenderTypeCode);
+-                    return 0;
+-                });
++        return tenderIdCache.computeIfAbsent(tenderTypeCode, code ->
++                asTndRepository.findByTenderTypeCode(code)
++                        .map(AsTndEntity::getTenderId)
++                        .orElseGet(() -> {
++                            log.warn("Tipo de tender no encontrado en AS_TND: {}", code);
++                            return 0;
++                        })
++        );
+     }
+ 
+     // ---------------------------------------------------------------------------
+@@ -736,37 +746,37 @@
+         entity.setTransactionId(idTrn);
+         entity.setInvoiceNumber(nroFactura);
+ 
++        // IMP_1 siempre viene del maestro de tienda, igual que en el legacy (retailStore.getTax1())
++        paStrRtlRepository.findById(retailStoreId).ifPresent(store -> {
++            if (store.getTax1() != null) {
++                entity.setTax(BigDecimal.valueOf(store.getTax1()));
++            }
++        });
++
++        // SubTotal y Total siempre de FacturaElec â InvoiceData no los trae en el nuevo formato
++        entity.setSubTotal(fe.getSubTotal());
++        entity.setTotal(fe.getTotal());
++
+         if (inv != null) {
+-            entity.setSubTotal(inv.getSubTotal());
+-            entity.setTotal(inv.getTotal());
+-            entity.setTax(inv.getTax());
+-            entity.setCustomerId(inv.getCustomerId());
++            // ID_CPR: customerId como Long (se pierde el cero inicial, correcto para campo numÃ©rico)
++            if (inv.getCustomerId() != null) {
++                try { entity.setCustomerId(Long.parseLong(inv.getCustomerId().trim())); }
++                catch (NumberFormatException e) { log.warn("CustomerID no numÃ©rico en InvoiceData: {}", inv.getCustomerId()); }
++            }
+             entity.setCustomerType("1".equals(inv.getCustomerType()) ? "1" : "0");
+             entity.setNameCustomer(inv.getNameCustomer());
+-            entity.setIdentificacionCustomer(inv.getIdentificacionCustomer());
+-        } else {
+-            entity.setSubTotal(fe.getSubTotal());
+-            entity.setTotal(fe.getTotal());
+-            // IMP_1 viene del maestro de tienda, equivalente a retailStore.getTax1() del original
+-            paStrRtlRepository.findById(retailStoreId).ifPresent(store -> {
+-                if (store.getTax1() != null) {
+-                    entity.setTax(BigDecimal.valueOf(store.getTax1()));
+-                }
+-            });
+-            if (assoc != null) {
+-                if (assoc.getCustomerId() != null) {
+-                    try {
+-                        entity.setCustomerId(Long.parseLong(assoc.getCustomerId().trim()));
+-                    } catch (NumberFormatException e) {
+-                        log.warn("CustomerID no numÃ©rico en AssociatedData: {}", assoc.getCustomerId());
+-                    }
+-                }
+-                entity.setNameCustomer(assoc.getNameCustomer());
+-                entity.setIdentificacionCustomer(assoc.getCustomerId());
+-                //entity.setCustomerType(assoc.getPersonType() != null ? assoc.getPersonType() : "0");
+-                entity.setCustomerType("0");
++            // ID_CST: cedula/RUC como String preservando ceros iniciales
++            entity.setIdentificacionCustomer(inv.getCustomerId());
++        } else if (assoc != null) {
++            if (assoc.getCustomerId() != null) {
++                try { entity.setCustomerId(Long.parseLong(assoc.getCustomerId().trim())); }
++                catch (NumberFormatException e) { log.warn("CustomerID no numÃ©rico en AssociatedData: {}", assoc.getCustomerId()); }
+             }
+-        }
++            entity.setNameCustomer(assoc.getNameCustomer());
++            entity.setIdentificacionCustomer(assoc.getCustomerId());
++            entity.setCustomerType("0");
++        }
++
+         if (entity.getTax() == null) entity.setTax(BigDecimal.ZERO);
+         trInvcRepository.save(entity);
+     }
+
+
+--- Diff for /src/main/resources/application-local.yaml ---
+--- a//src/main/resources/application-local.yaml
++++ b//src/main/resources/application-local.yaml
+@@ -14,6 +14,7 @@
+       entity-packages:
+         - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.artsec.entity
+       primary: true
++      batch-size: 300
+     devs-ec:
+       url: jdbc:sqlserver://CS3DWSARML1CORO:1433;databaseName=DEVS_EC;trustServerCertificate=true
+       username: alliances
+
+
+--- Diff for /src/main/resources/application-prod.yaml ---
+--- a//src/main/resources/application-prod.yaml
++++ b//src/main/resources/application-prod.yaml
+@@ -12,6 +12,7 @@
+       entity-packages:
+         - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.artsec.entity
+       primary: true
++      batch-size: 300
+     devs-ec:
+       url: ${DB_DEVS_URL}
+       username: ${DB_DEVS_USERNAME}
+
+

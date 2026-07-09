@@ -1,0 +1,1625 @@
+--- Diff for /CLAUDE.md ---
+--- a//CLAUDE.md
++++ b//CLAUDE.md
+@@ -19,15 +19,15 @@
+ 
+ | ID | Trigger | What it does |
+ |----|---------|-------------|
+-| TC-02 | Pub/Sub `retail.local.informe.cierre.request.v1` | Downloads ZIP from GCS → POST multipart to Central → moves blob to `{storeId}/procesado/` |
++| TC-02 | Pub/Sub `retail.local.closing.report.request.v1` | Downloads ZIP from GCS (`CIERREDIA/{storeCode}/TRANSFERIR/`) → POST multipart to Central → moves blob to `CIERREDIA/{storeCode}/PROCESADO/` |
+ | TC-03 | Pub/Sub `retail.local.journal.request.v1` | Downloads ZIP from GCS → POST multipart to Central → **deletes** blob |
+-| TC-04 | `@Scheduled` cron (every 5 min by default) | Lists files from Central → downloads each → uploads to GCS `{bucket}/{storeId}/{fileName}` |
++| TC-04 | `@Scheduled` cron (every 5 min by default) | Lists files from Central → downloads each → uploads to GCS `{clientReplicationPath}/{storeId}/{processedFolder}/{fileName}` |
+ 
+ **Out of scope (not implemented in this migration):**
+ - TC-01 — Transfer XML from Distributor Cloud to Central DB (future phase; no Pub/Sub subscription configured)
+ - TC-05 — Old returns REST endpoint for Portal Suite (future phase)
+ - Flejes module — migrating as a separate independent API
+-- Any write to Multi Local DB — this service has **no database connection**
++- Write to Multi Local DB — **read-only** connection to SAADMIN for store registry; no business writes
+ 
+ **What this service does NOT do:** generate XMLs, process sale business logic, communicate directly with POS terminals, write to any SQL database, or use JWT authentication (Central API is a legacy endpoint without JWT support).
+ 
+@@ -60,7 +60,7 @@
+ 
+ ## Architecture: Hexagonal (Ports & Adapters)
+ 
+-No Spring annotations or framework imports are allowed in `domain/`. This service has **no JPA, no datasource, no SQL database**.
++No Spring annotations or framework imports are allowed in `domain/`. The service has a **read-only** SAADMIN connection for `StoreRegistry` (loads `MN_TIENDA` at startup); it does not write to any SQL database.
+ 
+ ```
+ com.elrosado.transaction
+@@ -72,15 +72,23 @@
+ ├── application/
+ │   └── service/         # Use case implementations — coordinate output ports only
+ └── infrastructure/
+-    └── adapter/
+-        ├── in/
+-        │   ├── messaging/   # PubSubMessageRouterAdapter — handles TC-02 and TC-03 via IMessageSubscriber
+-        │   └── scheduler/   # ReplicationClientSchedulerAdapter — @Scheduled TC-04 with Virtual Threads
+-        └── out/
+-            ├── storage/     # GcsStorageAdapter — implements CloudStoragePort via jlib-storage
+-            └── web/
+-                ├── CentralEndpointAdapter.java   # WebClient HTTP to Central (no JWT)
+-                └── dto/                          # CentralFileTransferRequest/Response/Download Records
++    ├── adapter/
++    │   ├── in/
++    │   │   ├── messaging/   # PubSubMessageRouterAdapter — handles TC-02 and TC-03 via IMessageSubscriber
++    │   │   └── scheduler/   # ReplicationClientSchedulerAdapter — @Scheduled TC-04 with Virtual Threads
++    │   └── out/
++    │       ├── db/
++    │       │   ├── entity/      # StoreEntity — JPA mapping for MN_TIENDA
++    │       │   └── repository/  # JpaStoreRepository — findByIndActivoAndMultiLocal
++    │       ├── storage/     # GcsStorageAdapter — implements CloudStoragePort via jlib-storage
++    │       └── web/
++    │           ├── CentralEndpointAdapter.java   # WebClient HTTP to Central (no JWT)
++    │           └── dto/                          # CentralFileTransferRequest/Response/Download Records
++    └── config/
++        ├── GcsStorageProperties.java  # @ConfigurationProperties prefix=app.gcp.storage
++        ├── CentralProperties.java     # @ConfigurationProperties prefix=app.central
++        ├── CentralWebClientConfig.java # @Bean centralWebClient con base URL y timeout
++        └── StoreRegistry.java         # @PostConstruct — carga tiendas activas de SAADMIN
+ ```
+ 
+ **Layer import rules:**
+@@ -97,24 +105,34 @@
+ 
+ ### Multi-local design
+ One service instance serves multiple stores simultaneously. Every operation carries `storeId` as mandatory context:
+-- **Pub/Sub messages**: body is plain text GCS path `{storeId}/{filename}` — `storeId` is the prefix before the first `/`
+-- **GCS paths**: always `{bucket}/{storeId}/{filename}`
+-- **HTTP to Central**: `codLocal` (storeId) always included in the request body
++- **Pub/Sub messages (TC-02)**: body is the full GCS blob name `CIERREDIA/{storeCode}/TRANSFERIR/{filename}.zip` — `storeCode` is the **second** path segment
++- **GCS paths (TC-02)**: `CIERREDIA/{storeCode}/TRANSFERIR/{filename}.zip` (input) → `CIERREDIA/{storeCode}/PROCESADO/{filename}.zip` (after HTTP OK)
++- **HTTP to Central**: `codLocal` (storeCode) always included in the request body
+ 
+ ### Pub/Sub subscription API
+ `jlib-pubsub` does not expose `@PubSubMessageHandler`. The real API is `IMessageSubscriber`, which at runtime is decorated by `jlib-pubsub-logging` with MDC context. Subscriptions are registered in `@PostConstruct` via `messageSubscriber.startListening()`. The handler returns `CompletableFuture<Boolean>`: `true` = ACK, `false` = NACK (triggers retry).
+ 
+ ### GCS move operation
+-GCS has no native rename/move. `GcsStorageAdapter.moveBlob()` is implemented as: download → upload to target path → delete source. This is used by TC-02 to move processed blobs to `{storeId}/procesado/`.
+-
+-### KMS pattern
+-`jlib-kms` is a transitive dependency of `jlib-secretmanager`. In `application-local.yml`, `KmsAutoConfiguration` is excluded and `app.gcp.kms.enabled: false`. When KMS adapters are implemented, they must use `@ConditionalOnProperty(name = "app.gcp.kms.enabled", havingValue = "true")` for the real adapter and `havingValue = "false", matchIfMissing = true` for the no-op.
++GCS has no native rename/move. `GcsStorageAdapter.moveBlob()` is implemented as: download → upload to target path → delete source. This is used by TC-02 to move processed blobs. The replacement uses configurable folder names from `GcsStorageProperties`: `.replace("/" + gcsProperties.transferFolder() + "/", "/" + gcsProperties.processedFolder() + "/")`.
++
++### GCS single-bucket design
++One bucket (`GCS_BUCKET`) is shared across all use cases, differentiated by path prefix:
++- TC-02: `{closingDayPath}/{storeCode}/{transferFolder}/` → `{closingDayPath}/{storeCode}/{processedFolder}/`
++- TC-03: `{journalPath}/{storeCode}/{file}` (deleted after sending)
++- TC-04: `{clientReplicationPath}/{storeCode}/{processedFolder}/{file}`
++
++All path segments are configurable via `app.gcp.storage.*` with sensible defaults (`CIERREDIA`, `JOURNAL`, `REPLICA_CLIENTE`, `TRANSFERIR`, `PROCESADO`, `ERROR`).
++
++### Store registry
++`StoreRegistry` loads active multi-local stores from `SAADMIN.MN_TIENDA` at startup via `JpaStoreRepository.findByIndActivoAndMultiLocal(1, 1)`. Store codes are formatted as 3-digit zero-padded strings (`String.format("%03d", desClave)`). Used only by `ReplicationClientSchedulerAdapter` (TC-04); if the DB is unavailable at startup, the registry starts empty and logs a warning — the service continues running.
+ 
+ ### HTTP to Central
+-`CentralEndpointAdapter` uses Spring WebFlux `WebClient` directly — **not** `jlib-apicalls` — because the Central El Rosado legacy API does not support JWT. Calls block with `.block()` which is safe on Virtual Threads. Three endpoints:
+-- `POST {url}/transaction/receive/file` — multipart, sends ZIP (TC-02, TC-03)
+-- `POST {url}/transaction/send/name/file` — JSON, lists available replication files (TC-04)
+-- `POST {url}/transaction/send/file` — JSON, downloads a replication file as Base64 (TC-04)
++`CentralEndpointAdapter` uses a `WebClient` bean pre-configured in `CentralWebClientConfig` (base URL + Reactor Netty timeout from `CentralProperties`). Not `jlib-apicalls` — Central is a legacy API without JWT. Calls block with `.block()` safe on Virtual Threads. Three endpoints:
++- `POST /transaction/receive/file` — multipart, sends ZIP (TC-02 type=`CIERREDIA`, TC-03 type=`JOURNAL`)
++- `POST /transaction/send/name/file` — JSON, lists replication files (TC-04 type=`REPLICA_CLIENTE`)
++- `POST /transaction/send/file` — JSON, downloads a replication file as Base64 (TC-04)
++
++The type values (`CIERREDIA`, `JOURNAL`, `REPLICA_CLIENTE`) are defined by the legacy Central API contract and configured via `app.central.file-types.*`.
+ 
+ ---
+ 
+@@ -142,34 +160,36 @@
+ 
+ | Profile | File | Purpose |
+ |---------|------|---------|
+-| _(default)_ | `application.yml` | Shared: app name, virtual threads, actuator, Pub/Sub subscriptions, GCS buckets, scheduler config, Central HTTP config |
+-| `local` | `application-local.yml` | Plain-text logs, local GCP credentials file, hardcoded Pub/Sub subscription IDs, KMS disabled |
+-| `prod` | `application-prod.yml` | GCP structured JSON logging, all values from environment variables |
+-
+-In `application-local.yml`, the KMS autoconfiguration is excluded (`spring.autoconfigure.exclude: com.elrosado.jlib_kms.config.KmsAutoConfiguration`) and `app.gcp.kms.enabled: false`.
++| _(default)_ | `application.yml` | Shared: app name, virtual threads, actuator, Pub/Sub subscriptions, single GCS bucket config, scheduler, Central HTTP config |
++| `local` | `application-local.yml` | Plain-text logs, local GCP credentials file, hardcoded subscription IDs, local datasource |
++| `prod` | `application-prod.yml` | GCP structured JSON logging, datasource and all values from environment variables |
+ 
+ In production, `logging.structured.format.console=gcp` converts `addKeyValue` fields to first-class Cloud Logging structured fields — **never concatenate values in log message strings**.
+ 
+ **Required environment variables (prod) — injected from GKE ConfigMap:**
+ 
+-| Variable | Description |
+-|----------|-------------|
+-| `GOOGLE_CLOUD_PROJECT` | GCP Project ID |
+-| `PUBSUB_SUB_CLOSING_DAY` | Subscription ID for TC-02 |
+-| `PUBSUB_SUB_JOURNAL` | Subscription ID for TC-03 |
+-| `GCS_BUCKET_CIERRE_DIA` | Bucket for day-closing ZIPs |
+-| `GCS_BUCKET_JOURNAL` | Bucket for journal ZIPs |
+-| `GCS_BUCKET_REPLICA_CLIENTE` | Bucket for client replication files |
+-| `STORE_CODES` | Comma-separated list of store IDs (e.g. `065,100`) |
+-| `REPLICATION_CLIENT_ENABLED` | Enable/disable TC-04 scheduler (default: `true`) |
+-| `REPLICATION_CLIENT_CRON` | Cron expression for TC-04 (default: `0 0/5 * * * ?`) |
+-| `CENTRAL_ENDPOINT_URL` | Base URL of the Central El Rosado API |
+-| `CENTRAL_TIMEOUT_SECONDS` | WebClient timeout in seconds (default: `30`) |
+-| `KMS_LOCATION_ID` | KMS key location (default: `global`) |
+-| `KMS_KEY_RING_ID` | KMS keyring name |
+-| `KMS_CRYPTO_KEY_ID` | KMS crypto key name |
+-| `LOGGING_LEVEL_ROOT` | Root log level (default: `INFO`) |
+-| `LOGGING_LEVEL_APPLICATION` | Application package log level (default: `INFO`) |
++| Variable | Description | Default |
++|----------|-------------|---------|
++| `GOOGLE_CLOUD_PROJECT` | GCP Project ID | _(required)_ |
++| `PUBSUB_SUB_CLOSING_DAY` | Subscription ID for TC-02 | `retail.local.closing.report.request.v1-sub` |
++| `PUBSUB_SUB_JOURNAL` | Subscription ID for TC-03 | `retail.local.journal.request.v1-sub` |
++| `GCS_BUCKET` | Shared bucket name | `gcs-cer-suite-core-files` |
++| `GCS_CLOSING_DAY_PATH` | Root path for closing-day files | `CIERREDIA` |
++| `GCS_JOURNAL_PATH` | Root path for journal files | `JOURNAL` |
++| `GCS_CLIENT_REPLICATION_PATH` | Root path for client replication files | `REPLICA_CLIENTE` |
++| `GCS_TRANSFER_FOLDER` | Subfolder for pending files (TC-02) | `TRANSFERIR` |
++| `GCS_PROCESSED_FOLDER` | Subfolder for processed files | `PROCESADO` |
++| `GCS_ERROR_FOLDER` | Subfolder for failed files | `ERROR` |
++| `DB_SAADMIN_URL` | JDBC URL for SAADMIN (store registry) | _(required)_ |
++| `DB_SAADMIN_USERNAME` | SAADMIN read-only user | _(required)_ |
++| `DB_SAADMIN_PASSWORD` | SAADMIN password (from Secret) | _(required)_ |
++| `REPLICATION_CLIENT_ENABLED` | Enable/disable TC-04 scheduler | `true` |
++| `REPLICATION_CLIENT_CRON` | Cron expression for TC-04 | `0 0/5 * * * ?` |
++| `CENTRAL_ENDPOINT_URL` | Base URL of the Central El Rosado API | `https://10.2.7.21:8449/` |
++| `CENTRAL_TIMEOUT_SECONDS` | WebClient timeout in seconds | `30` |
++| `CENTRAL_SYSTEM_NAME` | System identifier in Central requests | `TRANSACTION-CLOUD` |
++| `LOGGING_LEVEL_ROOT` | Root log level | `INFO` |
++| `LOGGING_LEVEL_APPLICATION` | Application package log level | `INFO` |
+ 
+ ---
+ 
+@@ -186,7 +206,7 @@
+ 
+ ## Deployment (GKE / GCP)
+ 
+-- Kubernetes manifests in `k8s/`: `deployment.yaml`, `service.yaml`, `hpa.yaml`, `configmap.yaml` (no `secret.yaml` — this service has no database credentials).
++- Kubernetes manifests in `k8s/`: `deployment.yaml`, `service.yaml`, `hpa.yaml`, `configmap.yaml`. A `secret.yaml` is needed for `DB_SAADMIN_PASSWORD`.
+ - Dockerfile uses multi-stage build targeting Java 25 with `--enable-preview`, non-root user.
+ - Health probes: `/actuator/health/liveness` and `/actuator/health/readiness`.
+ - All GCP authentication (GCS, Pub/Sub, Secret Manager) uses **Workload Identity** — no JSON key files in production.
+@@ -205,7 +225,8 @@
+ **Shared libraries (jlib-*)** — all at version `1.0.0`:
+ - `jlib-pubsub-logging`: Pub/Sub subscriber + MDC correlation (`jlib-pubsub` is a transitive)
+ - `jlib-storage`: GCS operations via `IGoogleCloudStorageService`
+-- `jlib-secretmanager`: GCP Secret Manager (`jlib-kms` is a transitive — do NOT declare explicitly)
+ - `jlib-logging`: structured logging with correlation ID MDC filter
+ - `jlib-health`: liveness/readiness probe support
+ - `jlib-common`: standardized business exceptions (`BusinessRuleValidationException`)
++
++> `jlib-secretmanager` and `jlib-kms` are **not** used in this service. Store codes come from SAADMIN via JPA; Central credentials are Workload Identity in GCP.
+
+
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -6,40 +6,40 @@
+   labels:
+     app: cer-suite-cl-local-transaction
+ data:
+-  # ─── GCP ────────────────────────────────────────────────────────
++  # ─── GCP ─────────────────────────────────────────────────────────
+   GOOGLE_CLOUD_PROJECT: "nombre-proyecto-gcp-prod"
+ 
+-  # ─── KMS (keyring y clave para descifrado de payloads) ──────────
+-  KMS_LOCATION_ID: "global"
+-  KMS_KEY_RING_ID: "suite-cloud-keyring"
+-  KMS_CRYPTO_KEY_ID: "transaction-encryption-key"
+-
+-  # ─── Pub/Sub — suscripciones ────────────────────────────────────
+-  # TC-02: cierre de día (descarga ZIP de GCS y envía a Central)
+-  PUBSUB_SUB_CLOSING_DAY: "projects/nombre-proyecto-gcp-prod/subscriptions/retail.local.informe.cierre.request.v1-sub"
+-  # TC-03: archivos journal (evento object-created de GCS)
++  # ─── Pub/Sub — suscripciones ─────────────────────────────────────
++  # TC-02: cierre de día
++  PUBSUB_SUB_CLOSING_DAY: "projects/nombre-proyecto-gcp-prod/subscriptions/retail.local.closing.report.request.v1-sub"
++  # TC-03: archivos journal
+   PUBSUB_SUB_JOURNAL: "projects/nombre-proyecto-gcp-prod/subscriptions/retail.local.journal.request.v1-sub"
+ 
+-  # ─── GCS Buckets ────────────────────────────────────────────────
+-  GCS_BUCKET_CIERRE_DIA: "bucket-cierre-dia-prod"
+-  GCS_BUCKET_JOURNAL: "bucket-journal-prod"
+-  GCS_BUCKET_REPLICA_CLIENTE: "bucket-replica-cliente-prod"
++  # ─── GCS (bucket único compartido) ───────────────────────────────
++  GCS_BUCKET: "gcs-cer-suite-core-files"
++  GCS_CLOSING_DAY_PATH: "CIERREDIA"
++  GCS_JOURNAL_PATH: "JOURNAL"
++  GCS_CLIENT_REPLICATION_PATH: "REPLICA_CLIENTE"
++  GCS_TRANSFER_FOLDER: "TRANSFERIR"
++  GCS_PROCESSED_FOLDER: "PROCESADO"
++  GCS_ERROR_FOLDER: "ERROR"
+ 
+-  # ─── Códigos de tienda (TC-04) ───────────────────────────────────
+-  STORE_CODES: "065,100"
++  # ─── Base de datos SAADMIN (solo lectura — tabla MN_TIENDA) ──────
++  DB_SAADMIN_URL: "jdbc:sqlserver://saadmin-host:1433;databaseName=SAADMIN;encrypt=true;trustServerCertificate=false"
++  DB_SAADMIN_USERNAME: "sa_transaction_ro"
+ 
+-  # ─── Scheduler TC-04 — réplica de clientes ──────────────────────
++  # ─── Scheduler TC-04 — réplica de clientes ───────────────────────
+   REPLICATION_CLIENT_ENABLED: "true"
+   REPLICATION_CLIENT_CRON: "0 0/5 * * * ?"
+ 
+-  # ─── HTTP Client a Central El Rosado ────────────────────────────
++  # ─── HTTP Client a Central El Rosado ─────────────────────────────
+   CENTRAL_SYSTEM_NAME: "TRANSACTION-CLOUD"
+-  CENTRAL_ENDPOINT_URL: "http://central-elrosado-host:10000"
++  CENTRAL_ENDPOINT_URL: "https://10.2.7.21:8449/"
+   CENTRAL_TIMEOUT_SECONDS: "30"
+ 
+-  # ─── Logging ────────────────────────────────────────────────────
++  # ─── Logging ─────────────────────────────────────────────────────
+   LOGGING_LEVEL_ROOT: "INFO"
+   LOGGING_LEVEL_APPLICATION: "INFO"
+ 
+-  # ─── Spring ─────────────────────────────────────────────────────
++  # ─── Spring ──────────────────────────────────────────────────────
+   SPRING_PROFILES_ACTIVE: "prod"
+
+
+--- Diff for /migration.md ---
+--- a//migration.md
++++ b//migration.md
+@@ -118,7 +118,7 @@
+ 
+ | Método legacy | Cron legacy | Trigger en target | Propósito |
+ |---|---|---|---|
+-| `uploadFileClosingDay()` | `0/10 * * * * ?` | **Pub/Sub** `retail.local.informe.cierre.request.v1` | Descargar ZIP de GCS → enviar a Central |
++| `uploadFileClosingDay()` | `0/10 * * * * ?` | **Pub/Sub** `retail.local.closing.report.request.v1` | Descargar ZIP de GCS → enviar a Central |
+ | `uploadJournal()` | `0/20 * * * * ?` | **Pub/Sub** `retail.local.journal.request.v1` | Descargar ZIP de GCS → enviar a Central |
+ | `receiveReplicationClient()` | `0/15 * * * * ?` | **`@Scheduled`** (flag habilitado) | Consultar Central → descargar → GCS |
+ 
+@@ -157,7 +157,7 @@
+ 
+ | ID | Funcionalidad | Origen legacy | Trigger en target | Estado |
+ |---|---|---|---|---|
+-| TC-02 | **Cierre de día → Central** | txn-process `uploadFileClosingDay()` | Pub/Sub `retail.local.informe.cierre.request.v1` | ✅ En scope |
++| TC-02 | **Cierre de día → Central** | txn-process `uploadFileClosingDay()` | Pub/Sub `retail.local.closing.report.request.v1` | ✅ En scope |
+ | TC-03 | **Journal → Central** | txn-process `uploadJournal()` | Pub/Sub `retail.local.journal.request.v1` | ✅ En scope |
+ | TC-04 | **Replicación de clientes** | txn-process `receiveReplicationClient()` | `@Scheduled` (flag habilitado) | ✅ En scope |
+ 
+@@ -409,7 +409,7 @@
+ 
+ | Use Case | Topic | Subscription (ej.) | Publisher |
+ |---|---|---|---|
+-| TC-02 | `retail.local.informe.cierre.request.v1` | `transaction-cloud-cierre-sub` | Sistema de cierre de día |
++| TC-02 | `retail.local.closing.report.request.v1` | `transaction-cloud-cierre-sub` | Sistema de cierre de día |
+ | TC-03 | `retail.local.journal.request.v1` | `transaction-cloud-journal-sub` | Sistema de journal |
+ 
+ > **Regla**: Topics y subscriptions **no se crean desde código** — son responsabilidad de
+@@ -958,7 +958,7 @@
+ # TC-02: cierre de día — TC-03: journal
+ pubsub:
+   subscriptions:
+-    - topic-id: retail.local.informe.cierre.request.v1
++    - topic-id: retail.local.closing.report.request.v1
+       subscription-id: ${PUBSUB_SUB_CLOSING_DAY}
+     - topic-id: retail.local.journal.request.v1
+       subscription-id: ${PUBSUB_SUB_JOURNAL}
+@@ -1014,7 +1014,7 @@
+ 
+ pubsub:
+   subscriptions:
+-    - topic-id: retail.local.informe.cierre.request.v1
++    - topic-id: retail.local.closing.report.request.v1
+       subscription-id: projects/my-local-project/subscriptions/cierre-sub
+     - topic-id: retail.local.journal.request.v1
+       subscription-id: projects/my-local-project/subscriptions/journal-sub
+@@ -1430,7 +1430,7 @@
+ 
+ ### Funcionalidades
+ 
+-- [x] TC-02: `PubSubMessageRouterAdapter` → `retail.local.informe.cierre.request.v1` → GCS download → HTTP Central (sin JWT) → move blob
++- [x] TC-02: `PubSubMessageRouterAdapter` → `retail.local.closing.report.request.v1` → GCS download → HTTP Central (sin JWT) → move blob
+ - [x] TC-03: `PubSubMessageRouterAdapter` → `retail.local.journal.request.v1` → GCS download → HTTP Central (sin JWT) → delete blob
+ - [x] TC-04: `ReplicationClientSchedulerAdapter` `@Scheduled` + flag → Virtual Threads por tienda → GCS upload
+ 
+@@ -1502,7 +1502,7 @@
+ ### Infraestructura GCP (IaC/Terraform)
+ 
+ - [ ] GCS buckets creados: cierre-día, journal, replica-cliente
+-- [ ] Pub/Sub topics: `retail.local.informe.cierre.request.v1`, `retail.local.journal.request.v1`
++- [ ] Pub/Sub topics: `retail.local.closing.report.request.v1`, `retail.local.journal.request.v1`
+ - [ ] Subscriptions y Dead Letter Topics (DLT) configurados
+ - [ ] Workload Identity configurado en GKE
+ - [x] GKE ConfigMap creado (`k8s/configmap.yaml`)
+
+
+--- Diff for /pom.xml ---
+--- a//pom.xml
++++ b//pom.xml
+@@ -82,16 +82,20 @@
+             <artifactId>jlib-storage</artifactId>
+             <version>1.0.0</version>
+         </dependency>
+-        <!-- jlib-kms viene como transitiva de jlib-secretmanager -->
+-        <dependency>
+-            <groupId>com.elrosado</groupId>
+-            <artifactId>jlib-secretmanager</artifactId>
+-            <version>1.0.0</version>
+-        </dependency>
+         <dependency>
+             <groupId>com.elrosado</groupId>
+             <artifactId>jlib-common</artifactId>
+             <version>1.0.0</version>
++        </dependency>
++
++        <!-- ââ Base de datos SAADMIN (lectura de MN_TIENDA) ââââââââ -->
++        <dependency>
++            <groupId>org.springframework.boot</groupId>
++            <artifactId>spring-boot-starter-data-jpa</artifactId>
++        </dependency>
++        <dependency>
++            <groupId>com.microsoft.sqlserver</groupId>
++            <artifactId>mssql-jdbc</artifactId>
+         </dependency>
+ 
+         <!-- ââ Utilidades âââââââââââââââââââââââââââââââââââââââââ -->
+
+
+--- Diff for /src/main/java/com/elrosado/transaction/CerSuiteClLocalTransactionApplication.java ---
+--- a//src/main/java/com/elrosado/transaction/CerSuiteClLocalTransactionApplication.java
++++ b//src/main/java/com/elrosado/transaction/CerSuiteClLocalTransactionApplication.java
+@@ -2,10 +2,12 @@
+ 
+ import org.springframework.boot.SpringApplication;
+ import org.springframework.boot.autoconfigure.SpringBootApplication;
++import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
+ import org.springframework.scheduling.annotation.EnableScheduling;
+ 
+ @SpringBootApplication
+ @EnableScheduling
++@ConfigurationPropertiesScan
+ public class CerSuiteClLocalTransactionApplication {
+ 
+     public static void main(String[] args) {
+
+
+--- Diff for /src/main/java/com/elrosado/transaction/application/service/SyncReplicationClientService.java ---
+--- a//src/main/java/com/elrosado/transaction/application/service/SyncReplicationClientService.java
++++ b//src/main/java/com/elrosado/transaction/application/service/SyncReplicationClientService.java
+@@ -4,8 +4,9 @@
+ import com.elrosado.transaction.domain.port.in.SyncReplicationClientUseCase;
+ import com.elrosado.transaction.domain.port.out.CentralEndpointPort;
+ import com.elrosado.transaction.domain.port.out.CloudStoragePort;
++import com.elrosado.transaction.infrastructure.config.GcsStorageProperties;
++import lombok.RequiredArgsConstructor;
+ import lombok.extern.slf4j.Slf4j;
+-import org.springframework.beans.factory.annotation.Value;
+ import org.springframework.stereotype.Service;
+ 
+ import java.time.LocalDateTime;
+@@ -14,24 +15,20 @@
+ 
+ /**
+  * TC-04: Consulta al Central la lista de archivos de replicaciÃ³n, los descarga y los sube a GCS.
++ *
++ * Ruta GCS resultante: {clientReplicationPath}/{storeId}/{processedFolder}/{fileName}
++ *
+  * La concurrencia entre tiendas la gestiona el scheduler con Virtual Threads;
+  * los archivos de una misma tienda se procesan de forma secuencial.
+  */
+ @Service
+ @Slf4j
++@RequiredArgsConstructor
+ public class SyncReplicationClientService implements SyncReplicationClientUseCase {
+ 
+-    private final CentralEndpointPort centralEndpointPort;
+-    private final CloudStoragePort    cloudStoragePort;
+-
+-    @Value("${app.gcp.buckets.replica-cliente}")
+-    private String replicaBucket;
+-
+-    public SyncReplicationClientService(CentralEndpointPort centralEndpointPort,
+-                                        CloudStoragePort cloudStoragePort) {
+-        this.centralEndpointPort = centralEndpointPort;
+-        this.cloudStoragePort    = cloudStoragePort;
+-    }
++    private final CentralEndpointPort  centralEndpointPort;
++    private final CloudStoragePort     cloudStoragePort;
++    private final GcsStorageProperties gcsProperties;
+ 
+     @Override
+     public void syncForStore(String storeId) {
+@@ -74,8 +71,13 @@
+     }
+ 
+     private void uploadToGcs(String storeId, ReplicationFile file) {
+-        String blobName = storeId + "/" + file.fileName();
+-        cloudStoragePort.uploadFile(replicaBucket, blobName, file.content(), "application/octet-stream");
++        String blobName = gcsProperties.clientReplicationPath()
++                + "/" + storeId
++                + "/" + gcsProperties.processedFolder()
++                + "/" + file.fileName();
++
++        cloudStoragePort.uploadFile(gcsProperties.bucket(), blobName, file.content(), "application/octet-stream");
++
+         log.atInfo()
+            .setMessage("Archivo de replicaciÃ³n almacenado en GCS")
+            .addKeyValue("storeId", storeId)
+
+
+--- Diff for /src/main/java/com/elrosado/transaction/application/service/TransferClosingDayService.java ---
+--- a//src/main/java/com/elrosado/transaction/application/service/TransferClosingDayService.java
++++ b//src/main/java/com/elrosado/transaction/application/service/TransferClosingDayService.java
+@@ -4,28 +4,26 @@
+ import com.elrosado.transaction.domain.port.in.TransferClosingDayUseCase;
+ import com.elrosado.transaction.domain.port.out.CentralEndpointPort;
+ import com.elrosado.transaction.domain.port.out.CloudStoragePort;
++import com.elrosado.transaction.infrastructure.config.GcsStorageProperties;
++import lombok.RequiredArgsConstructor;
+ import lombok.extern.slf4j.Slf4j;
+-import org.springframework.beans.factory.annotation.Value;
+ import org.springframework.stereotype.Service;
+ 
+ /**
+- * TC-02: Descarga el ZIP de cierre de dÃ­a desde GCS, lo envÃ­a al Central y mueve el blob a procesado/.
++ * TC-02: Descarga el ZIP de cierre de dÃ­a desde GCS, lo envÃ­a al Central y mueve el blob a PROCESADO.
++ *
++ * Ruta GCS esperada (body del mensaje Pub/Sub es el blob name completo):
++ *   IN:  {closingDayPath}/{storeCode}/{transferFolder}/{nombre}.zip
++ *   OUT: {closingDayPath}/{storeCode}/{processedFolder}/{nombre}.zip
+  */
+ @Service
+ @Slf4j
++@RequiredArgsConstructor
+ public class TransferClosingDayService implements TransferClosingDayUseCase {
+ 
+-    private final CentralEndpointPort centralEndpointPort;
+-    private final CloudStoragePort    cloudStoragePort;
+-
+-    @Value("${app.gcp.buckets.cierre-dia}")
+-    private String cierreDiaBucket;
+-
+-    public TransferClosingDayService(CentralEndpointPort centralEndpointPort,
+-                                     CloudStoragePort cloudStoragePort) {
+-        this.centralEndpointPort = centralEndpointPort;
+-        this.cloudStoragePort    = cloudStoragePort;
+-    }
++    private final CentralEndpointPort  centralEndpointPort;
++    private final CloudStoragePort     cloudStoragePort;
++    private final GcsStorageProperties gcsProperties;
+ 
+     @Override
+     public void transfer(ClosingDayTransfer transfer) {
+@@ -33,21 +31,22 @@
+ 
+         log.atInfo()
+            .setMessage("Iniciando transferencia de cierre de dÃ­a")
+-           .addKeyValue("storeId", transfer.storeId())
++           .addKeyValue("storeCode", transfer.storeId())
+            .addKeyValue("blob", transfer.gcsBlobName())
+            .log();
+ 
+-        byte[] content = cloudStoragePort.downloadFile(cierreDiaBucket, transfer.gcsBlobName());
++        byte[] content = cloudStoragePort.downloadFile(gcsProperties.bucket(), transfer.gcsBlobName());
+ 
+-        centralEndpointPort.sendFile(transfer.storeId(), fileName, content, "CLOSING_DAY");
++        centralEndpointPort.sendClosingDayFile(transfer.storeId(), fileName, content);
+ 
+-        // Mover el blob a la carpeta de procesados tras envÃ­o exitoso
+-        String processedBlob = transfer.storeId() + "/procesado/" + fileName;
+-        cloudStoragePort.moveBlob(cierreDiaBucket, transfer.gcsBlobName(), processedBlob);
++        String processedBlob = transfer.gcsBlobName()
++                .replace("/" + gcsProperties.transferFolder() + "/",
++                         "/" + gcsProperties.processedFolder() + "/");
++        cloudStoragePort.moveBlob(gcsProperties.bucket(), transfer.gcsBlobName(), processedBlob);
+ 
+         log.atInfo()
+-           .setMessage("Cierre de dÃ­a transferido y movido a procesado")
+-           .addKeyValue("storeId", transfer.storeId())
++           .setMessage("Cierre de dÃ­a transferido y movido a PROCESADO")
++           .addKeyValue("storeCode", transfer.storeId())
+            .addKeyValue("origen", transfer.gcsBlobName())
+            .addKeyValue("destino", processedBlob)
+            .log();
+
+
+--- Diff for /src/main/java/com/elrosado/transaction/application/service/TransferJournalService.java ---
+--- a//src/main/java/com/elrosado/transaction/application/service/TransferJournalService.java
++++ b//src/main/java/com/elrosado/transaction/application/service/TransferJournalService.java
+@@ -4,28 +4,23 @@
+ import com.elrosado.transaction.domain.port.in.TransferJournalUseCase;
+ import com.elrosado.transaction.domain.port.out.CentralEndpointPort;
+ import com.elrosado.transaction.domain.port.out.CloudStoragePort;
++import com.elrosado.transaction.infrastructure.config.GcsStorageProperties;
++import lombok.RequiredArgsConstructor;
+ import lombok.extern.slf4j.Slf4j;
+-import org.springframework.beans.factory.annotation.Value;
+ import org.springframework.stereotype.Service;
+ 
+ /**
+  * TC-03: Descarga el ZIP de journal desde GCS, lo envÃ­a al Central y elimina el blob.
++ * El body del mensaje Pub/Sub es el blob name completo dentro del bucket compartido.
+  */
+ @Service
+ @Slf4j
++@RequiredArgsConstructor
+ public class TransferJournalService implements TransferJournalUseCase {
+ 
+-    private final CentralEndpointPort centralEndpointPort;
+-    private final CloudStoragePort    cloudStoragePort;
+-
+-    @Value("${app.gcp.buckets.journal}")
+-    private String journalBucket;
+-
+-    public TransferJournalService(CentralEndpointPort centralEndpointPort,
+-                                  CloudStoragePort cloudStoragePort) {
+-        this.centralEndpointPort = centralEndpointPort;
+-        this.cloudStoragePort    = cloudStoragePort;
+-    }
++    private final CentralEndpointPort  centralEndpointPort;
++    private final CloudStoragePort     cloudStoragePort;
++    private final GcsStorageProperties gcsProperties;
+ 
+     @Override
+     public void transfer(JournalTransfer transfer) {
+@@ -37,12 +32,11 @@
+            .addKeyValue("blob", transfer.gcsBlobName())
+            .log();
+ 
+-        byte[] content = cloudStoragePort.downloadFile(journalBucket, transfer.gcsBlobName());
++        byte[] content = cloudStoragePort.downloadFile(gcsProperties.bucket(), transfer.gcsBlobName());
+ 
+-        centralEndpointPort.sendFile(transfer.storeId(), fileName, content, "JOURNAL");
++        centralEndpointPort.sendJournalFile(transfer.storeId(), fileName, content);
+ 
+-        // Eliminar el blob de journal tras envÃ­o exitoso
+-        cloudStoragePort.deleteBlob(journalBucket, transfer.gcsBlobName());
++        cloudStoragePort.deleteBlob(gcsProperties.bucket(), transfer.gcsBlobName());
+ 
+         log.atInfo()
+            .setMessage("Journal transferido y eliminado de GCS")
+
+
+--- Diff for /src/main/java/com/elrosado/transaction/domain/port/out/CentralEndpointPort.java ---
+--- a//src/main/java/com/elrosado/transaction/domain/port/out/CentralEndpointPort.java
++++ b//src/main/java/com/elrosado/transaction/domain/port/out/CentralEndpointPort.java
+@@ -4,19 +4,28 @@
+ 
+ /**
+  * ComunicaciÃ³n HTTP con el servidor Central (API legacy sin JWT).
+- * Las llamadas se realizan con WebClient directo sin autenticaciÃ³n.
++ * Cada mÃ©todo encapsula un tipo de operaciÃ³n; el adaptador resuelve
++ * el valor del campo "type" que acepta Central para cada uno.
+  */
+ public interface CentralEndpointPort {
+ 
+     /**
+-     * TC-02, TC-03: EnvÃ­a un archivo ZIP al endpoint Central.
++     * TC-02: EnvÃ­a un ZIP de cierre de dÃ­a al endpoint Central.
+      *
+      * @param storeId  cÃ³digo de tienda
+      * @param fileName nombre del archivo
+-     * @param content  contenido del archivo en bytes
+-     * @param fileType tipo de operaciÃ³n: {@code CLOSING_DAY} o {@code JOURNAL}
++     * @param content  contenido del ZIP en bytes
+      */
+-    void sendFile(String storeId, String fileName, byte[] content, String fileType);
++    void sendClosingDayFile(String storeId, String fileName, byte[] content);
++
++    /**
++     * TC-03: EnvÃ­a un ZIP de journal al endpoint Central.
++     *
++     * @param storeId  cÃ³digo de tienda
++     * @param fileName nombre del archivo
++     * @param content  contenido del ZIP en bytes
++     */
++    void sendJournalFile(String storeId, String fileName, byte[] content);
+ 
+     /**
+      * TC-04: Consulta al Central la lista de archivos de replicaciÃ³n disponibles.
+
+
+--- Diff for /src/main/java/com/elrosado/transaction/infrastructure/adapter/in/messaging/PubSubMessageRouterAdapter.java ---
+--- a//src/main/java/com/elrosado/transaction/infrastructure/adapter/in/messaging/PubSubMessageRouterAdapter.java
++++ b//src/main/java/com/elrosado/transaction/infrastructure/adapter/in/messaging/PubSubMessageRouterAdapter.java
+@@ -18,23 +18,25 @@
+  * Adaptador de entrada Pub/Sub para TC-02 y TC-03.
+  *
+  * Llama a {@code IMessageSubscriber.startListening()} una Ãºnica vez al inicio del contexto.
+- * La API real de jlib-pubsub registra un listener por cada subscription configurada en
+- * {@code pubsub.subscriptions} y entrega {@code (subscriptionId, body)} al handler.
+- * El body es texto plano con la ruta GCS: {@code {storeId}/{filename}}.
++ * Las IDs de suscripciÃ³n se leen del Ã­ndice 0 y 1 de {@code pubsub.subscriptions}
++ * â el mismo arreglo que usa jlib-pubsub para registrar los listeners.
++ *
++ * El body del mensaje es el blob name completo en GCS: {@code {prefix}/{storeCode}/{folder}/{file}}.
++ * El storeCode se extrae del segundo segmento del path.
+  */
+ @Component
+ @Slf4j
+ @RequiredArgsConstructor
+ public class PubSubMessageRouterAdapter {
+ 
+-    private final IMessageSubscriber       messageSubscriber;
++    private final IMessageSubscriber        messageSubscriber;
+     private final TransferClosingDayUseCase closingDayUseCase;
+     private final TransferJournalUseCase    journalUseCase;
+ 
+-    @Value("${app.pubsub.closing-day-subscription}")
++    @Value("${pubsub.subscriptions[0].subscription-id}")
+     private String closingDaySubscriptionId;
+ 
+-    @Value("${app.pubsub.journal-subscription}")
++    @Value("${pubsub.subscriptions[1].subscription-id}")
+     private String journalSubscriptionId;
+ 
+     @PostConstruct
+@@ -42,7 +44,7 @@
+         messageSubscriber.startListening(this::route);
+         log.atInfo()
+            .setMessage("Listener de Pub/Sub iniciado")
+-           .addKeyValue("cierreDia", closingDaySubscriptionId)
++           .addKeyValue("closingDay", closingDaySubscriptionId)
+            .addKeyValue("journal", journalSubscriptionId)
+            .log();
+     }
+@@ -101,10 +103,14 @@
+         }
+     }
+ 
+-    /** Extrae el storeId del prefijo de la ruta GCS ({storeId}/{filename}). */
++    /**
++     * Extrae el storeCode del blob name GCS.
++     * Formato: {prefix}/{storeCode}/{folder}/{filename}
++     * El storeCode es el segundo segmento del path.
++     */
+     private String extractStoreId(String gcsBlobName) {
+-        int slash = gcsBlobName.indexOf('/');
+-        return slash > 0 ? gcsBlobName.substring(0, slash) : "";
++        String[] parts = gcsBlobName.split("/", 3);
++        return parts.length >= 2 ? parts[1] : "";
+     }
+ 
+     private SubscriptionType resolveSubscription(String subscriptionId) {
+
+
+--- Diff for /src/main/java/com/elrosado/transaction/infrastructure/adapter/in/scheduler/ReplicationClientSchedulerAdapter.java ---
+--- a//src/main/java/com/elrosado/transaction/infrastructure/adapter/in/scheduler/ReplicationClientSchedulerAdapter.java
++++ b//src/main/java/com/elrosado/transaction/infrastructure/adapter/in/scheduler/ReplicationClientSchedulerAdapter.java
+@@ -1,6 +1,7 @@
+ package com.elrosado.transaction.infrastructure.adapter.in.scheduler;
+ 
+ import com.elrosado.transaction.domain.port.in.SyncReplicationClientUseCase;
++import com.elrosado.transaction.infrastructure.config.StoreRegistry;
+ import lombok.RequiredArgsConstructor;
+ import lombok.extern.slf4j.Slf4j;
+ import org.springframework.beans.factory.annotation.Value;
+@@ -12,9 +13,8 @@
+ 
+ /**
+  * TC-04: Scheduler de replicaciÃ³n de clientes.
+- * Itera las tiendas configuradas y sincroniza cada una en un Virtual Thread independiente.
+- * La concurrencia entre tiendas estÃ¡ gestionada por el executor de Virtual Threads;
+- * el auto-close del try-with-resources espera que todos los hilos terminen.
++ * Las tiendas activas se obtienen de {@link StoreRegistry}, que carga desde SAADMIN.MN_TIENDA al arranque.
++ * Cada tienda se sincroniza en un Virtual Thread independiente para mÃ¡xima concurrencia.
+  */
+ @Component
+ @Slf4j
+@@ -22,12 +22,10 @@
+ public class ReplicationClientSchedulerAdapter {
+ 
+     private final SyncReplicationClientUseCase syncUseCase;
++    private final StoreRegistry                storeRegistry;
+ 
+     @Value("${app.replication.client.enabled:true}")
+     private boolean enabled;
+-
+-    @Value("${app.store-codes}")
+-    private List<String> storeCodes;
+ 
+     @Scheduled(cron = "${app.replication.client.cron}")
+     public void execute() {
+@@ -38,9 +36,11 @@
+             return;
+         }
+ 
++        List<String> storeCodes = storeRegistry.getActiveStoreCodes();
++
+         log.atInfo()
+            .setMessage("Iniciando ciclo de replicaciÃ³n de clientes")
+-           .addKeyValue("totalTiendas", storeCodes.size())
++           .addKeyValue("totalStores", storeCodes.size())
+            .log();
+ 
+         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+@@ -49,7 +49,7 @@
+ 
+         log.atInfo()
+            .setMessage("Ciclo de replicaciÃ³n de clientes finalizado")
+-           .addKeyValue("totalTiendas", storeCodes.size())
++           .addKeyValue("totalStores", storeCodes.size())
+            .log();
+     }
+ 
+
+
+--- Diff for /src/main/java/com/elrosado/transaction/infrastructure/adapter/out/db/entity/StoreEntity.java ---
+--- a//src/main/java/com/elrosado/transaction/infrastructure/adapter/out/db/entity/StoreEntity.java
++++ b//src/main/java/com/elrosado/transaction/infrastructure/adapter/out/db/entity/StoreEntity.java
+@@ -0,0 +1,39 @@
++package com.elrosado.transaction.infrastructure.adapter.out.db.entity;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++import jakarta.persistence.Table;
++
++/**
++ * Entidad JPA de la tabla MN_TIENDA en SAADMIN.
++ * Usada en lectura para obtener las tiendas multi-local activas al arranque.
++ */
++@Entity
++@Table(name = "MN_TIENDA", schema = "dbo")
++public class StoreEntity {
++
++    @Id
++    @Column(name = "COD_TIENDA")
++    private Integer codTienda;
++
++    @Column(name = "DES_CLAVE")
++    private Integer desClave;
++
++    @Column(name = "DES_TIENDA")
++    private String desTienda;
++
++    @Column(name = "IND_ACTIVO")
++    private Integer indActivo;
++
++    @Column(name = "MULTI_LOCAL")
++    private Integer multiLocal;
++
++    protected StoreEntity() {}
++
++    public Integer getCodTienda()  { return codTienda;  }
++    public Integer getDesClave()   { return desClave;   }
++    public String  getDesTienda()  { return desTienda;  }
++    public Integer getIndActivo()  { return indActivo;  }
++    public Integer getMultiLocal() { return multiLocal; }
++}
+
+--- Diff for /src/main/java/com/elrosado/transaction/infrastructure/adapter/out/db/repository/JpaStoreRepository.java ---
+--- a//src/main/java/com/elrosado/transaction/infrastructure/adapter/out/db/repository/JpaStoreRepository.java
++++ b//src/main/java/com/elrosado/transaction/infrastructure/adapter/out/db/repository/JpaStoreRepository.java
+@@ -0,0 +1,15 @@
++package com.elrosado.transaction.infrastructure.adapter.out.db.repository;
++
++import com.elrosado.transaction.infrastructure.adapter.out.db.entity.StoreEntity;
++import org.springframework.data.jpa.repository.JpaRepository;
++
++import java.util.List;
++
++/**
++ * Repositorio JPA para MN_TIENDA.
++ * Solo operaciones de lectura: este servicio no escribe en la base de datos.
++ */
++public interface JpaStoreRepository extends JpaRepository<StoreEntity, Integer> {
++
++    List<StoreEntity> findByIndActivoAndMultiLocal(Integer indActivo, Integer multiLocal);
++}
+
+--- Diff for /src/main/java/com/elrosado/transaction/infrastructure/adapter/out/web/CentralEndpointAdapter.java ---
+--- a//src/main/java/com/elrosado/transaction/infrastructure/adapter/out/web/CentralEndpointAdapter.java
++++ b//src/main/java/com/elrosado/transaction/infrastructure/adapter/out/web/CentralEndpointAdapter.java
+@@ -4,8 +4,9 @@
+ import com.elrosado.transaction.infrastructure.adapter.out.web.dto.CentralFileDownloadResponse;
+ import com.elrosado.transaction.infrastructure.adapter.out.web.dto.CentralFileTransferRequest;
+ import com.elrosado.transaction.infrastructure.adapter.out.web.dto.CentralFileTransferResponse;
++import com.elrosado.transaction.infrastructure.config.CentralProperties;
++import lombok.RequiredArgsConstructor;
+ import lombok.extern.slf4j.Slf4j;
+-import org.springframework.beans.factory.annotation.Value;
+ import org.springframework.core.io.ByteArrayResource;
+ import org.springframework.http.MediaType;
+ import org.springframework.http.client.MultipartBodyBuilder;
+@@ -19,63 +20,34 @@
+ 
+ /**
+  * Adaptador HTTP hacia el servidor Central (API legacy sin JWT).
+- * Usa WebClient directo sin ApiCaller ya que Central no soporta autenticaciÃ³n JWT.
++ * Usa WebClient configurado en CentralWebClientConfig.
+  * Se bloquea con {@code .block()} aprovechando que el servicio corre en Virtual Threads.
++ *
++ * Los valores del campo "type" (CIERREDIA, JOURNAL, REPLICA_CLIENTE) provienen de
++ * {@link CentralProperties} y corresponden al contrato definido en la API legada de Central.
+  */
+ @Component
+ @Slf4j
++@RequiredArgsConstructor
+ public class CentralEndpointAdapter implements CentralEndpointPort {
+ 
+-    private final WebClient webClient;
+-    private final Duration  timeout;
+-    private final String    systemName;
++    private final WebClient         centralWebClient;
++    private final CentralProperties centralProperties;
+ 
+-    public CentralEndpointAdapter(
+-            @Value("${api-config.central-url}") String centralUrl,
+-            @Value("${api-config.timeout-seconds:30}") int timeoutSeconds,
+-            @Value("${app.central.system-name:TRANSACTION-CLOUD}") String systemName,
+-            WebClient.Builder webClientBuilder) {
+-        this.webClient  = webClientBuilder.baseUrl(centralUrl).build();
+-        this.timeout    = Duration.ofSeconds(timeoutSeconds);
+-        this.systemName = systemName;
++    /**
++     * TC-02: POST multipart a /transaction/receive/file con tipo CIERREDIA.
++     */
++    @Override
++    public void sendClosingDayFile(String storeId, String fileName, byte[] content) {
++        sendFileToEndpoint(storeId, fileName, content, centralProperties.fileTypes().closingDay());
+     }
+ 
+     /**
+-     * TC-02, TC-03: POST multipart a /transaction/receive/file.
+-     * Part "file": bytes del ZIP. Part "data": CentralFileTransferRequest como JSON.
++     * TC-03: POST multipart a /transaction/receive/file con tipo JOURNAL.
+      */
+     @Override
+-    public void sendFile(String storeId, String fileName, byte[] content, String fileType) {
+-        log.atInfo()
+-           .setMessage("Enviando archivo a Central")
+-           .addKeyValue("storeId", storeId)
+-           .addKeyValue("fileName", fileName)
+-           .addKeyValue("tipo", fileType)
+-           .log();
+-
+-        var request = new CentralFileTransferRequest(fileType, storeId, fileName, "zip", systemName);
+-
+-        MultipartBodyBuilder builder = new MultipartBodyBuilder();
+-        builder.part("file", new ByteArrayResource(content) {
+-            @Override
+-            public String getFilename() { return fileName; }
+-        }).contentType(MediaType.APPLICATION_OCTET_STREAM);
+-        builder.part("data", request);
+-
+-        webClient.post()
+-                .uri("/transaction/receive/file")
+-                .contentType(MediaType.MULTIPART_FORM_DATA)
+-                .body(BodyInserters.fromMultipartData(builder.build()))
+-                .retrieve()
+-                .bodyToMono(CentralFileTransferResponse.class)
+-                .timeout(timeout)
+-                .doOnNext(response -> log.atInfo()
+-                        .setMessage("Respuesta de Central al enviar archivo")
+-                        .addKeyValue("storeId", storeId)
+-                        .addKeyValue("code", response.code())
+-                        .addKeyValue("message", response.message())
+-                        .log())
+-                .block();
++    public void sendJournalFile(String storeId, String fileName, byte[] content) {
++        sendFileToEndpoint(storeId, fileName, content, centralProperties.fileTypes().journal());
+     }
+ 
+     /**
+@@ -83,15 +55,18 @@
+      */
+     @Override
+     public List<String> listReplicationFiles(String storeId) {
+-        var request = new CentralFileTransferRequest("REPLICATION_CLIENT", storeId, null, null, systemName);
++        var request = new CentralFileTransferRequest(
++                centralProperties.fileTypes().replicationClient(),
++                storeId, null, null,
++                centralProperties.systemName());
+ 
+-        CentralFileTransferResponse response = webClient.post()
++        CentralFileTransferResponse response = centralWebClient.post()
+                 .uri("/transaction/send/name/file")
+                 .contentType(MediaType.APPLICATION_JSON)
+                 .bodyValue(request)
+                 .retrieve()
+                 .bodyToMono(CentralFileTransferResponse.class)
+-                .timeout(timeout)
++                .timeout(Duration.ofSeconds(centralProperties.timeoutSeconds()))
+                 .block();
+ 
+         if (response == null || response.nameFiles() == null) {
+@@ -112,15 +87,18 @@
+      */
+     @Override
+     public byte[] downloadReplicationFile(String storeId, String fileName) {
+-        var request = new CentralFileTransferRequest("REPLICATION_CLIENT", storeId, fileName, null, systemName);
++        var request = new CentralFileTransferRequest(
++                centralProperties.fileTypes().replicationClient(),
++                storeId, fileName, null,
++                centralProperties.systemName());
+ 
+-        CentralFileDownloadResponse response = webClient.post()
++        CentralFileDownloadResponse response = centralWebClient.post()
+                 .uri("/transaction/send/file")
+                 .contentType(MediaType.APPLICATION_JSON)
+                 .bodyValue(request)
+                 .retrieve()
+                 .bodyToMono(CentralFileDownloadResponse.class)
+-                .timeout(timeout)
++                .timeout(Duration.ofSeconds(centralProperties.timeoutSeconds()))
+                 .block();
+ 
+         if (response == null || response.file() == null || response.file().isBlank()) {
+@@ -134,4 +112,39 @@
+ 
+         return Base64.getDecoder().decode(response.file());
+     }
++
++    private void sendFileToEndpoint(String storeId, String fileName, byte[] content, String fileType) {
++        log.atInfo()
++           .setMessage("Enviando archivo a Central")
++           .addKeyValue("storeId", storeId)
++           .addKeyValue("fileName", fileName)
++           .addKeyValue("tipo", fileType)
++           .log();
++
++        var request = new CentralFileTransferRequest(
++                fileType, storeId, fileName, "zip",
++                centralProperties.systemName());
++
++        MultipartBodyBuilder builder = new MultipartBodyBuilder();
++        builder.part("file", new ByteArrayResource(content) {
++            @Override
++            public String getFilename() { return fileName; }
++        }).contentType(MediaType.APPLICATION_OCTET_STREAM);
++        builder.part("data", request);
++
++        centralWebClient.post()
++                .uri("/transaction/receive/file")
++                .contentType(MediaType.MULTIPART_FORM_DATA)
++                .body(BodyInserters.fromMultipartData(builder.build()))
++                .retrieve()
++                .bodyToMono(CentralFileTransferResponse.class)
++                .timeout(Duration.ofSeconds(centralProperties.timeoutSeconds()))
++                .doOnNext(response -> log.atInfo()
++                        .setMessage("Respuesta de Central al enviar archivo")
++                        .addKeyValue("storeId", storeId)
++                        .addKeyValue("code", response.code())
++                        .addKeyValue("message", response.message())
++                        .log())
++                .block();
++    }
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/transaction/infrastructure/adapter/out/web/dto/CentralFileTransferRequest.java ---
+--- a//src/main/java/com/elrosado/transaction/infrastructure/adapter/out/web/dto/CentralFileTransferRequest.java
++++ b//src/main/java/com/elrosado/transaction/infrastructure/adapter/out/web/dto/CentralFileTransferRequest.java
+@@ -4,7 +4,7 @@
+  * Request enviado al endpoint Central para transferencia de archivos.
+  * Reemplaza el POJO {@code HttpRequestWs} del legacy txn-process.
+  *
+- * @param type      tipo de operaciÃ³n: {@code CLOSING_DAY}, {@code JOURNAL} o {@code REPLICATION_CLIENT}
++ * @param type      tipo de operaciÃ³n segÃºn contrato de Central: {@code CIERREDIA}, {@code JOURNAL} o {@code REPLICA_CLIENTE}
+  * @param codLocal  cÃ³digo de tienda (storeId)
+  * @param fileName  nombre del archivo
+  * @param extension extensiÃ³n del archivo (ej: {@code zip})
+
+
+--- Diff for /src/main/java/com/elrosado/transaction/infrastructure/config/CentralProperties.java ---
+--- a//src/main/java/com/elrosado/transaction/infrastructure/config/CentralProperties.java
++++ b//src/main/java/com/elrosado/transaction/infrastructure/config/CentralProperties.java
+@@ -0,0 +1,27 @@
++package com.elrosado.transaction.infrastructure.config;
++
++import org.springframework.boot.context.properties.ConfigurationProperties;
++
++/**
++ * Propiedades del endpoint Central El Rosado.
++ * El campo fileTypes encapsula los valores de tipo enviados en cada solicitud HTTP,
++ * definidos por el contrato de la API legada de Central.
++ */
++@ConfigurationProperties(prefix = "app.central")
++public record CentralProperties(
++        String url,
++        int timeoutSeconds,
++        String systemName,
++        FileTypes fileTypes
++) {
++
++    /**
++     * Valores de tipo que acepta la API legada de Central para el campo "type".
++     * Deben coincidir exactamente con los definidos en el sistema Central El Rosado.
++     */
++    public record FileTypes(
++            String closingDay,
++            String journal,
++            String replicationClient
++    ) {}
++}
+
+--- Diff for /src/main/java/com/elrosado/transaction/infrastructure/config/CentralWebClientConfig.java ---
+--- a//src/main/java/com/elrosado/transaction/infrastructure/config/CentralWebClientConfig.java
++++ b//src/main/java/com/elrosado/transaction/infrastructure/config/CentralWebClientConfig.java
+@@ -0,0 +1,28 @@
++package com.elrosado.transaction.infrastructure.config;
++
++import org.springframework.context.annotation.Bean;
++import org.springframework.context.annotation.Configuration;
++import org.springframework.http.client.reactive.ReactorClientHttpConnector;
++import org.springframework.web.reactive.function.client.WebClient;
++import reactor.netty.http.client.HttpClient;
++
++import java.time.Duration;
++
++/**
++ * ConfiguraciÃ³n del WebClient para el endpoint Central El Rosado.
++ * Centraliza timeout y URL base para que el adaptador solo inyecte el cliente ya listo.
++ */
++@Configuration
++public class CentralWebClientConfig {
++
++    @Bean
++    public WebClient centralWebClient(CentralProperties centralProperties) {
++        HttpClient httpClient = HttpClient.create()
++                .responseTimeout(Duration.ofSeconds(centralProperties.timeoutSeconds()));
++
++        return WebClient.builder()
++                .baseUrl(centralProperties.url())
++                .clientConnector(new ReactorClientHttpConnector(httpClient))
++                .build();
++    }
++}
+
+--- Diff for /src/main/java/com/elrosado/transaction/infrastructure/config/GcsStorageProperties.java ---
+--- a//src/main/java/com/elrosado/transaction/infrastructure/config/GcsStorageProperties.java
++++ b//src/main/java/com/elrosado/transaction/infrastructure/config/GcsStorageProperties.java
+@@ -0,0 +1,25 @@
++package com.elrosado.transaction.infrastructure.config;
++
++import org.springframework.boot.context.properties.ConfigurationProperties;
++
++/**
++ * Propiedades de almacenamiento GCS.
++ * Bucket Ãºnico compartido, diferenciado por prefijo de ruta segÃºn caso de uso.
++ *
++ * Rutas resultantes:
++ *   TC-02: {closingDayPath}/{storeCode}/{transferFolder}/{file}.zip
++ *          â {closingDayPath}/{storeCode}/{processedFolder}/{file}.zip
++ *   TC-03: {journalPath}/{storeCode}/{file}.zip  (descarga y elimina)
++ *   TC-04: {clientReplicationPath}/{storeCode}/{processedFolder}/{file}
++ *          {clientReplicationPath}/{storeCode}/{errorFolder}/{file}  (en error)
++ */
++@ConfigurationProperties(prefix = "app.gcp.storage")
++public record GcsStorageProperties(
++        String bucket,
++        String closingDayPath,
++        String journalPath,
++        String clientReplicationPath,
++        String transferFolder,
++        String processedFolder,
++        String errorFolder
++) {}
+
+--- Diff for /src/main/java/com/elrosado/transaction/infrastructure/config/StoreRegistry.java ---
+--- a//src/main/java/com/elrosado/transaction/infrastructure/config/StoreRegistry.java
++++ b//src/main/java/com/elrosado/transaction/infrastructure/config/StoreRegistry.java
+@@ -0,0 +1,55 @@
++package com.elrosado.transaction.infrastructure.config;
++
++import com.elrosado.transaction.infrastructure.adapter.out.db.entity.StoreEntity;
++import com.elrosado.transaction.infrastructure.adapter.out.db.repository.JpaStoreRepository;
++import jakarta.annotation.PostConstruct;
++import lombok.RequiredArgsConstructor;
++import lombok.extern.slf4j.Slf4j;
++import org.springframework.stereotype.Component;
++
++import java.util.Collections;
++import java.util.List;
++
++/**
++ * Registro de tiendas multi-local activas.
++ * Carga los cÃ³digos desde SAADMIN.MN_TIENDA al arranque y los expone
++ * al scheduler de rÃ©plica de clientes (TC-04).
++ */
++@Component
++@Slf4j
++@RequiredArgsConstructor
++public class StoreRegistry {
++
++    private final JpaStoreRepository storeRepository;
++
++    private volatile List<StoreEntity> activeStores = List.of();
++
++    @PostConstruct
++    public void load() {
++        try {
++            activeStores = storeRepository.findByIndActivoAndMultiLocal(1, 1);
++            log.atInfo()
++                    .setMessage("Tiendas multi-local activas cargadas desde SAADMIN")
++                    .addKeyValue("totalStores", activeStores.size())
++                    .log();
++        } catch (Exception ex) {
++            log.atWarn()
++                    .setMessage("No se pudo cargar el registro de tiendas; se continÃºa sin tiendas activas")
++                    .setCause(ex)
++                    .log();
++        }
++    }
++
++    public List<StoreEntity> getActiveStores() {
++        return Collections.unmodifiableList(activeStores);
++    }
++
++    /**
++     * Retorna los cÃ³digos de tienda formateados a 3 dÃ­gitos (ej. 65 â "065").
++     */
++    public List<String> getActiveStoreCodes() {
++        return activeStores.stream()
++                .map(s -> String.format("%03d", s.getDesClave()))
++                .toList();
++    }
++}
+
+
+--- Diff for /src/main/resources/application-local.yml ---
+--- a//src/main/resources/application-local.yml
++++ b//src/main/resources/application-local.yml
+@@ -1,20 +1,25 @@
+ spring:
+-  autoconfigure:
+-    exclude:
+-      - com.elrosado.jlib_kms.config.KmsAutoConfiguration
+-
+   cloud:
+     gcp:
+       project-id: ${GOOGLE_CLOUD_PROJECT:my-local-project}
+       # Credenciales de cuenta de servicio para desarrollo local.
+-      # En GCP (GKE) se usa Workload Identity — sin este bloque.
++      # En GKE se usa Workload Identity — sin este bloque.
+       credentials:
+         location: file:D:/SIPECOM/repository-git/cer-gcp/credentials_per.json
+       storage:
+         enabled: true
+-        bucket: local-default
+       pubsub:
+         enabled: true
++
++  datasource:
++    url: ${DB_SAADMIN_URL:jdbc:sqlserver://localhost:1433;databaseName=SAADMIN;encrypt=false;trustServerCertificate=true}
++    username: ${DB_SAADMIN_USERNAME:sa}
++    password: ${DB_SAADMIN_PASSWORD:}
++    driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
++  jpa:
++    hibernate:
++      ddl-auto: none
++    show-sql: false
+ 
+ logging:
+   structured:
+@@ -25,39 +30,42 @@
+     com.elrosado.transaction: DEBUG
+     org.springframework: INFO
+ 
++# ─── Pub/Sub ─────────────────────────────────────────────────────
++# Índice 0 (TC-02): suscripción al tópico de cierre de día
++# Índice 1 (TC-03): suscripción al tópico de archivos journal
++# PubSubMessageRouterAdapter usa estos mismos índices para resolver el enrutamiento.
+ pubsub:
+   subscriptions:
+-    - topic-id: retail.local.informe.cierre.request.v1
+-      subscription-id: projects/my-local-project/subscriptions/cierre-sub
++    - topic-id: retail.local.closing.report.request.v1
++      subscription-id: ${PUBSUB_SUB_CLOSING_DAY:retail.local.closing.report.request.v1-sub}
+     - topic-id: retail.local.journal.request.v1
+-      subscription-id: projects/my-local-project/subscriptions/journal-sub
+-
+-google:
+-  kms:
+-    project-id: ${GOOGLE_CLOUD_PROJECT:my-local-project}
+-    location-id: ${KMS_LOCATION_ID:global}
+-    key-ring-id: ${KMS_KEY_RING_ID:suite-cloud-keyring}
+-    crypto-key-id: ${KMS_CRYPTO_KEY_ID:transaction-encryption-key}
++      subscription-id: ${PUBSUB_SUB_JOURNAL:retail.local.journal.request.v1-sub}
+ 
+ app:
+-  pubsub:
+-    closing-day-subscription: projects/my-local-project/subscriptions/cierre-sub
+-    journal-subscription:     projects/my-local-project/subscriptions/journal-sub
+-  store-codes: 065,100
++  # ─── GCS (bucket único, diferenciado por prefijo de ruta) ──────
+   gcp:
+-    kms:
+-      enabled: false   # KMS deshabilitado en local — los datos se leen sin descifrar
+-    buckets:
+-      cierre-dia:      local-cierre-dia
+-      journal:         local-journal
+-      replica-cliente: local-replica-cliente
++    storage:
++      bucket: ${GCS_BUCKET:gcs-cer-suite-core-files}
++      closing-day-path: ${GCS_CLOSING_DAY_PATH:CIERREDIA}
++      journal-path: ${GCS_JOURNAL_PATH:JOURNAL}
++      client-replication-path: ${GCS_CLIENT_REPLICATION_PATH:REPLICA_CLIENTE}
++      transfer-folder: ${GCS_TRANSFER_FOLDER:TRANSFERIR}
++      processed-folder: ${GCS_PROCESSED_FOLDER:PROCESADO}
++      error-folder: ${GCS_ERROR_FOLDER:ERROR}
++
++  # ─── Scheduler TC-04 (réplica de clientes) ────────────────────
+   replication:
+     client:
+-      enabled: true
+-      cron: "0 0/5 * * * ?"
++      enabled: ${REPLICATION_CLIENT_ENABLED:true}
++      cron: ${REPLICATION_CLIENT_CRON:0 0/5 * * * ?}
++
++  # ─── HTTP Client a Central El Rosado (API legacy sin JWT) ─────
++  # Los file-types corresponden al campo "type" esperado por la API de Central.
+   central:
+-    system-name: TRANSACTION-CLOUD
+-
+-api-config:
+-  central-url: http://10.2.7.21:10000
+-  timeout-seconds: 30
++    url: ${CENTRAL_ENDPOINT_URL:https://10.2.7.21:8449/}
++    timeout-seconds: ${CENTRAL_TIMEOUT_SECONDS:30}
++    system-name: ${CENTRAL_SYSTEM_NAME:TRANSACTION-CLOUD}
++    file-types:
++      closing-day: ${CENTRAL_FILE_TYPE_CLOSING_DAY:CIERREDIA}
++      journal: ${CENTRAL_FILE_TYPE_JOURNAL:JOURNAL}
++      replication-client: ${CENTRAL_FILE_TYPE_REPLICATION_CLIENT:REPLICA_CLIENTE}
+
+--- Diff for /src/main/resources/application-prod.yml ---
+--- a//src/main/resources/application-prod.yml
++++ b//src/main/resources/application-prod.yml
+@@ -6,6 +6,16 @@
+         enabled: true
+       pubsub:
+         enabled: true
++
++  datasource:
++    url: ${DB_SAADMIN_URL}
++    username: ${DB_SAADMIN_USERNAME}
++    password: ${DB_SAADMIN_PASSWORD}
++    driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
++  jpa:
++    hibernate:
++      ddl-auto: none
++    show-sql: false
+ 
+ logging:
+   structured:
+@@ -22,9 +32,43 @@
+     com.elrosado.transaction: ${LOGGING_LEVEL_APPLICATION:INFO}
+     org.springframework: INFO
+ 
+-google:
+-  kms:
+-    project-id: ${GOOGLE_CLOUD_PROJECT}
+-    location-id: ${KMS_LOCATION_ID:global}
+-    key-ring-id: ${KMS_KEY_RING_ID}
+-    crypto-key-id: ${KMS_CRYPTO_KEY_ID}
++
++# ─── Pub/Sub ─────────────────────────────────────────────────────
++# Índice 0 (TC-02): suscripción al tópico de cierre de día
++# Índice 1 (TC-03): suscripción al tópico de archivos journal
++# PubSubMessageRouterAdapter usa estos mismos índices para resolver el enrutamiento.
++pubsub:
++  subscriptions:
++    - topic-id: retail.local.closing.report.request.v1
++      subscription-id: ${PUBSUB_SUB_CLOSING_DAY:retail.local.closing.report.request.v1-sub}
++    - topic-id: retail.local.journal.request.v1
++      subscription-id: ${PUBSUB_SUB_JOURNAL:retail.local.journal.request.v1-sub}
++
++app:
++  # ─── GCS (bucket único, diferenciado por prefijo de ruta) ──────
++  gcp:
++    storage:
++      bucket: ${GCS_BUCKET:gcs-cer-suite-core-files}
++      closing-day-path: ${GCS_CLOSING_DAY_PATH:CIERREDIA}
++      journal-path: ${GCS_JOURNAL_PATH:JOURNAL}
++      client-replication-path: ${GCS_CLIENT_REPLICATION_PATH:REPLICA_CLIENTE}
++      transfer-folder: ${GCS_TRANSFER_FOLDER:TRANSFERIR}
++      processed-folder: ${GCS_PROCESSED_FOLDER:PROCESADO}
++      error-folder: ${GCS_ERROR_FOLDER:ERROR}
++
++  # ─── Scheduler TC-04 (réplica de clientes) ────────────────────
++  replication:
++    client:
++      enabled: ${REPLICATION_CLIENT_ENABLED:true}
++      cron: ${REPLICATION_CLIENT_CRON:0 0/5 * * * ?}
++
++  # ─── HTTP Client a Central El Rosado (API legacy sin JWT) ─────
++  # Los file-types corresponden al campo "type" esperado por la API de Central.
++  central:
++    url: ${CENTRAL_ENDPOINT_URL:https://10.2.7.21:8449/}
++    timeout-seconds: ${CENTRAL_TIMEOUT_SECONDS:30}
++    system-name: ${CENTRAL_SYSTEM_NAME:TRANSACTION-CLOUD}
++    file-types:
++      closing-day: ${CENTRAL_FILE_TYPE_CLOSING_DAY:CIERREDIA}
++      journal: ${CENTRAL_FILE_TYPE_JOURNAL:JOURNAL}
++      replication-client: ${CENTRAL_FILE_TYPE_REPLICATION_CLIENT:REPLICA_CLIENTE}
+
+--- Diff for /src/main/resources/application.yml ---
+--- a//src/main/resources/application.yml
++++ b//src/main/resources/application.yml
+@@ -4,6 +4,8 @@
+   application:
+     name: cer-suite-cl-local-transaction
+ 
++  # El perfil local se activa por defecto en desarrollo.
++  # En GKE se sobreescribe con: SPRING_PROFILES_ACTIVE=prod
+   profiles:
+     active: local
+ 
+@@ -29,41 +31,3 @@
+ pubsub-logging:
+   enabled: true
+ 
+-# ─── Pub/Sub ────────────────────────────────────────────────────
+-# TC-02: suscripción al tópico de cierre de día
+-# TC-03: suscripción al tópico de archivos journal (evento GCS object-created)
+-pubsub:
+-  subscriptions:
+-    - topic-id: retail.local.informe.cierre.request.v1
+-      subscription-id: ${PUBSUB_SUB_CLOSING_DAY}
+-    - topic-id: retail.local.journal.request.v1
+-      subscription-id: ${PUBSUB_SUB_JOURNAL}
+-
+-# Alias de enrutamiento para el PubSubMessageRouterAdapter
+-app:
+-  pubsub:
+-    closing-day-subscription: ${PUBSUB_SUB_CLOSING_DAY}
+-    journal-subscription:     ${PUBSUB_SUB_JOURNAL}
+-
+-# ─── GCS Buckets ────────────────────────────────────────────────
+-  gcp:
+-    buckets:
+-      cierre-dia:      ${GCS_BUCKET_CIERRE_DIA}
+-      journal:         ${GCS_BUCKET_JOURNAL}
+-      replica-cliente: ${GCS_BUCKET_REPLICA_CLIENTE}
+-
+-# ─── Scheduler TC-04 (réplica de clientes) ──────────────────────
+-  replication:
+-    client:
+-      enabled: ${REPLICATION_CLIENT_ENABLED:true}
+-      cron: ${REPLICATION_CLIENT_CRON:0 0/5 * * * ?}
+-
+-  store-codes: ${STORE_CODES}
+-
+-# ─── HTTP Client a Central El Rosado (sin JWT) ──────────────────
+-  central:
+-    system-name: ${CENTRAL_SYSTEM_NAME:TRANSACTION-CLOUD}
+-
+-api-config:
+-  central-url: ${CENTRAL_ENDPOINT_URL}
+-  timeout-seconds: ${CENTRAL_TIMEOUT_SECONDS:30}
+
+
+--- Diff for /src/test/java/com/elrosado/transaction/unit/application/service/SyncReplicationClientServiceTest.java ---
+--- a//src/test/java/com/elrosado/transaction/unit/application/service/SyncReplicationClientServiceTest.java
++++ b//src/test/java/com/elrosado/transaction/unit/application/service/SyncReplicationClientServiceTest.java
+@@ -3,13 +3,13 @@
+ import com.elrosado.transaction.application.service.SyncReplicationClientService;
+ import com.elrosado.transaction.domain.port.out.CentralEndpointPort;
+ import com.elrosado.transaction.domain.port.out.CloudStoragePort;
++import com.elrosado.transaction.infrastructure.config.GcsStorageProperties;
+ import org.junit.jupiter.api.BeforeEach;
+ import org.junit.jupiter.api.Test;
+ import org.junit.jupiter.api.extension.ExtendWith;
+ import org.mockito.InjectMocks;
+ import org.mockito.Mock;
+ import org.mockito.junit.jupiter.MockitoExtension;
+-import org.springframework.test.util.ReflectionTestUtils;
+ 
+ import java.util.List;
+ 
+@@ -19,17 +19,22 @@
+ @ExtendWith(MockitoExtension.class)
+ class SyncReplicationClientServiceTest {
+ 
+-    @Mock private CentralEndpointPort centralEndpointPort;
+-    @Mock private CloudStoragePort    cloudStoragePort;
++    @Mock private CentralEndpointPort  centralEndpointPort;
++    @Mock private CloudStoragePort     cloudStoragePort;
++    @Mock private GcsStorageProperties gcsProperties;
+ 
+     @InjectMocks private SyncReplicationClientService service;
+ 
+-    private static final String STORE_ID = "065";
+-    private static final String BUCKET   = "test-replica";
++    private static final String STORE_ID         = "065";
++    private static final String BUCKET           = "gcs-cer-suite-core-files";
++    private static final String PREFIX           = "REPLICA_CLIENTE";
++    private static final String PROCESSED_FOLDER = "PROCESADO";
+ 
+     @BeforeEach
+     void setup() {
+-        ReflectionTestUtils.setField(service, "replicaBucket", BUCKET);
++        lenient().when(gcsProperties.bucket()).thenReturn(BUCKET);
++        lenient().when(gcsProperties.clientReplicationPath()).thenReturn(PREFIX);
++        lenient().when(gcsProperties.processedFolder()).thenReturn(PROCESSED_FOLDER);
+     }
+ 
+     @Test
+@@ -44,7 +49,7 @@
+ 
+         verify(cloudStoragePort).uploadFile(
+                 eq(BUCKET),
+-                eq(STORE_ID + "/clientes-065.dat"),
++                eq(PREFIX + "/" + STORE_ID + "/" + PROCESSED_FOLDER + "/clientes-065.dat"),
+                 eq(content),
+                 anyString()
+         );
+@@ -73,7 +78,12 @@
+ 
+         // Solo file2 se sube; file1 falla silenciosamente con WARN
+         verify(cloudStoragePort, times(1)).uploadFile(any(), any(), any(), any());
+-        verify(cloudStoragePort).uploadFile(eq(BUCKET), eq(STORE_ID + "/file2.dat"), eq(contentFile2), anyString());
++        verify(cloudStoragePort).uploadFile(
++                eq(BUCKET),
++                eq(PREFIX + "/" + STORE_ID + "/" + PROCESSED_FOLDER + "/file2.dat"),
++                eq(contentFile2),
++                anyString()
++        );
+     }
+ 
+     @Test
+
+
+--- Diff for /src/test/java/com/elrosado/transaction/unit/application/service/TransferClosingDayServiceTest.java ---
+--- a//src/test/java/com/elrosado/transaction/unit/application/service/TransferClosingDayServiceTest.java
++++ b//src/test/java/com/elrosado/transaction/unit/application/service/TransferClosingDayServiceTest.java
+@@ -4,16 +4,17 @@
+ import com.elrosado.transaction.domain.model.ClosingDayTransfer;
+ import com.elrosado.transaction.domain.port.out.CentralEndpointPort;
+ import com.elrosado.transaction.domain.port.out.CloudStoragePort;
++import com.elrosado.transaction.infrastructure.config.GcsStorageProperties;
+ import org.junit.jupiter.api.BeforeEach;
+ import org.junit.jupiter.api.Test;
+ import org.junit.jupiter.api.extension.ExtendWith;
+ import org.mockito.InjectMocks;
+ import org.mockito.Mock;
+ import org.mockito.junit.jupiter.MockitoExtension;
+-import org.springframework.test.util.ReflectionTestUtils;
+ 
+ import java.time.LocalDateTime;
+ 
++import static org.assertj.core.api.Assertions.assertThatThrownBy;
+ import static org.mockito.ArgumentMatchers.any;
+ import static org.mockito.ArgumentMatchers.eq;
+ import static org.mockito.Mockito.*;
+@@ -21,20 +22,23 @@
+ @ExtendWith(MockitoExtension.class)
+ class TransferClosingDayServiceTest {
+ 
+-    @Mock private CentralEndpointPort centralEndpointPort;
+-    @Mock private CloudStoragePort    cloudStoragePort;
++    @Mock private CentralEndpointPort  centralEndpointPort;
++    @Mock private CloudStoragePort     cloudStoragePort;
++    @Mock private GcsStorageProperties gcsProperties;
+ 
+     @InjectMocks private TransferClosingDayService service;
+ 
+-    private static final String STORE_ID   = "065";
+-    private static final String BLOB_NAME  = "065/cierre-20240115-120000.zip";
+-    private static final String FILE_NAME  = "cierre-20240115-120000.zip";
+-    private static final String BUCKET     = "test-cierre-dia";
+-    private static final byte[] ZIP_BYTES  = "zip-content".getBytes();
++    private static final String STORE_ID  = "065";
++    private static final String BUCKET    = "gcs-cer-suite-core-files";
++    private static final String BLOB_NAME = "CIERREDIA/065/TRANSFERIR/cierre-20240115-120000.zip";
++    private static final String FILE_NAME = "cierre-20240115-120000.zip";
++    private static final byte[] ZIP_BYTES = "zip-content".getBytes();
+ 
+     @BeforeEach
+     void setup() {
+-        ReflectionTestUtils.setField(service, "cierreDiaBucket", BUCKET);
++        lenient().when(gcsProperties.bucket()).thenReturn(BUCKET);
++        lenient().when(gcsProperties.transferFolder()).thenReturn("TRANSFERIR");
++        lenient().when(gcsProperties.processedFolder()).thenReturn("PROCESADO");
+         lenient().when(cloudStoragePort.downloadFile(BUCKET, BLOB_NAME)).thenReturn(ZIP_BYTES);
+     }
+ 
+@@ -45,11 +49,11 @@
+         service.transfer(transfer);
+ 
+         verify(cloudStoragePort).downloadFile(BUCKET, BLOB_NAME);
+-        verify(centralEndpointPort).sendFile(STORE_ID, FILE_NAME, ZIP_BYTES, "CLOSING_DAY");
++        verify(centralEndpointPort).sendClosingDayFile(STORE_ID, FILE_NAME, ZIP_BYTES);
+         verify(cloudStoragePort).moveBlob(
+                 eq(BUCKET),
+                 eq(BLOB_NAME),
+-                eq(STORE_ID + "/procesado/" + FILE_NAME)
++                eq("CIERREDIA/065/PROCESADO/cierre-20240115-120000.zip")
+         );
+     }
+ 
+@@ -60,22 +64,22 @@
+ 
+         var transfer = new ClosingDayTransfer(STORE_ID, BLOB_NAME, LocalDateTime.now());
+ 
+-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.transfer(transfer))
++        assertThatThrownBy(() -> service.transfer(transfer))
+                 .isInstanceOf(RuntimeException.class)
+                 .hasMessageContaining("GCS no disponible");
+ 
+-        verify(centralEndpointPort, never()).sendFile(any(), any(), any(), any());
++        verify(centralEndpointPort, never()).sendClosingDayFile(any(), any(), any());
+         verify(cloudStoragePort, never()).moveBlob(any(), any(), any());
+     }
+ 
+     @Test
+     void transfer_whenCentralFails_shouldPropagateAndNotMove() {
+         doThrow(new RuntimeException("Central no disponible"))
+-                .when(centralEndpointPort).sendFile(any(), any(), any(), any());
++                .when(centralEndpointPort).sendClosingDayFile(any(), any(), any());
+ 
+         var transfer = new ClosingDayTransfer(STORE_ID, BLOB_NAME, LocalDateTime.now());
+ 
+-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.transfer(transfer))
++        assertThatThrownBy(() -> service.transfer(transfer))
+                 .isInstanceOf(RuntimeException.class);
+ 
+         verify(cloudStoragePort, never()).moveBlob(any(), any(), any());
+
+
+--- Diff for /src/test/java/com/elrosado/transaction/unit/application/service/TransferJournalServiceTest.java ---
+--- a//src/test/java/com/elrosado/transaction/unit/application/service/TransferJournalServiceTest.java
++++ b//src/test/java/com/elrosado/transaction/unit/application/service/TransferJournalServiceTest.java
+@@ -4,13 +4,13 @@
+ import com.elrosado.transaction.domain.model.JournalTransfer;
+ import com.elrosado.transaction.domain.port.out.CentralEndpointPort;
+ import com.elrosado.transaction.domain.port.out.CloudStoragePort;
++import com.elrosado.transaction.infrastructure.config.GcsStorageProperties;
+ import org.junit.jupiter.api.BeforeEach;
+ import org.junit.jupiter.api.Test;
+ import org.junit.jupiter.api.extension.ExtendWith;
+ import org.mockito.InjectMocks;
+ import org.mockito.Mock;
+ import org.mockito.junit.jupiter.MockitoExtension;
+-import org.springframework.test.util.ReflectionTestUtils;
+ 
+ import java.time.LocalDateTime;
+ 
+@@ -21,20 +21,21 @@
+ @ExtendWith(MockitoExtension.class)
+ class TransferJournalServiceTest {
+ 
+-    @Mock private CentralEndpointPort centralEndpointPort;
+-    @Mock private CloudStoragePort    cloudStoragePort;
++    @Mock private CentralEndpointPort  centralEndpointPort;
++    @Mock private CloudStoragePort     cloudStoragePort;
++    @Mock private GcsStorageProperties gcsProperties;
+ 
+     @InjectMocks private TransferJournalService service;
+ 
+     private static final String STORE_ID  = "100";
+-    private static final String BLOB_NAME = "100/journal-20240115.zip";
++    private static final String BUCKET    = "gcs-cer-suite-core-files";
++    private static final String BLOB_NAME = "JOURNAL/100/journal-20240115.zip";
+     private static final String FILE_NAME = "journal-20240115.zip";
+-    private static final String BUCKET    = "test-journal";
+     private static final byte[] ZIP_BYTES = "zip-journal".getBytes();
+ 
+     @BeforeEach
+     void setup() {
+-        ReflectionTestUtils.setField(service, "journalBucket", BUCKET);
++        lenient().when(gcsProperties.bucket()).thenReturn(BUCKET);
+         lenient().when(cloudStoragePort.downloadFile(BUCKET, BLOB_NAME)).thenReturn(ZIP_BYTES);
+     }
+ 
+@@ -45,7 +46,7 @@
+         service.transfer(transfer);
+ 
+         verify(cloudStoragePort).downloadFile(BUCKET, BLOB_NAME);
+-        verify(centralEndpointPort).sendFile(STORE_ID, FILE_NAME, ZIP_BYTES, "JOURNAL");
++        verify(centralEndpointPort).sendJournalFile(STORE_ID, FILE_NAME, ZIP_BYTES);
+         verify(cloudStoragePort).deleteBlob(BUCKET, BLOB_NAME);
+     }
+ 
+@@ -59,14 +60,14 @@
+         assertThatThrownBy(() -> service.transfer(transfer))
+                 .isInstanceOf(RuntimeException.class);
+ 
+-        verify(centralEndpointPort, never()).sendFile(any(), any(), any(), any());
++        verify(centralEndpointPort, never()).sendJournalFile(any(), any(), any());
+         verify(cloudStoragePort, never()).deleteBlob(any(), any());
+     }
+ 
+     @Test
+     void transfer_whenCentralFails_shouldPropagateAndNotDelete() {
+         doThrow(new RuntimeException("Central no disponible"))
+-                .when(centralEndpointPort).sendFile(any(), any(), any(), any());
++                .when(centralEndpointPort).sendJournalFile(any(), any(), any());
+ 
+         var transfer = new JournalTransfer(STORE_ID, BLOB_NAME, LocalDateTime.now());
+ 
+
+

@@ -1,0 +1,7 @@
+{
+    "commit_id": "a4ec5d28846eba325292e1505931d0a013923b02",
+    "author": "Ricardo Mu\u00f1oz",
+    "message": "Solicitud de incorporaci\u00f3n de cambios fusionados 10922: pub/sub devolution and transfer\n\n- feature: antes de agregar sub de transferencia devolucion\n- feature: pub/sub devolution and transfer\n\nElementos de trabajo relacionados: #10290",
+    "date": "2026-06-12T21:55:00Z",
+    "work_items": []
+}

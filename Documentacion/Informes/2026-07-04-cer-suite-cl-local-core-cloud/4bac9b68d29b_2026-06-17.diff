@@ -1,0 +1,427 @@
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -25,5 +25,5 @@
+ 
+   # Nivel de logging global y de frameworks
+   LOGGING_LEVEL_ROOT: "INFO"
+-  LOGGING_LEVEL_APPLICATION: "DEBUG"
++  LOGGING_LEVEL_APPLICATION: "INFO"
+ 
+
+
+--- Diff for /k8s/deployment.yaml ---
+--- a//k8s/deployment.yaml
++++ b//k8s/deployment.yaml
+@@ -60,6 +60,22 @@
+                 secretKeyRef:
+                   name: cer-suite-local-core-secret
+                   key: SPRING_DATASOURCE_DEVS_URL
++            # Credenciales BD Central (PI_CONTROL — 10.2.7.21/ARTS_EC)
++            - name: SPRING_DATASOURCE_CENTRAL_URL
++              valueFrom:
++                secretKeyRef:
++                  name: cer-suite-local-core-secret
++                  key: SPRING_DATASOURCE_CENTRAL_URL
++            - name: SPRING_DATASOURCE_CENTRAL_USERNAME
++              valueFrom:
++                secretKeyRef:
++                  name: cer-suite-local-core-secret
++                  key: SPRING_DATASOURCE_CENTRAL_USERNAME
++            - name: SPRING_DATASOURCE_CENTRAL_PASSWORD
++              valueFrom:
++                secretKeyRef:
++                  name: cer-suite-local-core-secret
++                  key: SPRING_DATASOURCE_CENTRAL_PASSWORD
+             - name: GOOGLE_APPLICATION_CREDENTIALS
+               value: /var/secrets/google/key.json
+           volumeMounts:
+
+
+--- Diff for /k8s/secret.yaml ---
+--- a//k8s/secret.yaml
++++ b//k8s/secret.yaml
+@@ -15,3 +15,8 @@
+ 
+   #datasource DEVS_EC
+   SPRING_DATASOURCE_DEVS_URL: "amRiYzpzcWxzZXJ2ZXI6Ly9DUzNEV1NBUk1MMUNPUk86MTQzMztkYXRhYmFzZU5hbWU9REVWU19FQztlbmNyeXB0PWZhbHNl"
++
++  #datasource Central ARTS_EC (10.2.7.21) — validación PI_CONTROL
++  SPRING_DATASOURCE_CENTRAL_URL: "amRiYzpzcWxzZXJ2ZXI6Ly8xMC4yLjcuMjE6MTQzMztkYXRhYmFzZU5hbWU9QVJUU19FQztlbmNyeXB0PWZhbHNl"
++  SPRING_DATASOURCE_CENTRAL_USERNAME: "YWxsaWFuY2Vz"
++  SPRING_DATASOURCE_CENTRAL_PASSWORD: "QUxMQ18wMTgw"
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/PiControlRepositoryPort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/PiControlRepositoryPort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/PiControlRepositoryPort.java
+@@ -0,0 +1,20 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import java.time.LocalDate;
++
++/**
++ * Puerto de salida: consulta de control de recepciÃ³n de cajas en BD Central.
++ * Verifica si la tabla [PI_CONTROL] tiene bloqueada la recepciÃ³n para una
++ * tienda y fecha contable determinadas.
++ */
++public interface PiControlRepositoryPort {
++
++    /**
++     * Retorna {@code true} si la tienda ya fue contabilizada en la fecha indicada
++     * (RECEPCION_CAJAS = '1' en [PI_CONTROL]).
++     *
++     * @param storeCode   cÃ³digo numÃ©rico de tienda (e.g. "100")
++     * @param businessDate fecha contable extraÃ­da de la trama TSL (header[7])
++     */
++    boolean isReceptionBlocked(String storeCode, LocalDate businessDate);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/central/DbPiControlAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/central/DbPiControlAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/central/DbPiControlAdapter.java
+@@ -0,0 +1,73 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.central;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.PiControlRepositoryPort;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.beans.factory.annotation.Qualifier;
++import org.springframework.jdbc.core.JdbcTemplate;
++import org.springframework.stereotype.Component;
++
++import javax.sql.DataSource;
++import java.sql.Date;
++import java.time.LocalDate;
++
++/**
++ * Adaptador de salida: consulta [PI_CONTROL] en BD Central (ARTS_EC 10.2.7.21)
++ * mediante JDBC directo (sin JPA) para validar el bloqueo de recepciÃ³n de cajas.
++ * <p>
++ * Migra: validaciÃ³n de cierre contable que en el sistema legado era responsabilidad
++ * del ArmsServer al procesar la trama antes de generar el XML.
++ */
++@Component
++public class DbPiControlAdapter implements PiControlRepositoryPort {
++
++    private static final Logger log = LoggerFactory.getLogger(DbPiControlAdapter.class);
++
++    private static final String SQL_IS_BLOCKED =
++            "SELECT COUNT(1) FROM dbo.PI_CONTROL " +
++            "WHERE COD_TIENDA = ? AND FECHA_CIERRE = ? AND RECEPCION_CAJAS = '1'";
++
++    private final JdbcTemplate centralJdbc;
++
++    public DbPiControlAdapter(@Qualifier("centralDataSource") DataSource centralDataSource) {
++        this.centralJdbc = new JdbcTemplate(centralDataSource);
++    }
++
++    /**
++     * Consulta si la recepciÃ³n de cajas estÃ¡ cerrada para la tienda y fecha contable.
++     * Ante cualquier error de conexiÃ³n se permite el procesamiento (fail-open) y se loguea WARN.
++     */
++    @Override
++    public boolean isReceptionBlocked(String storeCode, LocalDate businessDate) {
++        try {
++            int codTienda = Integer.parseInt(storeCode.trim());
++            Integer count = centralJdbc.queryForObject(
++                    SQL_IS_BLOCKED, Integer.class, codTienda, Date.valueOf(businessDate));
++            boolean blocked = count != null && count > 0;
++
++            log.atDebug()
++                    .setMessage("Consulta PI_CONTROL ejecutada")
++                    .addKeyValue("storeCode", storeCode)
++                    .addKeyValue("businessDate", businessDate)
++                    .addKeyValue("blocked", blocked)
++                    .log();
++
++            return blocked;
++
++        } catch (NumberFormatException e) {
++            log.atWarn()
++                    .setMessage("storeCode no es numÃ©rico â se omite validaciÃ³n PI_CONTROL")
++                    .addKeyValue("storeCode", storeCode)
++                    .log();
++            return false;
++        } catch (Exception e) {
++            log.atWarn()
++                    .setMessage("Error consultando PI_CONTROL en BD Central â se permite el procesamiento")
++                    .addKeyValue("storeCode", storeCode)
++                    .addKeyValue("businessDate", businessDate)
++                    .setCause(e)
++                    .log();
++            return false;
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/ProcessSaleService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/ProcessSaleService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/ProcessSaleService.java
+@@ -6,6 +6,7 @@
+ import com.elrosado.cersuitecloudlocalcore.domain.model.TslFrame;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.in.ProcessSaleUseCase;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.EventPublisherPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.PiControlRepositoryPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.RetailStoreRepositoryPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.TransactionFirestorePort;
+ import org.slf4j.Logger;
+@@ -13,6 +14,7 @@
+ import org.slf4j.MDC;
+ import org.springframework.stereotype.Service;
+ 
++import java.time.LocalDate;
+ import java.time.LocalDateTime;
+ import java.time.format.DateTimeFormatter;
+ 
+@@ -34,9 +36,11 @@
+ 
+     private static final Logger log = LoggerFactory.getLogger(ProcessSaleService.class);
+     private static final DateTimeFormatter TIMESTAMP_FMT = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
++    private static final DateTimeFormatter BUSINESS_DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
+ 
+     private final TransactionFirestorePort firestorePort;
+     private final RetailStoreRepositoryPort retailStorePort;
++    private final PiControlRepositoryPort piControlPort;
+     private final EventPublisherPort eventPublisherPort;
+     private final TslFrameParserService frameParser;
+     private final XmlGeneratorService xmlGenerator;
+@@ -44,11 +48,13 @@
+     public ProcessSaleService(
+             TransactionFirestorePort firestorePort,
+             RetailStoreRepositoryPort retailStorePort,
++            PiControlRepositoryPort piControlPort,
+             EventPublisherPort eventPublisherPort,
+             TslFrameParserService frameParser,
+             XmlGeneratorService xmlGenerator) {
+         this.firestorePort    = firestorePort;
+         this.retailStorePort  = retailStorePort;
++        this.piControlPort    = piControlPort;
+         this.eventPublisherPort = eventPublisherPort;
+         this.frameParser      = frameParser;
+         this.xmlGenerator     = xmlGenerator;
+@@ -72,12 +78,28 @@
+             TslFrame frame = frameParser.parseFrame(plainFrame);
+             MDC.put("storeCode", frame.storeCode());
+ 
+-            // 3. Consultar tienda
++            // 3. Validar PI_CONTROL: verificar si la fecha contable ya fue contabilizada
++            LocalDate businessDate = parseBusinessDate(frame.businessDayDate());
++            if (piControlPort.isReceptionBlocked(frame.storeCode(), businessDate)) {
++                String blockMsg = "Trama ya contabilizada: fecha contable [" + frame.businessDayDate() +
++                        "] para tienda [" + frame.storeCode() + "] tiene RECEPCION_CAJAS=1" +
++                        " en tabla [PI_CONTROL]. No se generarÃ¡ XML. Revisar tabla PI_CONTROL.";
++                log.atWarn()
++                        .setMessage("Trama bloqueada â fecha contable ya contabilizada en PI_CONTROL")
++                        .addKeyValue("transactionId", transactionId)
++                        .addKeyValue("storeCode", frame.storeCode())
++                        .addKeyValue("businessDayDate", frame.businessDayDate())
++                        .log();
++                firestorePort.updateStatusWithError(transactionId, blockMsg);
++                return; // ACK â la trama no debe reintentarse
++            }
++
++            // 4. Consultar tienda
+             RetailStore retailStore = retailStorePort.findByCode(frame.storeCode())
+                 .orElseThrow(() -> new IllegalStateException(
+                     "RetailStore not found for storeCode: " + frame.storeCode()));
+ 
+-            // 4. Construir SaleTransaction
++            // 5. Construir SaleTransaction
+             SaleTransaction transaction = frameParser.buildTransaction(transactionId, frame, retailStore);
+ 
+             log.atInfo()
+@@ -90,7 +112,7 @@
+                .addKeyValue("isStoreClosing", transaction.isStoreClosing())
+                .log();
+ 
+-            // 5. Generar XML
++            // 6. Generar XML
+             String xmlContent  = xmlGenerator.generate(transaction);
+             String timestampKey = LocalDateTime.now().format(TIMESTAMP_FMT);
+             String xmlFileName  = xmlGenerator.buildFileName(transaction, timestampKey);
+@@ -101,11 +123,11 @@
+                .addKeyValue("fileName", xmlFileName)
+                .log();
+ 
+-            // 6. Persistir XML en Firestore + actualizar estado
++            // 7. Persistir XML en Firestore + actualizar estado
+             firestorePort.saveXmlPayload(transactionId, xmlContent);
+             firestorePort.updateStatus(transactionId, TransactionStatus.XML_GENERATED);
+ 
+-            // 7. Notificar Distributor Cloud
++            // 8. Notificar Distributor Cloud
+             eventPublisherPort.publishXmlGenerated(transactionId, transaction.storeCode());
+ 
+             log.atInfo()
+@@ -127,4 +149,19 @@
+             MDC.remove("storeCode");
+         }
+     }
++
++    private LocalDate parseBusinessDate(String businessDayDate) {
++        if (businessDayDate == null || businessDayDate.length() < 8) {
++            return LocalDate.now();
++        }
++        try {
++            return LocalDate.parse(businessDayDate.substring(0, 8), BUSINESS_DATE_FMT);
++        } catch (Exception e) {
++            log.atWarn()
++               .setMessage("Fecha contable invÃ¡lida en trama â se usa fecha actual para validaciÃ³n PI_CONTROL")
++               .addKeyValue("businessDayDate", businessDayDate)
++               .log();
++            return LocalDate.now();
++        }
++    }
+ }
+
+
+--- Diff for /src/main/resources/application-dev.yml ---
+--- a//src/main/resources/application-dev.yml
++++ b//src/main/resources/application-dev.yml
+@@ -49,6 +49,14 @@
+     - subscription-id: ${GCP_PUBSUB_SUB_VENTAS}
+       topic-id: ${GCP_PUBSUB_TOPIC_VENTAS}
+ 
++multi-sql:
++  datasources:
++    - name: central
++      url: ${SPRING_DATASOURCE_CENTRAL_URL}
++      username: ${SPRING_DATASOURCE_CENTRAL_USERNAME}
++      password: ${SPRING_DATASOURCE_CENTRAL_PASSWORD}
++      entity-packages: com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.central
++
+ app:
+   gcp:
+     pubsub:
+
+
+--- Diff for /src/main/resources/application-local.yml ---
+--- a//src/main/resources/application-local.yml
++++ b//src/main/resources/application-local.yml
+@@ -83,6 +83,14 @@
+     key-ring-id: ${KMS_KEY_RING_ID:suite-cloud-keyring}
+     crypto-key-id: ${KMS_CRYPTO_KEY_ID:trama-encryption-key}
+ 
++multi-sql:
++  datasources:
++    - name: central
++      url: jdbc:sqlserver://10.2.7.21:1433;databaseName=ARTS_EC;encrypt=false
++      username: alliances
++      password: ALLC_0180
++      entity-packages: com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.central
++
+ app:
+   gcp:
+     pubsub:
+
+
+--- Diff for /src/main/resources/application-prod.yml ---
+--- a//src/main/resources/application-prod.yml
++++ b//src/main/resources/application-prod.yml
+@@ -63,6 +63,14 @@
+       topic-id: ${GCP_PUBSUB_TOPIC_VENTAS}
+ 
+ 
++multi-sql:
++  datasources:
++    - name: central
++      url: ${SPRING_DATASOURCE_CENTRAL_URL}
++      username: ${SPRING_DATASOURCE_CENTRAL_USERNAME}
++      password: ${SPRING_DATASOURCE_CENTRAL_PASSWORD}
++      entity-packages: com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.central
++
+ app:
+   gcp:
+     pubsub:
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/ProcessSaleServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/ProcessSaleServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/ProcessSaleServiceTest.java
+@@ -2,6 +2,7 @@
+ 
+ import com.elrosado.cersuitecloudlocalcore.domain.model.*;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.EventPublisherPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.PiControlRepositoryPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.RetailStoreRepositoryPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.TransactionFirestorePort;
+ import org.junit.jupiter.api.BeforeEach;
+@@ -10,6 +11,7 @@
+ import org.mockito.Mock;
+ import org.mockito.junit.jupiter.MockitoExtension;
+ 
++import java.time.LocalDate;
+ import java.time.LocalDateTime;
+ import java.util.List;
+ import java.util.Map;
+@@ -34,6 +36,8 @@
+     @Mock
+     RetailStoreRepositoryPort retailStorePort;
+     @Mock
++    PiControlRepositoryPort piControlPort;
++    @Mock
+     EventPublisherPort eventPublisherPort;
+     @Mock
+     TslFrameParserService frameParser;
+@@ -54,7 +58,9 @@
+     @BeforeEach
+     void setUp() {
+         service = new ProcessSaleService(
+-                firestorePort, retailStorePort, eventPublisherPort, frameParser, xmlGenerator);
++                firestorePort, retailStorePort, piControlPort, eventPublisherPort, frameParser, xmlGenerator);
++        // PI_CONTROL: por defecto permite el procesamiento (no bloqueado)
++        lenient().when(piControlPort.isReceptionBlocked(any(), any())).thenReturn(false);
+ 
+         sampleFrame = new TslFrame(
+                 "000152S", "10", "000", "100", "1", "20250101120000",
+@@ -190,6 +196,45 @@
+     }
+ 
+     // -----------------------------------------------------------------------
++    // PI_CONTROL bloqueado â ACK sin generar XML
++    // -----------------------------------------------------------------------
++
++    @Test
++    void processSale_piControlBlocked_acksWithoutGeneratingXml() {
++        when(firestorePort.readPayload(TRX_ID)).thenReturn(PLAIN_FRAME);
++        when(frameParser.parseFrame(PLAIN_FRAME)).thenReturn(sampleFrame);
++        when(piControlPort.isReceptionBlocked("100", LocalDate.of(2025, 1, 1))).thenReturn(true);
++
++        // No debe lanzar excepciÃ³n â el ACK se realiza con retorno normal
++        assertDoesNotThrow(() -> service.processSale(TRX_ID));
++
++        verify(firestorePort).updateStatusWithError(eq(TRX_ID), contains("PI_CONTROL"));
++        // No debe avanzar al procesamiento de negocio
++        verify(retailStorePort, never()).findByCode(any());
++        verify(frameParser, never()).buildTransaction(any(), any(), any());
++        verify(xmlGenerator, never()).generate(any());
++        verify(eventPublisherPort, never()).publishXmlGenerated(any(), any());
++    }
++
++    @Test
++    void processSale_piControlUnavailable_allowsProcessingFail_open() {
++        // Fail-open: el adaptador de PI_CONTROL retorna false ante errores de BD
++        when(firestorePort.readPayload(TRX_ID)).thenReturn(PLAIN_FRAME);
++        when(frameParser.parseFrame(PLAIN_FRAME)).thenReturn(sampleFrame);
++        when(piControlPort.isReceptionBlocked(any(), any())).thenReturn(false);
++        when(retailStorePort.findByCode("100")).thenReturn(Optional.of(sampleStore));
++        when(frameParser.buildTransaction(TRX_ID, sampleFrame, sampleStore)).thenReturn(sampleTransaction);
++        doReturn(SAMPLE_XML).when(xmlGenerator).generate(sampleTransaction);
++        doReturn("file.xml").when(xmlGenerator).buildFileName(any(), any());
++
++        assertDoesNotThrow(() -> service.processSale(TRX_ID));
++
++        // Flujo completo ejecutado normalmente
++        verify(eventPublisherPort).publishXmlGenerated(TRX_ID, "100");
++        verify(firestorePort, never()).updateStatusWithError(any(), any());
++    }
++
++    // -----------------------------------------------------------------------
+     // Error al guardar XML en Firestore
+     // -----------------------------------------------------------------------
+ 
+
+

@@ -1,0 +1,18 @@
+--- Diff for /k8s/deployment.yaml ---
+--- a//k8s/deployment.yaml
++++ b//k8s/deployment.yaml
+@@ -40,12 +40,6 @@
+           env:
+             - name: SPRING_THREADS_VIRTUAL_ENABLED
+               value: "true"
+-            - name: GOOGLE_APPLICATION_CREDENTIALS
+-              value: /var/secrets/google/key.json
+-          volumeMounts:
+-            - name: gcp-credentials
+-              mountPath: /var/secrets/google
+-              readOnly: true
+           securityContext:
+             allowPrivilegeEscalation: false
+             readOnlyRootFilesystem: false
+
+

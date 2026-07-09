@@ -1,0 +1,25 @@
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/MultiSqlConfig.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/MultiSqlConfig.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/MultiSqlConfig.java
+@@ -0,0 +1,19 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import com.elrosado.jlib_multisql.registrar.MultiSqlBeanRegistrar;
++import org.springframework.context.annotation.Configuration;
++import org.springframework.context.annotation.Import;
++
++/**
++ * Activa el registro dinÃ¡mico de DataSources definidos en {@code multi-sql.datasources}.
++ * <p>
++ * Importa directamente {@link MultiSqlBeanRegistrar} porque {@code MultiSqlAutoConfiguration}
++ * usa {@code @ConditionalOnProperty(name="datasources")} que falla para propiedades de tipo mapa
++ * (Spring flattens YAML a hojas como {@code multi-sql.datasources.central.url}, pero no registra
++ * la clave intermedia {@code multi-sql.datasources} que la condiciÃ³n busca con getProperty).
++ * El registrador usa internamente {@code Binder} que sÃ­ resuelve mapas YAML correctamente.
++ */
++@Configuration
++@Import(MultiSqlBeanRegistrar.class)
++public class MultiSqlConfig {
++}
+
+

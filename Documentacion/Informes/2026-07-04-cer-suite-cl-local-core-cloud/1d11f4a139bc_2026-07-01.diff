@@ -1,0 +1,1004 @@
+--- Diff for /.claude_rules/GCS_ROUTES_INVENTORY.md ---
+--- a//.claude_rules/GCS_ROUTES_INVENTORY.md
++++ b//.claude_rules/GCS_ROUTES_INVENTORY.md
+@@ -31,6 +31,9 @@
+ | `reversarRedencion.in.folder.path` | `gs://gcs-cer-suite-core-files/EYES/RVSRED/IN` | `gcs-cer-suite-core-files` | `EYES/RVSRED/IN` | Defined | User confirmation, 2026-06-29. Hardcoded en legacy `inicializar()` como `RVSRED/IN` |
+ | `reversarRedencion.out.folder.path` | `gs://gcs-cer-suite-core-files/EYES/RVSRED/BKP` | `gcs-cer-suite-core-files` | `EYES/RVSRED/BKP` | Defined | User confirmation, 2026-06-29. Archivos exitosos movidos aquí tras intercambio ISO8583 |
+ | `reversarRedencion.error.folder.path` | `gs://gcs-cer-suite-core-files/EYES/RVSRED/ERROR` | `gcs-cer-suite-core-files` | `EYES/RVSRED/ERROR` | Defined | User confirmation, 2026-06-29. Mismo criterio de error que familia RVSCER/PAGCER: inmediato para parse, 3 reintentos para socket |
++| `fileSenderFTPCierreDia.in.folder.path` | `gs://gcs-cer-suite-core-files/CIERREDIA/{storeCode}/` | `gcs-cer-suite-core-files` | `CIERREDIA/{storeCode}/` | Defined | User confirmation, 2026-07-01. Portal deposita .xml/.txt/.pdf aquí. {storeCode} es dinámico por tienda MULTI_LOCAL. Solo blobs raíz (sin subfolder TRANSFERIR/PROCESADO) |
++| `fileSenderFTPCierreDia.transferir.folder.path` | `gs://gcs-cer-suite-core-files/CIERREDIA/{storeCode}/TRANSFERIR/` | `gcs-cer-suite-core-files` | `CIERREDIA/{storeCode}/TRANSFERIR/` | Defined | User confirmation, 2026-07-01. Local Core sube ZIPs aquí. Body Pub/Sub = "CIERREDIA/{storeCode}/TRANSFERIR/{nombre}.zip". Topic: retail.local.closing.report.request.v1 |
++| `fileSenderFTPCierreDia.procesado.folder.path` | `gs://gcs-cer-suite-core-files/CIERREDIA/{storeCode}/PROCESADO/` | `gcs-cer-suite-core-files` | `CIERREDIA/{storeCode}/PROCESADO/` | Defined | User confirmation, 2026-07-01. TransactionCloud mueve ZIPs aquí tras HTTP exitoso a Central. Shared con Phase 3 donde Central escribe aquí directamente |
+ 
+ ## Shared Route Contracts
+ 
+@@ -44,7 +47,7 @@
+ 
+ ## Pending Routes
+ 
+-No pending GCS routes as of 2026-06-29.
++No pending GCS routes as of 2026-07-01.
+ 
+ ## Rules
+ 
+
+
+--- Diff for /k8s/properties.yaml ---
+--- a//k8s/properties.yaml
++++ b//k8s/properties.yaml
+@@ -55,3 +55,8 @@
+     operatorPasswordUpdate.posTimeoutConnectionMs=5000
+     operatorPasswordUpdate.posTimeoutSleepMs=300
+     operatorPasswordUpdate.posQtyBytesLength=6
++    closing-day-sender.sleeptime=30000
++    closing-day-sender.gcs.bucket=gcs-cer-suite-core-files
++    closing-day-sender.gcs.base-prefix=CIERREDIA
++    closing-day-sender.gcs.transferir-suffix=TRANSFERIR
++    closing-day-sender.pubsub.topic=retail.local.closing.report.request.v1
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/ClosingDayBlob.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/ClosingDayBlob.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/ClosingDayBlob.java
+@@ -0,0 +1,39 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++import java.util.Objects;
++
++/**
++ * Representa un archivo de cierre de dÃ­a ubicado en GCS antes de ser comprimido.
++ */
++public record ClosingDayBlob(GcsObjectReference location, String extension) {
++
++    public ClosingDayBlob {
++        Objects.requireNonNull(location, "location is required");
++        if (extension == null || extension.isBlank()) {
++            throw new IllegalArgumentException("extension is required");
++        }
++        extension = extension.toLowerCase();
++    }
++
++    public String fileName() {
++        return location.fileName();
++    }
++
++    public String baseName() {
++        String name = fileName();
++        int dot = name.lastIndexOf('.');
++        return dot > 0 ? name.substring(0, dot) : name;
++    }
++
++    public boolean isXml() {
++        return "xml".equals(extension);
++    }
++
++    public boolean isTxt() {
++        return "txt".equals(extension);
++    }
++
++    public boolean isPdf() {
++        return "pdf".equals(extension);
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/SendClosingDayUseCase.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/SendClosingDayUseCase.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/SendClosingDayUseCase.java
+@@ -0,0 +1,12 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.in;
++
++/**
++ * Caso de uso para el envÃ­o de archivos de cierre de dÃ­a desde GCS hacia TransactionCloud vÃ­a Pub/Sub.
++ */
++public interface SendClosingDayUseCase {
++
++    /**
++     * Procesa todos los archivos de cierre de dÃ­a pendientes en GCS para cada tienda MULTI_LOCAL activa.
++     */
++    void processAllPendingFiles();
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/ClosingDayEventPort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/ClosingDayEventPort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/ClosingDayEventPort.java
+@@ -0,0 +1,15 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++/**
++ * Puerto de mensajerÃ­a para notificar la disponibilidad de un ZIP de cierre de dÃ­a.
++ */
++public interface ClosingDayEventPort {
++
++    /**
++     * Publica un evento Pub/Sub indicando que el ZIP estÃ¡ listo para transferencia a Central.
++     *
++     * @param storeCode   cÃ³digo de tienda (ej. "65")
++     * @param zipBlobName nombre del objeto GCS, ej. {@code CIERREDIA/65/TRANSFERIR/report.zip}
++     */
++    void publishZipReady(String storeCode, String zipBlobName);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/ClosingDayStoragePort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/ClosingDayStoragePort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/ClosingDayStoragePort.java
+@@ -0,0 +1,45 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.ClosingDayBlob;
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++
++import java.util.List;
++import java.util.Optional;
++
++/**
++ * Puerto de almacenamiento GCS para el proceso de cierre de dÃ­a.
++ */
++public interface ClosingDayStoragePort {
++
++    /**
++     * Lista archivos .xml y .txt directos (sin subfolder) en la carpeta de entrada de la tienda.
++     */
++    List<ClosingDayBlob> listSourceFiles(String storeCode);
++
++    /**
++     * Busca el PDF asociado a un blob .txt por nombre base.
++     */
++    Optional<ClosingDayBlob> findAssociatedPdf(ClosingDayBlob blob);
++
++    /**
++     * Descarga el contenido binario de un blob.
++     */
++    byte[] download(ClosingDayBlob blob);
++
++    /**
++     * Verifica si ya existe un ZIP con el nombre dado en la carpeta TRANSFERIR de la tienda.
++     */
++    boolean zipExistsInTransferir(String storeCode, String zipName);
++
++    /**
++     * Sube un ZIP comprimido a la carpeta TRANSFERIR de la tienda.
++     *
++     * @return referencia GCS al ZIP subido
++     */
++    GcsObjectReference uploadZip(String storeCode, String zipName, byte[] content);
++
++    /**
++     * Elimina un blob de GCS.
++     */
++    void deleteBlob(ClosingDayBlob blob);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/ClosingDayZipPort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/ClosingDayZipPort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/ClosingDayZipPort.java
+@@ -0,0 +1,17 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import java.util.Map;
++
++/**
++ * Puerto para comprimir archivos de cierre de dÃ­a en formato ZIP.
++ */
++public interface ClosingDayZipPort {
++
++    /**
++     * Comprime las entradas dadas en un archivo ZIP en memoria.
++     *
++     * @param entries mapa de nombre-de-archivo â contenido binario
++     * @return bytes del ZIP generado
++     */
++    byte[] compress(Map<String, byte[]> entries);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SendClosingDaySchedulerAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SendClosingDaySchedulerAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SendClosingDaySchedulerAdapter.java
+@@ -0,0 +1,31 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.scheduler;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.SendClosingDayUseCase;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.scheduling.annotation.Scheduled;
++import org.springframework.stereotype.Component;
++
++@Component
++public class SendClosingDaySchedulerAdapter {
++
++    private static final Logger log = LoggerFactory.getLogger(SendClosingDaySchedulerAdapter.class);
++
++    private final SendClosingDayUseCase sendClosingDayUseCase;
++
++    public SendClosingDaySchedulerAdapter(SendClosingDayUseCase sendClosingDayUseCase) {
++        this.sendClosingDayUseCase = sendClosingDayUseCase;
++    }
++
++    @Scheduled(fixedDelayString = "${closing-day-sender.sleeptime:30000}")
++    public void execute() {
++        try {
++            sendClosingDayUseCase.processAllPendingFiles();
++        } catch (Exception e) {
++            log.atError()
++                    .setMessage("Error no controlado en scheduler SendClosingDay")
++                    .setCause(e)
++                    .log();
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/messaging/PubSubClosingDayEventAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/messaging/PubSubClosingDayEventAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/messaging/PubSubClosingDayEventAdapter.java
+@@ -0,0 +1,48 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.messaging;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.ClosingDayEventPort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.LegacyClosingDayProperties;
++import com.elrosado.jlib_pubsub.interfaces.IMessagePublisher;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Component;
++
++@Component
++public class PubSubClosingDayEventAdapter implements ClosingDayEventPort {
++
++    private static final Logger log = LoggerFactory.getLogger(PubSubClosingDayEventAdapter.class);
++
++    private final IMessagePublisher messagePublisher;
++    private final LegacyClosingDayProperties properties;
++
++    public PubSubClosingDayEventAdapter(
++            IMessagePublisher messagePublisher,
++            LegacyClosingDayProperties properties) {
++        this.messagePublisher = messagePublisher;
++        this.properties = properties;
++    }
++
++    @Override
++    public void publishZipReady(String storeCode, String zipBlobName) {
++        String topic = properties.pubsub().topic();
++        messagePublisher.publishAsync(topic, zipBlobName)
++                .whenComplete((msgId, ex) -> {
++                    if (ex != null) {
++                        log.atError()
++                                .setMessage("Error publicando evento de cierre de dÃ­a a Pub/Sub")
++                                .addKeyValue("storeCode", storeCode)
++                                .addKeyValue("zipBlobName", zipBlobName)
++                                .addKeyValue("topic", topic)
++                                .setCause(ex)
++                                .log();
++                    } else {
++                        log.atInfo()
++                                .setMessage("Evento de cierre de dÃ­a publicado exitosamente")
++                                .addKeyValue("storeCode", storeCode)
++                                .addKeyValue("zipBlobName", zipBlobName)
++                                .addKeyValue("messageId", msgId)
++                                .log();
++                    }
++                });
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsClosingDayStorageAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsClosingDayStorageAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsClosingDayStorageAdapter.java
+@@ -0,0 +1,137 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.storage;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.ClosingDayBlob;
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.ClosingDayStoragePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.LegacyClosingDayProperties;
++import com.google.cloud.storage.Blob;
++import com.google.cloud.storage.BlobId;
++import com.google.cloud.storage.Storage;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Component;
++
++import java.util.Comparator;
++import java.util.List;
++import java.util.Optional;
++
++@Component
++public class GcsClosingDayStorageAdapter implements ClosingDayStoragePort {
++
++    private static final Logger log = LoggerFactory.getLogger(GcsClosingDayStorageAdapter.class);
++    private static final String ZIP_CONTENT_TYPE = "application/zip";
++
++    private final GcsStorageHelper gcsHelper;
++    private final Storage storage;
++    private final LegacyClosingDayProperties properties;
++
++    public GcsClosingDayStorageAdapter(
++            GcsStorageHelper gcsHelper,
++            Storage storage,
++            LegacyClosingDayProperties properties) {
++        this.gcsHelper = gcsHelper;
++        this.storage = storage;
++        this.properties = properties;
++    }
++
++    @Override
++    public List<ClosingDayBlob> listSourceFiles(String storeCode) {
++        GcsObjectReference storeFolder = buildStoreFolder(storeCode);
++        String prefixWithSlash = storeFolder.prefixWithSlash();
++
++        return gcsHelper.streamBlobs(storeFolder)
++                .flatMap(blob -> toClosingDayBlob(blob, prefixWithSlash).stream())
++                .sorted(Comparator.comparing(ClosingDayBlob::fileName))
++                .toList();
++    }
++
++    @Override
++    public Optional<ClosingDayBlob> findAssociatedPdf(ClosingDayBlob blob) {
++        String objectName = blob.location().objectName();
++        int lastSlash = objectName.lastIndexOf('/');
++        String parentPath = objectName.substring(0, lastSlash);
++        String pdfObjectName = parentPath + "/" + blob.baseName() + ".pdf";
++
++        Blob pdfBlob = storage.get(BlobId.of(blob.location().bucket(), pdfObjectName));
++        if (pdfBlob == null) {
++            return Optional.empty();
++        }
++        return Optional.of(new ClosingDayBlob(
++                new GcsObjectReference(blob.location().bucket(), pdfObjectName),
++                "pdf"
++        ));
++    }
++
++    @Override
++    public byte[] download(ClosingDayBlob blob) {
++        return storage.readAllBytes(blob.location().bucket(), blob.location().objectName());
++    }
++
++    @Override
++    public boolean zipExistsInTransferir(String storeCode, String zipName) {
++        GcsObjectReference zipRef = buildZipRef(storeCode, zipName);
++        Blob blob = storage.get(BlobId.of(zipRef.bucket(), zipRef.objectName()));
++        return blob != null;
++    }
++
++    @Override
++    public GcsObjectReference uploadZip(String storeCode, String zipName, byte[] content) {
++        GcsObjectReference target = buildZipRef(storeCode, zipName);
++        return gcsHelper.upload(target, content, ZIP_CONTENT_TYPE);
++    }
++
++    @Override
++    public void deleteBlob(ClosingDayBlob blob) {
++        boolean deleted = storage.delete(BlobId.of(blob.location().bucket(), blob.location().objectName()));
++        if (!deleted) {
++            log.atWarn()
++                    .setMessage("Blob GCS no eliminado â puede haber sido removido por otro proceso")
++                    .addKeyValue("uri", blob.location().toUri())
++                    .log();
++        }
++    }
++
++    private GcsObjectReference buildStoreFolder(String storeCode) {
++        String objectName = properties.gcs().basePrefix() + "/" + storeCode;
++        return new GcsObjectReference(properties.gcs().bucket(), objectName);
++    }
++
++    private GcsObjectReference buildZipRef(String storeCode, String zipName) {
++        String objectName = properties.gcs().basePrefix()
++                + "/" + storeCode
++                + "/" + properties.gcs().transferirSuffix()
++                + "/" + zipName;
++        return new GcsObjectReference(properties.gcs().bucket(), objectName);
++    }
++
++    private Optional<ClosingDayBlob> toClosingDayBlob(Blob blob, String prefixWithSlash) {
++        String objectName = blob.getName();
++        if (!objectName.startsWith(prefixWithSlash)) {
++            return Optional.empty();
++        }
++
++        String relativeName = objectName.substring(prefixWithSlash.length());
++
++        // Solo blobs directos â sin subfolders como TRANSFERIR/ o PROCESADO/
++        if (relativeName.isBlank() || relativeName.contains("/")) {
++            return Optional.empty();
++        }
++
++        int dotIndex = relativeName.lastIndexOf('.');
++        if (dotIndex <= 0) {
++            return Optional.empty();
++        }
++
++        String extension = relativeName.substring(dotIndex + 1).toLowerCase();
++
++        // Solo .xml y .txt son archivos de entrada vÃ¡lidos
++        if (!extension.equals("xml") && !extension.equals("txt")) {
++            return Optional.empty();
++        }
++
++        return Optional.of(new ClosingDayBlob(
++                new GcsObjectReference(blob.getBucket(), objectName),
++                extension
++        ));
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/zip/ZipCompressionAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/zip/ZipCompressionAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/zip/ZipCompressionAdapter.java
+@@ -0,0 +1,30 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.zip;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.ClosingDayZipPort;
++import org.springframework.stereotype.Component;
++
++import java.io.ByteArrayOutputStream;
++import java.io.IOException;
++import java.util.Map;
++import java.util.zip.ZipEntry;
++import java.util.zip.ZipOutputStream;
++
++@Component
++public class ZipCompressionAdapter implements ClosingDayZipPort {
++
++    @Override
++    public byte[] compress(Map<String, byte[]> entries) {
++        ByteArrayOutputStream baos = new ByteArrayOutputStream();
++        try (ZipOutputStream zos = new ZipOutputStream(baos)) {
++            for (Map.Entry<String, byte[]> entry : entries.entrySet()) {
++                ZipEntry zipEntry = new ZipEntry(entry.getKey());
++                zos.putNextEntry(zipEntry);
++                zos.write(entry.getValue());
++                zos.closeEntry();
++            }
++        } catch (IOException e) {
++            throw new IllegalStateException("Error comprimiendo archivos en ZIP", e);
++        }
++        return baos.toByteArray();
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LegacyClosingDayProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LegacyClosingDayProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LegacyClosingDayProperties.java
+@@ -0,0 +1,41 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.boot.context.properties.ConfigurationProperties;
++
++/**
++ * Propiedades heredadas de ArmsServerConf.properties para el proceso de cierre de dÃ­a.
++ * Registradas en k8s/properties.yaml bajo el prefijo closing-day-sender.
++ */
++@ConfigurationProperties(prefix = "closing-day-sender")
++public record LegacyClosingDayProperties(
++        long sleeptime,
++        Gcs gcs,
++        Pubsub pubsub
++) {
++
++    public LegacyClosingDayProperties {
++        if (sleeptime <= 0) {
++            sleeptime = 30_000L;
++        }
++        if (gcs == null) {
++            gcs = new Gcs("", "", "");
++        }
++        if (pubsub == null) {
++            pubsub = new Pubsub("");
++        }
++    }
++
++    public record Gcs(String bucket, String basePrefix, String transferirSuffix) {
++        public Gcs {
++            if (bucket == null) bucket = "";
++            if (basePrefix == null) basePrefix = "";
++            if (transferirSuffix == null) transferirSuffix = "";
++        }
++    }
++
++    public record Pubsub(String topic) {
++        public Pubsub {
++            if (topic == null) topic = "";
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java
+@@ -5,7 +5,7 @@
+ import org.springframework.scheduling.annotation.EnableScheduling;
+ 
+ /**
+- * Habilita @Scheduled para el proceso de reproceso frames_repro.
++ * Habilita @Scheduled y registra todas las propiedades de configuraciÃ³n de procesos migrados.
+  */
+ @Configuration
+ @EnableScheduling
+@@ -26,7 +26,9 @@
+         ReversarRedencionProperties.class,
+         ReversarPagoProperties.class,
+         OperatorPasswordUpdateProperties.class,
+-        LegacyOperatorPasswordUpdateProperties.class
++        LegacyOperatorPasswordUpdateProperties.class,
++        SendClosingDayProperties.class,
++        LegacyClosingDayProperties.class
+ })
+ public class SchedulingConfig {
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SendClosingDayProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SendClosingDayProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SendClosingDayProperties.java
+@@ -0,0 +1,7 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.boot.context.properties.ConfigurationProperties;
++
++@ConfigurationProperties(prefix = "app.send-closing-day")
++public record SendClosingDayProperties(boolean enabled) {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/SendClosingDayService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/SendClosingDayService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/SendClosingDayService.java
+@@ -0,0 +1,128 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.ClosingDayBlob;
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.SendClosingDayUseCase;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.ClosingDayEventPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.ClosingDayStoragePort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.ClosingDayZipPort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.SendClosingDayProperties;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.StoreRegistry;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Service;
++
++import java.util.ArrayList;
++import java.util.LinkedHashMap;
++import java.util.List;
++import java.util.Map;
++
++@Service
++public class SendClosingDayService implements SendClosingDayUseCase {
++
++    private static final Logger log = LoggerFactory.getLogger(SendClosingDayService.class);
++
++    private final ClosingDayStoragePort storagePort;
++    private final ClosingDayZipPort zipPort;
++    private final ClosingDayEventPort eventPort;
++    private final StoreRegistry storeRegistry;
++    private final SendClosingDayProperties properties;
++
++    public SendClosingDayService(
++            ClosingDayStoragePort storagePort,
++            ClosingDayZipPort zipPort,
++            ClosingDayEventPort eventPort,
++            StoreRegistry storeRegistry,
++            SendClosingDayProperties properties) {
++        this.storagePort = storagePort;
++        this.zipPort = zipPort;
++        this.eventPort = eventPort;
++        this.storeRegistry = storeRegistry;
++        this.properties = properties;
++    }
++
++    @Override
++    public void processAllPendingFiles() {
++        if (!properties.enabled()) {
++            log.debug("Proceso SendClosingDay deshabilitado");
++            return;
++        }
++
++        if (!storeRegistry.isMultiLocalEnabled()) {
++            log.debug("No hay tiendas MULTI_LOCAL activas â omitiendo ciclo de cierre de dÃ­a");
++            return;
++        }
++
++        storeRegistry.getActiveMultiLocalStores().forEach(store -> {
++            String storeCode = String.valueOf(store.getDesClave());
++            processStore(storeCode);
++        });
++    }
++
++    private void processStore(String storeCode) {
++        List<ClosingDayBlob> files = storagePort.listSourceFiles(storeCode);
++
++        if (files.isEmpty()) {
++            log.debug("Sin archivos de cierre de dÃ­a pendientes para tienda {}", storeCode);
++            return;
++        }
++
++        log.atInfo()
++                .setMessage("Procesando archivos de cierre de dÃ­a")
++                .addKeyValue("storeCode", storeCode)
++                .addKeyValue("fileCount", files.size())
++                .log();
++
++        files.forEach(blob -> processBlob(storeCode, blob));
++    }
++
++    private void processBlob(String storeCode, ClosingDayBlob blob) {
++        String zipName = blob.baseName() + ".zip";
++
++        if (storagePort.zipExistsInTransferir(storeCode, zipName)) {
++            log.atInfo()
++                    .setMessage("ZIP ya existe en TRANSFERIR, omitiendo")
++                    .addKeyValue("storeCode", storeCode)
++                    .addKeyValue("zipName", zipName)
++                    .log();
++            return;
++        }
++
++        if (!blob.isXml() && !blob.isTxt()) {
++            log.atWarn()
++                    .setMessage("Tipo de archivo no esperado en cierre de dÃ­a, omitiendo")
++                    .addKeyValue("storeCode", storeCode)
++                    .addKeyValue("fileName", blob.fileName())
++                    .addKeyValue("extension", blob.extension())
++                    .log();
++            return;
++        }
++
++        Map<String, byte[]> entries = new LinkedHashMap<>();
++        List<ClosingDayBlob> blobsToDelete = new ArrayList<>();
++
++        entries.put(blob.fileName(), storagePort.download(blob));
++        blobsToDelete.add(blob);
++
++        if (blob.isTxt()) {
++            storagePort.findAssociatedPdf(blob).ifPresent(pdf -> {
++                entries.put(pdf.fileName(), storagePort.download(pdf));
++                blobsToDelete.add(pdf);
++            });
++        }
++
++        byte[] zipContent = zipPort.compress(entries);
++        GcsObjectReference zipRef = storagePort.uploadZip(storeCode, zipName, zipContent);
++
++        eventPort.publishZipReady(storeCode, zipRef.objectName());
++
++        blobsToDelete.forEach(storagePort::deleteBlob);
++
++        log.atInfo()
++                .setMessage("ZIP de cierre de dÃ­a generado y publicado")
++                .addKeyValue("storeCode", storeCode)
++                .addKeyValue("zipName", zipName)
++                .addKeyValue("totalEntries", entries.size())
++                .log();
++    }
++}
+
+
+--- Diff for /src/main/resources/application-dev.yml ---
+--- a//src/main/resources/application-dev.yml
++++ b//src/main/resources/application-dev.yml
+@@ -126,5 +126,7 @@
+     socket-retry-threshold: ${REVERSAR_PAGO_SOCKET_RETRIES:3}
+   operator-password-update:
+     enabled: ${OPERATOR_PASSWORD_UPDATE_ENABLED:true}
++  send-closing-day:
++    enabled: ${SEND_CLOSING_DAY_ENABLED:true}
+ 
+ 
+
+
+--- Diff for /src/main/resources/application-prod.yml ---
+--- a//src/main/resources/application-prod.yml
++++ b//src/main/resources/application-prod.yml
+@@ -87,5 +87,7 @@
+     batch-size: ${REPRO_BATCH_SIZE:10}
+   operator-password-update:
+     enabled: ${OPERATOR_PASSWORD_UPDATE_ENABLED:true}
++  send-closing-day:
++    enabled: ${SEND_CLOSING_DAY_ENABLED:true}
+ 
+ 
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SendClosingDaySchedulerAdapterTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SendClosingDaySchedulerAdapterTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SendClosingDaySchedulerAdapterTest.java
+@@ -0,0 +1,20 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.scheduler;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.SendClosingDayUseCase;
++import org.junit.jupiter.api.Test;
++
++import static org.mockito.Mockito.mock;
++import static org.mockito.Mockito.verify;
++
++class SendClosingDaySchedulerAdapterTest {
++
++    @Test
++    void execute_delegatesToUseCase() {
++        SendClosingDayUseCase useCase = mock(SendClosingDayUseCase.class);
++        SendClosingDaySchedulerAdapter adapter = new SendClosingDaySchedulerAdapter(useCase);
++
++        adapter.execute();
++
++        verify(useCase).processAllPendingFiles();
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/zip/ZipCompressionAdapterTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/zip/ZipCompressionAdapterTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/zip/ZipCompressionAdapterTest.java
+@@ -0,0 +1,57 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.zip;
++
++import org.junit.jupiter.api.Test;
++
++import java.io.ByteArrayInputStream;
++import java.io.IOException;
++import java.util.LinkedHashMap;
++import java.util.Map;
++import java.util.zip.ZipEntry;
++import java.util.zip.ZipInputStream;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++class ZipCompressionAdapterTest {
++
++    private final ZipCompressionAdapter adapter = new ZipCompressionAdapter();
++
++    @Test
++    void compress_singleEntry_returnsValidZip() throws IOException {
++        byte[] content = "file-content".getBytes();
++        Map<String, byte[]> entries = Map.of("report.xml", content);
++
++        byte[] zip = adapter.compress(entries);
++
++        assertThat(zip).isNotEmpty();
++        try (ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(zip))) {
++            ZipEntry entry = zis.getNextEntry();
++            assertThat(entry).isNotNull();
++            assertThat(entry.getName()).isEqualTo("report.xml");
++            assertThat(zis.readAllBytes()).isEqualTo(content);
++            assertThat(zis.getNextEntry()).isNull();
++        }
++    }
++
++    @Test
++    void compress_multipleEntries_containsAllFiles() throws IOException {
++        byte[] txtContent = "txt-content".getBytes();
++        byte[] pdfContent = "pdf-content".getBytes();
++        Map<String, byte[]> entries = new LinkedHashMap<>();
++        entries.put("summary.txt", txtContent);
++        entries.put("summary.pdf", pdfContent);
++
++        byte[] zip = adapter.compress(entries);
++
++        assertThat(zip).isNotEmpty();
++        int entryCount = 0;
++        try (ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(zip))) {
++            ZipEntry entry;
++            while ((entry = zis.getNextEntry()) != null) {
++                assertThat(entries).containsKey(entry.getName());
++                entryCount++;
++                zis.closeEntry();
++            }
++        }
++        assertThat(entryCount).isEqualTo(2);
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/SendClosingDayServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/SendClosingDayServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/SendClosingDayServiceTest.java
+@@ -0,0 +1,198 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.ClosingDayBlob;
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.ClosingDayEventPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.ClosingDayStoragePort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.ClosingDayZipPort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.saadmin.entity.StoreEntity;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.SendClosingDayProperties;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.StoreRegistry;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.ArgumentCaptor;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.util.List;
++import java.util.Map;
++import java.util.Optional;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.ArgumentMatchers.anyString;
++import static org.mockito.ArgumentMatchers.eq;
++import static org.mockito.Mockito.lenient;
++import static org.mockito.Mockito.mock;
++import static org.mockito.Mockito.never;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.verifyNoInteractions;
++import static org.mockito.Mockito.when;
++
++@ExtendWith(MockitoExtension.class)
++class SendClosingDayServiceTest {
++
++    @Mock
++    ClosingDayStoragePort storagePort;
++    @Mock
++    ClosingDayZipPort zipPort;
++    @Mock
++    ClosingDayEventPort eventPort;
++    @Mock
++    StoreRegistry storeRegistry;
++
++    SendClosingDayService service;
++
++    @BeforeEach
++    void setUp() {
++        service = new SendClosingDayService(
++                storagePort, zipPort, eventPort, storeRegistry, new SendClosingDayProperties(true));
++        lenient().when(storeRegistry.isMultiLocalEnabled()).thenReturn(true);
++    }
++
++    @Test
++    void processAllPendingFiles_disabled_doesNotQueryStorage() {
++        service = new SendClosingDayService(
++                storagePort, zipPort, eventPort, storeRegistry, new SendClosingDayProperties(false));
++
++        service.processAllPendingFiles();
++
++        verifyNoInteractions(storagePort, zipPort, eventPort, storeRegistry);
++    }
++
++    @Test
++    void processAllPendingFiles_noActiveStores_doesNotQueryStorage() {
++        when(storeRegistry.isMultiLocalEnabled()).thenReturn(false);
++
++        service.processAllPendingFiles();
++
++        verifyNoInteractions(storagePort, zipPort, eventPort);
++    }
++
++    @Test
++    void processAllPendingFiles_noFiles_doesNotCompress() {
++        StoreEntity store = store(65);
++        when(storeRegistry.getActiveMultiLocalStores()).thenReturn(List.of(store));
++        when(storagePort.listSourceFiles("65")).thenReturn(List.of());
++
++        service.processAllPendingFiles();
++
++        verifyNoInteractions(zipPort, eventPort);
++    }
++
++    @Test
++    void processAllPendingFiles_xmlBlob_createsZipAndPublishesEvent() {
++        StoreEntity store = store(65);
++        ClosingDayBlob xmlBlob = blob("CIERREDIA/65/report.xml", "xml");
++        byte[] xmlBytes = "xml-content".getBytes();
++        byte[] zipBytes = "zip-content".getBytes();
++        GcsObjectReference zipRef = new GcsObjectReference("gcs-cer-suite-core-files", "CIERREDIA/65/TRANSFERIR/report.zip");
++
++        when(storeRegistry.getActiveMultiLocalStores()).thenReturn(List.of(store));
++        when(storagePort.listSourceFiles("65")).thenReturn(List.of(xmlBlob));
++        when(storagePort.zipExistsInTransferir("65", "report.zip")).thenReturn(false);
++        when(storagePort.download(xmlBlob)).thenReturn(xmlBytes);
++        when(zipPort.compress(any())).thenReturn(zipBytes);
++        when(storagePort.uploadZip("65", "report.zip", zipBytes)).thenReturn(zipRef);
++
++        service.processAllPendingFiles();
++
++        @SuppressWarnings("unchecked")
++        ArgumentCaptor<Map<String, byte[]>> entriesCaptor = ArgumentCaptor.forClass(Map.class);
++        verify(zipPort).compress(entriesCaptor.capture());
++        assertThat(entriesCaptor.getValue()).containsOnlyKeys("report.xml");
++
++        verify(storagePort).uploadZip("65", "report.zip", zipBytes);
++        verify(eventPort).publishZipReady("65", "CIERREDIA/65/TRANSFERIR/report.zip");
++        verify(storagePort).deleteBlob(xmlBlob);
++        verify(storagePort, never()).findAssociatedPdf(any());
++    }
++
++    @Test
++    void processAllPendingFiles_xmlBlobAlreadyZipped_skips() {
++        StoreEntity store = store(65);
++        ClosingDayBlob xmlBlob = blob("CIERREDIA/65/report.xml", "xml");
++
++        when(storeRegistry.getActiveMultiLocalStores()).thenReturn(List.of(store));
++        when(storagePort.listSourceFiles("65")).thenReturn(List.of(xmlBlob));
++        when(storagePort.zipExistsInTransferir("65", "report.zip")).thenReturn(true);
++
++        service.processAllPendingFiles();
++
++        verifyNoInteractions(zipPort, eventPort);
++        verify(storagePort, never()).download(any());
++        verify(storagePort, never()).deleteBlob(any());
++    }
++
++    @Test
++    void processAllPendingFiles_txtBlobWithPdf_createsZipWithBothFiles() {
++        StoreEntity store = store(65);
++        ClosingDayBlob txtBlob = blob("CIERREDIA/65/invoice.txt", "txt");
++        ClosingDayBlob pdfBlob = blob("CIERREDIA/65/invoice.pdf", "pdf");
++        byte[] txtBytes = "txt-content".getBytes();
++        byte[] pdfBytes = "pdf-content".getBytes();
++        byte[] zipBytes = "zip-content".getBytes();
++        GcsObjectReference zipRef = new GcsObjectReference("gcs-cer-suite-core-files", "CIERREDIA/65/TRANSFERIR/invoice.zip");
++
++        when(storeRegistry.getActiveMultiLocalStores()).thenReturn(List.of(store));
++        when(storagePort.listSourceFiles("65")).thenReturn(List.of(txtBlob));
++        when(storagePort.zipExistsInTransferir("65", "invoice.zip")).thenReturn(false);
++        when(storagePort.download(txtBlob)).thenReturn(txtBytes);
++        when(storagePort.findAssociatedPdf(txtBlob)).thenReturn(Optional.of(pdfBlob));
++        when(storagePort.download(pdfBlob)).thenReturn(pdfBytes);
++        when(zipPort.compress(any())).thenReturn(zipBytes);
++        when(storagePort.uploadZip("65", "invoice.zip", zipBytes)).thenReturn(zipRef);
++
++        service.processAllPendingFiles();
++
++        @SuppressWarnings("unchecked")
++        ArgumentCaptor<Map<String, byte[]>> entriesCaptor = ArgumentCaptor.forClass(Map.class);
++        verify(zipPort).compress(entriesCaptor.capture());
++        assertThat(entriesCaptor.getValue()).containsOnlyKeys("invoice.txt", "invoice.pdf");
++
++        verify(eventPort).publishZipReady("65", "CIERREDIA/65/TRANSFERIR/invoice.zip");
++        verify(storagePort).deleteBlob(txtBlob);
++        verify(storagePort).deleteBlob(pdfBlob);
++    }
++
++    @Test
++    void processAllPendingFiles_txtBlobWithoutPdf_createsZipWithTxtOnly() {
++        StoreEntity store = store(65);
++        ClosingDayBlob txtBlob = blob("CIERREDIA/65/summary.txt", "txt");
++        byte[] txtBytes = "txt-content".getBytes();
++        byte[] zipBytes = "zip-content".getBytes();
++        GcsObjectReference zipRef = new GcsObjectReference("gcs-cer-suite-core-files", "CIERREDIA/65/TRANSFERIR/summary.zip");
++
++        when(storeRegistry.getActiveMultiLocalStores()).thenReturn(List.of(store));
++        when(storagePort.listSourceFiles("65")).thenReturn(List.of(txtBlob));
++        when(storagePort.zipExistsInTransferir("65", "summary.zip")).thenReturn(false);
++        when(storagePort.download(txtBlob)).thenReturn(txtBytes);
++        when(storagePort.findAssociatedPdf(txtBlob)).thenReturn(Optional.empty());
++        when(zipPort.compress(any())).thenReturn(zipBytes);
++        when(storagePort.uploadZip("65", "summary.zip", zipBytes)).thenReturn(zipRef);
++
++        service.processAllPendingFiles();
++
++        @SuppressWarnings("unchecked")
++        ArgumentCaptor<Map<String, byte[]>> entriesCaptor = ArgumentCaptor.forClass(Map.class);
++        verify(zipPort).compress(entriesCaptor.capture());
++        assertThat(entriesCaptor.getValue()).containsOnlyKeys("summary.txt");
++
++        verify(eventPort).publishZipReady(eq("65"), anyString());
++        verify(storagePort).deleteBlob(txtBlob);
++    }
++
++    private StoreEntity store(int desClave) {
++        StoreEntity store = mock(StoreEntity.class);
++        when(store.getDesClave()).thenReturn(desClave);
++        return store;
++    }
++
++    private ClosingDayBlob blob(String objectName, String extension) {
++        return new ClosingDayBlob(
++                new GcsObjectReference("gcs-cer-suite-core-files", objectName),
++                extension
++        );
++    }
++}
+
+

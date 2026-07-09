@@ -1,0 +1,1296 @@
+--- Diff for /CLAUDE.md ---
+--- a//CLAUDE.md
++++ b//CLAUDE.md
+@@ -2,9 +2,9 @@
+ 
+ This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+ 
+-## Reglas del proyecto (cargadas automáticamente)
+-
+-Los siguientes archivos definen las reglas de arquitectura, tecnología y diseño que **deben aplicarse en toda sesión y consulta**:
++## Reglas del proyecto (cargadas automÃ¡ticamente)
++
++Los siguientes archivos definen las reglas de arquitectura, tecnologÃ­a y diseÃ±o que **deben aplicarse en toda sesiÃ³n y consulta**:
+ 
+ @../.claude_rules/rules_and_prompt.md
+ @../.claude_rules/sharedlibs.md
+@@ -14,12 +14,12 @@
+ 
+ Spring Boot 4.0.6 microservice on Java 25, deployed on GKE/GCP. Part of the CER-Suite-Cloud ecosystem that modernizes legacy Java 8 retail/POS systems into cloud-native microservices.
+ 
+-**Responsabilidad única:** generar el archivo DV del proceso de devoluciones del POS retail CER/El Rosado, escribirlo en GCS y publicar un evento en Pub/Sub para que el `SincronizadorService` lo entregue al POS.
++**Responsabilidad Ãºnica:** generar el archivo DV del proceso de devoluciones del POS retail CER/El Rosado, escribirlo en GCS y publicar un evento en Pub/Sub para que el `SincronizadorService` lo entregue al POS.
+ 
+ - **GroupId**: `com.elrosado` | **ArtifactId**: `cer-suite-cl-local-integration`
+ - **Build tool**: Maven 3.9.16 (wrapper included)
+-- **Análisis completo de implementación**: `.claude_analytics/init-project.md`
+-- **Template base**: `D:\SIPECOM\repository-git\cer-gcp\template-microservice` — seguir esta estructura para todo desarrollo nuevo. Swagger (`springdoc-openapi-starter-webmvc-ui:2.8.5`), Dockerfile multi-stage (Maven → JRE 25, usuario no-root uid 10001), skaffold + build.sh (Podman), k8s con 6 manifiestos.
++- **AnÃ¡lisis completo de implementaciÃ³n**: `.claude_analytics/init-project.md`
++- **Template base**: `D:\SIPECOM\repository-git\cer-gcp\template-microservice` â€” seguir esta estructura para todo desarrollo nuevo. Swagger (`springdoc-openapi-starter-webmvc-ui:2.8.5`), Dockerfile multi-stage (Maven â†’ JRE 25, usuario no-root uid 10001), skaffold + build.sh (Podman), k8s con 6 manifiestos.
+ 
+ ## Commands
+ 
+@@ -46,50 +46,50 @@
+ 
+ ```
+ com.elrosado.integration/
+-├── domain/
+-│   ├── exception/          DevolutionAlreadyProcessedException, DevolutionValidationException,
+-│   │                       CreditNoteNotEligibleException
+-│   ├── model/              Devolution, DevolutionItem, DevolutionTotals, DevolutionStatus,
+-│   │                       ReturnMode (enum 14 modos), DvFile, StoreData, TransactionData,
+-│   │                       TaxRates, ConsumerFinalData, GiftCardData, DocumentType
+-│   └── port/
+-│       ├── in/             ExecuteDevolutionUseCase, GetDevolutionStatusUseCase
+-│       └── out/            DevolutionReadPort, DevolutionWritePort, TransactionQueryPort,
+-│                           TaxRateQueryPort, StoreQueryPort, DevolutionSequencePort,
+-│                           DevolutionAuditPort, DvFileStoragePort, DevolutionEventPort,
+-│                           CreditNoteEligibilityPort, DevolutionStatusPort
+-│
+-├── application/
+-│   ├── command/            ExecuteDevolutionCommand (devolutionId, operatorCode)
+-│   ├── result/             DevolutionResult
+-│   └── service/            ExecuteDevolutionService, GetDevolutionStatusService
+-│
+-└── infrastructure/
+-    ├── adapter/
+-    │   ├── in/
+-    │   │   ├── pubsub/     DevolutionPubSubSubscriber ← ENTRADA PRINCIPAL
+-    │   │   │               DevolutionTriggerMessage (topic: retail.local.devolucion.request.v1)
+-    │   │   └── web/
+-    │   │       ├── controller/  DevolutionController (POST + GET /api/v1/devolution)
+-    │   │       └── dto/         ExecuteDevolutionRequest, DevolutionResultResponse
+-    │   └── out/
+-    │       ├── db/
+-    │       │   ├── entity/
+-    │       │   │   ├── devsec/  DvTicketEntity, DvArtsEntity, DvTmpItmEntity,
+-    │       │   │   │            DvTmpTrnEntity, DvGfcdEntity, DvErrorSecuencialEntity
+-    │       │   │   ├── artsec/  TrTrnEntity, TrRtlEntity, AsWsEntity, PaOprEntity,
+-    │       │   │   │            PaStrRtlEntity, AsItmEntity, CoMrhrcGpEntity,
+-    │       │   │   │            TrTyTaxEntity, TrInvcEntity, TrRtnEntity
+-    │       │   │   └── saadmin/ MnTiendaEntity, PmParamEntity, PmParvalEntity
+-    │       │   ├── repository/  (un repo por entidad, separados por datasource)
+-    │       │   └── adapter/     DevolutionReadAdapter, DevolutionWriteAdapter,
+-    │       │                    TransactionQueryAdapter, TaxRateQueryAdapter,
+-    │       │                    StoreQueryAdapter, DevolutionSequenceAdapter,
+-    │       │                    DevolutionAuditAdapter, DevolutionStatusAdapter,
+-    │       │                    CreditNoteEligibilityAdapter
+-    │       ├── storage/    DvFileBuilder (ancho fijo ISO-8859-1), GcsDvFileAdapter
+-    │       └── pubsub/     DevolutionEventAdapter, DevolutionProcessedEvent
+-    └── config/
++â”œâ”€â”€ domain/
++â”‚   â”œâ”€â”€ exception/          DevolutionAlreadyProcessedException, DevolutionValidationException,
++â”‚   â”‚                       CreditNoteNotEligibleException
++â”‚   â”œâ”€â”€ model/              Devolution, DevolutionItem, DevolutionTotals, DevolutionStatus,
++â”‚   â”‚                       ReturnMode (enum 14 modos), DvFile, StoreData, TransactionData,
++â”‚   â”‚                       TaxRates, ConsumerFinalData, GiftCardData, DocumentType
++â”‚   â””â”€â”€ port/
++â”‚       â”œâ”€â”€ in/             ExecuteDevolutionUseCase, GetDevolutionStatusUseCase
++â”‚       â””â”€â”€ out/            DevolutionReadPort, DevolutionWritePort, TransactionQueryPort,
++â”‚                           TaxRateQueryPort, StoreQueryPort, DevolutionSequencePort,
++â”‚                           DevolutionAuditPort, DvFileStoragePort, DevolutionEventPort,
++â”‚                           CreditNoteEligibilityPort, DevolutionStatusPort
++â”‚
++â”œâ”€â”€ application/
++â”‚   â”œâ”€â”€ command/            ExecuteDevolutionCommand (devolutionId, operatorCode)
++â”‚   â”œâ”€â”€ result/             DevolutionResult
++â”‚   â””â”€â”€ service/            ExecuteDevolutionService, GetDevolutionStatusService
++â”‚
++â””â”€â”€ infrastructure/
++    â”œâ”€â”€ adapter/
++    â”‚   â”œâ”€â”€ in/
++    â”‚   â”‚   â”œâ”€â”€ pubsub/     DevolutionPubSubSubscriber â† ENTRADA PRINCIPAL
++    â”‚   â”‚   â”‚               DevolutionTriggerMessage (topic: retail.local.devolucion.request.v1)
++    â”‚   â”‚   â””â”€â”€ web/
++    â”‚   â”‚       â”œâ”€â”€ controller/  DevolutionController (POST + GET /api/v1/devolution)
++    â”‚   â”‚       â””â”€â”€ dto/         ExecuteDevolutionRequest, DevolutionResultResponse
++    â”‚   â””â”€â”€ out/
++    â”‚       â”œâ”€â”€ db/
++    â”‚       â”‚   â”œâ”€â”€ entity/
++    â”‚       â”‚   â”‚   â”œâ”€â”€ devsec/  DvTicketEntity, DvArtsEntity, DvTmpItmEntity,
++    â”‚       â”‚   â”‚   â”‚            DvTmpTrnEntity, DvGfcdEntity, DvErrorSecuencialEntity
++    â”‚       â”‚   â”‚   â”œâ”€â”€ artsec/  TrTrnEntity, TrRtlEntity, AsWsEntity, PaOprEntity,
++    â”‚       â”‚   â”‚   â”‚            PaStrRtlEntity, AsItmEntity, CoMrhrcGpEntity,
++    â”‚       â”‚   â”‚   â”‚            TrTyTaxEntity, TrInvcEntity, TrRtnEntity
++    â”‚       â”‚   â”‚   â””â”€â”€ saadmin/ MnTiendaEntity, PmParamEntity, PmParvalEntity
++    â”‚       â”‚   â”œâ”€â”€ repository/  (un repo por entidad, separados por datasource)
++    â”‚       â”‚   â””â”€â”€ adapter/     DevolutionReadAdapter, DevolutionWriteAdapter,
++    â”‚       â”‚                    TransactionQueryAdapter, TaxRateQueryAdapter,
++    â”‚       â”‚                    StoreQueryAdapter, DevolutionSequenceAdapter,
++    â”‚       â”‚                    DevolutionAuditAdapter, DevolutionStatusAdapter,
++    â”‚       â”‚                    CreditNoteEligibilityAdapter
++    â”‚       â”œâ”€â”€ storage/    DvFileBuilder (ancho fijo ISO-8859-1), GcsDvFileAdapter
++    â”‚       â””â”€â”€ pubsub/     DevolutionEventAdapter, DevolutionProcessedEvent
++    â””â”€â”€ config/
+         DevsEcDataSourceConfig (@Primary), ArtsEcDataSourceConfig,
+         SaadminDataSourceConfig, MultiSqlSharedConfig
+ ```
+@@ -98,21 +98,21 @@
+ 
+ ```
+ Portal Angular
+-  └─► Pub/Sub topic: retail.local.devolucion.request.v1
+-           │  { devolutionId: 12345, operatorCode: "001234567" }
+-           ▼
+-  DevolutionPubSubSubscriber  ← adapter IN
+-           │  Ack/Nack según tipo de excepción (ver tabla en init-project.md)
+-           ▼
++  â””â”€â–º Pub/Sub topic: retail.local.devolucion.request.v1
++           â”‚  { devolutionId: 12345, operatorCode: "001234567" }
++           â–¼
++  DevolutionPubSubSubscriber  â† adapter IN
++           â”‚  Ack/Nack segÃºn tipo de excepciÃ³n (ver tabla en init-project.md)
++           â–¼
+   ExecuteDevolutionService
+-           │  1. loadSession(idDev) → DV_TICKET + DV_ARTS + AS_ITM
+-           │  2. ReturnMode.fromCode(devolution.tyDev())  ← de BD
+-           │  3. validateTotals / validateCreditNoteEligibility
+-           │  4. TransactionData + TaxRates + StoreData
+-           │  5. generateSequence → NUM_NC (si no es MODO 80)
+-           │  6. DvFileBuilder.build() → byte[] ancho fijo
+-           │  7. GCS upload → gs://suite-devoluciones/{storeId}/{fileName}
+-           └─► Pub/Sub publish → retail.local.sincronizador.request.v1
++           â”‚  1. loadSession(idDev) â†’ DV_TICKET + DV_ARTS + AS_ITM
++           â”‚  2. ReturnMode.fromCode(devolution.tyDev())  â† de BD
++           â”‚  3. validateTotals / validateCreditNoteEligibility
++           â”‚  4. TransactionData + TaxRates + StoreData
++           â”‚  5. generateSequence â†’ NUM_NC (si no es MODO 80)
++           â”‚  6. DvFileBuilder.build() â†’ byte[] ancho fijo
++           â”‚  7. GCS upload â†’ gs://suite-devoluciones/{storeId}/{fileName}
++           â””â”€â–º Pub/Sub publish â†’ retail.local.synchro.controller.v1
+ ```
+ 
+ ## Hard Rules
+@@ -125,29 +125,29 @@
+ | `System.out.println` | SLF4J via `@Slf4j` |
+ | Hardcoded credentials or business values | Spring Profiles + Secret Manager / constants |
+ | Mutable POJOs in domain layer | Java Records (immutable) |
+-| Crear topics/subscriptions desde código | Definir en Terraform/IaC |
++| Crear topics/subscriptions desde cÃ³digo | Definir en Terraform/IaC |
+ 
+ ## Multi-Datasource (jlib-multisql)
+ 
+-Tres datasources configurados vía `multi-sql.datasources.*`:
++Tres datasources configurados vÃ­a `multi-sql.datasources.*`:
+ 
+ | Key | BD | Paquete entidades | Rol |
+ |---|---|---|---|
+-| `devs-ec` | DEVS_EC | `db.entity.devsec` | Primary — DV_TICKET, DV_ARTS, etc. |
++| `devs-ec` | DEVS_EC | `db.entity.devsec` | Primary â€” DV_TICKET, DV_ARTS, etc. |
+ | `arts-ec` | ARTS_EC | `db.entity.artsec` | Transacciones origen y maestros retail |
+-| `saadmin` | SAADMIN | `db.entity.saadmin` | Parámetros, tiendas, Frecuento |
++| `saadmin` | SAADMIN | `db.entity.saadmin` | ParÃ¡metros, tiendas, Frecuento |
+ 
+ Cada adaptador que usa `arts-ec` o `saadmin` debe anotar `@Transactional` con el `transactionManagerRef` correspondiente.
+ 
+ ## Spring Profiles
+ 
+-- `application.yaml` — shared: virtual threads, multi-sql, pubsub subscription
+-- `application-local.yaml` — local dev: logs coloreados, BD localhost, subscription default
+-- `application-prod.yaml` — GKE: JSON structured logs (`logging.structured.format.console=gcp`), env vars K8s
++- `application.yaml` â€” shared: virtual threads, multi-sql, pubsub subscription
++- `application-local.yaml` â€” local dev: logs coloreados, BD localhost, subscription default
++- `application-prod.yaml` â€” GKE: JSON structured logs (`logging.structured.format.console=gcp`), env vars K8s
+ 
+ ## Variables de entorno
+ 
+-| Variable | Descripción | Default local |
++| Variable | DescripciÃ³n | Default local |
+ |---|---|---|
+ | `GOOGLE_CLOUD_PROJECT` | Project ID de GCP | `modern-suite-cloud-local` |
+ | `DB_DEVS_EC_URL` | JDBC URL DEVS_EC | `localhost:1433` |
+@@ -157,8 +157,9 @@
+ | `DB_SAADMIN_URL` | JDBC URL SAADMIN | `localhost:1433` |
+ | `DB_SAADMIN_USER` / `DB_SAADMIN_PASSWORD` | Credenciales SAADMIN | `sa` |
+ | `GCS_BUCKET_DEVS` | Bucket GCS archivos DV | `cer-devs-local` |
+-| `PUBSUB_TOPIC_DEVOLUTION` | Topic evento procesado → sincronizador | `devolution-processed-local` |
++| `PUBSUB_TOPIC_SYNCHRO_CONTROLLER` | Topic evento procesado â†’ sincronizador | `retail.local.synchro.controller.v1` |
+ | `PUBSUB_SUBSCRIPTION_DEVOLUCION` | Subscription entrada portal | `retail.local.devolucion.request.v1-sub` |
++| `SYNCHRO_CONTROLLER_TARGET_DIR` | Directorio POS enviado en el evento generico | `f:/ALLC_DAT/IN/devs` |
+ 
+ ## Code Conventions
+ 
+@@ -171,7 +172,7 @@
+ 
+ ### Naming & Package Conventions (aligned to template-microservice)
+ 
+-| Elemento | Convención | Ejemplo |
++| Elemento | ConvenciÃ³n | Ejemplo |
+ |---|---|---|
+ | Repositorios JPA | Prefijo `Jpa` | `JpaDvTicketRepository`, `JpaTrTrnRepository` |
+ | Subscriber Pub/Sub | Paquete `adapter/in/event/` | `DevolutionPubSubSubscriber` |
+@@ -181,22 +182,22 @@
+ | DTOs web | `adapter/in/web/dto/` | `ExecuteDevolutionRequest` |
+ | Controladores REST | `adapter/in/web/controller/` | `DevolutionController` |
+ 
+-> **Nota**: `jlib-logging` provee `MdcLoggingFilter` equivalente al `LoggingEnrichmentFilter` del template — no duplicar.
++> **Nota**: `jlib-logging` provee `MdcLoggingFilter` equivalente al `LoggingEnrichmentFilter` del template â€” no duplicar.
+ 
+ ### Infraestructura de despliegue
+ 
+-| Archivo | Descripción |
++| Archivo | DescripciÃ³n |
+ |---|---|
+-| `Dockerfile` | Multi-stage: Maven 3+JDK25 build → JRE25 runtime, usuario `appuser:appgroup` uid 10001 |
++| `Dockerfile` | Multi-stage: Maven 3+JDK25 build â†’ JRE25 runtime, usuario `appuser:appgroup` uid 10001 |
+ | `docker/dev/Dockerfile` | Igual al root con `SPRING_PROFILES_ACTIVE=local` |
+ | `build.sh` | Extrae artifactId/version de Maven, construye y publica con Podman |
+ | `skaffold.yaml` | `apiVersion: skaffold/v4beta11`, custom build via `build.sh`, deploys `k8s/*.yaml` |
+ | `k8s/namespace.yaml` | `ns-cer-suite-dev` |
+ | `k8s/configmap.yaml` | SPRING_PROFILES_ACTIVE, GCS_BUCKET_DEVS, PUBSUB_SUBSCRIPTION_DEVOLUCION |
+-| `k8s/secret.yaml` | Credenciales DB (stringData — completar en prod con Secret Manager) |
++| `k8s/secret.yaml` | Credenciales DB (stringData â€” completar en prod con Secret Manager) |
+ | `k8s/deployment.yaml` | Probes liveness/readiness, securityContext runAsUser:10001, limits cpu:1/mem:512Mi |
+-| `k8s/service.yaml` | NodePort 30052 → 8080 |
+-| `k8s/hpa.yaml` | CPU 75% + memory 80%, min:1 max:5 réplicas |
++| `k8s/service.yaml` | NodePort 30052 â†’ 8080 |
++| `k8s/hpa.yaml` | CPU 75% + memory 80%, min:1 max:5 rÃ©plicas |
+ 
+ ## Logging
+ 
+@@ -205,7 +206,7 @@
+ Multi-attribute business events (mandatory pattern):
+ ```java
+ log.atInfo()
+-   .setMessage("Descripción del evento en español")
++   .setMessage("DescripciÃ³n del evento en espaÃ±ol")
+    .addKeyValue("entidad.id", id)
+    .addKeyValue("atributo", valor)
+    .log();
+@@ -217,29 +218,30 @@
+ 
+ ## Testing
+ 
+-- **Unit tests** (sin carpeta `unit/` — directamente en el paquete del componente bajo `test/`): JUnit 5 + Mockito. `@ExtendWith(MockitoExtension.class)`. Los tests de `ExecuteDevolutionService` usan fakes manuales (no Mockito) para evitar warning de agente dinámico en Java 25.
++- **Unit tests** (sin carpeta `unit/` â€” directamente en el paquete del componente bajo `test/`): JUnit 5 + Mockito. `@ExtendWith(MockitoExtension.class)`. Los tests de `ExecuteDevolutionService` usan fakes manuales (no Mockito) para evitar warning de agente dinÃ¡mico en Java 25.
+ - **Integration tests**: anotados con `@Disabled`, requieren emuladores o infraestructura local.
+ - Cada puerto de dominio necesita al menos un test happy-path y uno de error.
+-- Mínimo 80% cobertura de código (estándar SonarQube).
++- MÃ­nimo 80% cobertura de cÃ³digo (estÃ¡ndar SonarQube).
+ 
+ ## Shared Libraries activas en este microservicio
+ 
+-| Librería | Versión | Rol |
++| LibrerÃ­a | VersiÃ³n | Rol |
+ |---|---|---|
+ | `jlib-logging` | 1.0.0 | MDC filter HTTP + logback base GCP |
+ | `jlib-health` | 1.0.0 | Actuator liveness/readiness para GKE |
+ | `jlib-multisql` | 1.0.1 | Multi-datasource JPA (DEVS_EC + ARTS_EC + SAADMIN) |
+-| `jlib-storage` | 1.0.1 | `IGoogleCloudStorageService` → GCS |
++| `jlib-storage` | 1.0.1 | `IGoogleCloudStorageService` â†’ GCS |
+ | `jlib-pubsub-logging` | 1.0.0 | `IMessagePublisher` + `IMessageSubscriber` con MDC |
+ 
+-`jlib-pubsub-logging` incluye transitivamente `jlib-pubsub`. El bean `IMessageSubscriber` que se inyecta en `DevolutionPubSubSubscriber` es el `MdcMessageSubscriber` (decorador con MDC automático).
++`jlib-pubsub-logging` incluye transitivamente `jlib-pubsub`. El bean `IMessageSubscriber` que se inyecta en `DevolutionPubSubSubscriber` es el `MdcMessageSubscriber` (decorador con MDC automÃ¡tico).
+ 
+ ## GKE Deployment Requirements
+ 
+ - GCP authentication via **Workload Identity** (no JSON key files on disk)
+-- Kubernetes health probes → `/actuator/health/liveness` and `/actuator/health/readiness`
++- Kubernetes health probes â†’ `/actuator/health/liveness` and `/actuator/health/readiness`
+ - HPA based on CPU (75%) or Pub/Sub pending message count (`retail.local.devolucion.request.v1-sub`)
+ - Multi-stage Dockerfile (Java 25, non-root user, minimal runtime image)
+ - K8s manifests under `k8s/` directory (Deployment, Service, HPA, ConfigMap, Secret)
+ - Required prod env var: `GOOGLE_CLOUD_PROJECT`
+-- Topic y subscription de Pub/Sub se crean vía Terraform — no desde código
++- Topic y subscription de Pub/Sub se crean vÃ­a Terraform â€” no desde cÃ³digo
++
+
+
+--- Diff for /asyncapi.yaml ---
+--- a//asyncapi.yaml
++++ b//asyncapi.yaml
+@@ -4,163 +4,96 @@
+   title: cer-suite-cl-local-integration
+   version: 1.0.0
+   description: |
+-    Microservicio de integración local CER Suite Cloud.
+-    Responsabilidad: generar el archivo DV del proceso de devoluciones del POS retail CER/El Rosado,
+-    escribirlo en GCS y publicar un evento en Pub/Sub para que el SincronizadorService lo entregue al POS.
++    Microservicio de integracion local CER Suite Cloud.
++    Responsabilidad: generar el archivo DV del proceso de devoluciones, escribirlo en GCS
++    y publicar un evento generico para que cer-suite-cl-local-synchro-srv lo entregue al POS.
+ 
+-    **Flujo principal:**
+-    1. Recibe solicitud de devolución desde el portal Angular via `retail.local.devolucion.request.v1`
+-    2. Ejecuta el caso de uso `ExecuteDevolutionUseCase` (consulta BD, genera DV, escribe en GCS)
+-    3. Publica resultado en `retail.local.devolution.processed.v1` para que el SincronizadorService lo entregue al POS
+-
+-    **Política de Ack/Nack:**
+-    - `Ack` (true): procesamiento exitoso, error permanente de negocio, mensaje inválido o duplicado
+-    - `Nack` (false): error transitorio (BD no disponible, GCS no disponible) — reintento automático
+-
+-  contact:
+-    name: CER Suite Cloud — SIPECOM
+-  license:
+-    name: Privado — uso interno SIPECOM
++    Flujo principal:
++    1. Recibe solicitud desde `retail.local.devolucion.request.v1`.
++    2. Ejecuta `ExecuteDevolutionUseCase`, genera el archivo DV y lo sube a GCS.
++    3. Publica `SynchroControllerEvent` en `retail.local.synchro.controller.v1`.
+ 
+ servers:
+   gcp-local:
+     host: pubsub.googleapis.com
+     protocol: googlepubsub
+-    description: GCP Pub/Sub — proyecto modern-suite-cloud-inf (entorno local)
+-    tags:
+-      - name: env:local
++    description: GCP Pub/Sub local
+   gcp-prod:
+     host: pubsub.googleapis.com
+     protocol: googlepubsub
+-    description: GCP Pub/Sub — proyecto GKE producción (Workload Identity)
+-    tags:
+-      - name: env:prod
++    description: GCP Pub/Sub produccion
+ 
+ channels:
+-
+   devolutionRequest:
+     address: retail.local.devolucion.request.v1
+-    description: |
+-      Topic de entrada. El backend del portal Angular publica aquí cuando el operador
+-      confirma una devolución en el POS. Este microservicio consume la subscription
+-      `retail.local.devolucion.request.v1-sub`.
++    description: Solicitud de devolucion publicada por el backend del portal.
+     messages:
+       DevolutionTriggerMessage:
+         $ref: '#/components/messages/DevolutionTriggerMessage'
+ 
+-  devolutionProcessed:
+-    address: retail.local.devolution.processed.v1
+-    description: |
+-      Topic de salida. Este microservicio publica aquí el evento `DevolutionProcessedEvent`
+-      tras generar el archivo DV y escribirlo en GCS. El SincronizadorService consume
+-      este topic para descargar el archivo y entregarlo al POS.
++  synchroController:
++    address: retail.local.synchro.controller.v1
++    description: Evento generico para transferir archivos desde GCS al controlador POS.
+     messages:
+-      DevolutionProcessedEvent:
+-        $ref: '#/components/messages/DevolutionProcessedEvent'
++      SynchroControllerEvent:
++        $ref: '#/components/messages/SynchroControllerEvent'
+ 
+ operations:
+-
+   receiveDevolutionRequest:
+     action: receive
+     channel:
+       $ref: '#/channels/devolutionRequest'
+-    title: Recibir solicitud de devolución desde el portal
+-    summary: |
+-      Desencadena la ejecución de `ExecuteDevolutionUseCase`: consulta BD (DEVS_EC, ARTS_EC, SAADMIN),
+-      genera el archivo DV en formato de ancho fijo ISO-8859-1, lo escribe en GCS y publica el evento
+-      de resultado en `retail.local.devolution.processed.v1`.
+-    description: |
+-      **Handler:** `DevolutionCreationMessageHandler`
+-
+-      **Subscription:** `retail.local.devolucion.request.v1-sub`
+-
+-      **Política de Ack/Nack:**
+-      | Situación | Resultado |
+-      |-----------|-----------|
+-      | Procesamiento exitoso | Ack |
+-      | JSON inválido o payload nulo | Ack (descarte) |
+-      | `devolutionId` ausente | Ack (descarte) |
+-      | `DevolutionAlreadyProcessedException` | Ack (duplicado) |
+-      | `DevolutionValidationException` | Ack (regla de negocio) |
+-      | `CreditNoteNotEligibleException` | Ack (regla de negocio) |
+-      | `NoSuchElementException` (sesión no encontrada) | Nack → reintento |
+-      | Error inesperado | Nack → reintento |
++    title: Recibir solicitud de devolucion
++    summary: Genera el archivo DV, lo sube a GCS y publica el evento de sincronizacion.
+     messages:
+       - $ref: '#/channels/devolutionRequest/messages/DevolutionTriggerMessage'
+     bindings:
+       googlepubsub:
+         clientId: DevolutionPubSubSubscriber
+ 
+-  publishDevolutionProcessed:
++  publishSynchroControllerEvent:
+     action: send
+     channel:
+-      $ref: '#/channels/devolutionProcessed'
+-    title: Publicar evento de devolución procesada
+-    summary: |
+-      Se publica tras confirmar la escritura del archivo DV en GCS. El SincronizadorService
+-      lo consume para descargar el archivo de GCS y entregarlo al POS.
+-    description: |
+-      **Publisher:** `DevolutionEventAdapter` → `IMessagePublisher.publishAsync()`
+-
+-      El mensaje se serializa a JSON con Jackson. El campo `gcsPath` contiene la ruta relativa
+-      dentro del bucket y `gcsBucket` el nombre del bucket GCS.
++      $ref: '#/channels/synchroController'
++    title: Publicar evento generico de sincronizacion al controlador
++    summary: Publica la ubicacion GCS y el destino POS que consumira synchro-srv.
+     messages:
+-      - $ref: '#/channels/devolutionProcessed/messages/DevolutionProcessedEvent'
++      - $ref: '#/channels/synchroController/messages/SynchroControllerEvent'
+ 
+ components:
+-
+   messages:
+-
+     DevolutionTriggerMessage:
+       name: DevolutionTriggerMessage
+-      title: Solicitud de ejecución de devolución
+-      summary: Publicado por el backend del portal Angular cuando el operador confirma la devolución.
++      title: Solicitud de ejecucion de devolucion
+       contentType: application/json
+       payload:
+         $ref: '#/components/schemas/DevolutionTriggerMessagePayload'
+       examples:
+-        - name: Devolución estándar con código de operador
++        - name: Devolucion estandar con codigo de operador
+           payload:
+             devolutionId: 12345
+             operatorCode: "001234567"
+-        - name: Devolución sin operador (operatorCode opcional)
+-          payload:
+-            devolutionId: 99001
+-            operatorCode: null
+ 
+-    DevolutionProcessedEvent:
+-      name: DevolutionProcessedEvent
+-      title: Evento de devolución procesada
+-      summary: |
+-        Publicado por este microservicio tras generar el archivo DV y escribirlo en GCS.
+-        Consumido por el SincronizadorService para descargar el archivo y entregarlo al POS.
++    SynchroControllerEvent:
++      name: SynchroControllerEvent
++      title: Evento generico de sincronizacion al controlador POS
+       contentType: application/json
+       payload:
+-        $ref: '#/components/schemas/DevolutionProcessedEventPayload'
++        $ref: '#/components/schemas/SynchroControllerEventPayload'
+       examples:
+-        - name: Devolución con nota de crédito generada
++        - name: Archivo DV listo para transferir
+           payload:
+-            devolutionId: 12345
+-            codStore: 1
+-            numNc: 87
+-            creditNoteNumber: "001001000000087"
+-            gcsBucket: "gcs-cer-suite-core-files"
+-            gcsPath: "001/DV_20260612_12345.txt"
+-            fileName: "DV_20260612_12345.txt"
+-            processedAt: "2026-06-12T14:35:22.123Z"
+-        - name: Devolución modo 80 (sin nota de crédito)
+-          payload:
+-            devolutionId: 99001
+-            codStore: 1
+-            numNc: 0
+-            creditNoteNumber: ""
+-            gcsBucket: "gcs-cer-suite-core-files"
+-            gcsPath: "001/DV_20260612_99001.txt"
+-            fileName: "DV_20260612_99001.txt"
+-            processedAt: "2026-06-12T15:10:00.000Z"
++            eventId: "12345"
++            eventType: "file.ready"
++            source: "cer-suite-cl-local-integration"
++            codStore: 5
++            gcsBucket: "gcs-cer-suite-core-files/dev"
++            gcsPath: "005/DV000123.005"
++            fileName: "DV000123.005"
++            targetDir: "f:/ALLC_DAT/IN/devs"
++            createdAt: "2026-06-24T15:30:00Z"
+ 
+   schemas:
+-
+     DevolutionTriggerMessagePayload:
+       type: object
+       required:
+@@ -169,73 +102,58 @@
+         devolutionId:
+           type: integer
+           format: int32
+-          description: |
+-            Identificador de la sesión de devolución en DEVS_EC.DV_TICKET.
+-            Corresponde al campo ID_DEV de la tabla.
+           minimum: 1
+-          example: 12345
++          description: Identificador de la sesion de devolucion en DEVS_EC.DV_TICKET.
+         operatorCode:
+           type:
+             - string
+             - "null"
+-          description: |
+-            Código del operador que ejecuta la devolución. Formato: 9 dígitos numéricos.
+-            Corresponde a PaOprEntity.codOpr. Puede ser null si la devolución no requiere operador.
+           pattern: '^\d{9}$'
+-          example: "001234567"
++          description: Codigo de operador. Puede ser null si no aplica.
+ 
+-    DevolutionProcessedEventPayload:
++    SynchroControllerEventPayload:
+       type: object
+       required:
+-        - devolutionId
+         - codStore
+-        - numNc
+-        - creditNoteNumber
+         - gcsBucket
+         - gcsPath
+         - fileName
+-        - processedAt
++        - targetDir
+       properties:
+-        devolutionId:
+-          type: integer
+-          format: int32
+-          description: Identificador de la sesión de devolución. Mismo valor que en `DevolutionTriggerMessage`.
+-          minimum: 1
+-          example: 12345
++        eventId:
++          type: string
++          description: Identificador trazable del proceso origen.
++          example: "12345"
++        eventType:
++          type: string
++          description: Tipo funcional del archivo publicado.
++          example: "file.ready"
++        source:
++          type: string
++          description: Servicio productor del evento.
++          example: "cer-suite-cl-local-integration"
+         codStore:
+           type: integer
+           format: int32
+-          description: Código numérico de la tienda donde se generó la devolución.
+-          example: 1
+-        numNc:
+-          type: integer
+-          format: int32
+-          description: |
+-            Número de secuencia de la nota de crédito generada (campo NUM_NC).
+-            Valor 0 para devoluciones en modo 80 (sin nota de crédito).
+-          example: 87
+-        creditNoteNumber:
+-          type: string
+-          description: |
+-            Número de nota de crédito formateado: `{codSri(3)}{posDevolution(3)}{numNc(9)}`.
+-            Cadena vacía para modo 80.
+-          example: "001001000000087"
++          description: Codigo de tienda usado por synchro-srv para buscar el controlador POS.
++          example: 5
+         gcsBucket:
+           type: string
+-          description: Nombre del bucket GCS donde se almacenó el archivo DV.
+-          example: "gcs-cer-suite-core-files"
++          description: Bucket o bucket/prefijo donde se encuentra el archivo.
++          example: "gcs-cer-suite-core-files/dev"
+         gcsPath:
+           type: string
+-          description: |
+-            Ruta relativa del archivo DV dentro del bucket GCS.
+-            Formato: `{storeId}/{fileName}`.
+-          example: "001/DV_20260612_12345.txt"
++          description: Ruta relativa del objeto dentro de `gcsBucket`.
++          example: "005/DV000123.005"
+         fileName:
+           type: string
+-          description: Nombre del archivo DV generado.
+-          example: "DV_20260612_12345.txt"
+-        processedAt:
++          description: Nombre final del archivo en TCx Sky.
++          example: "DV000123.005"
++        targetDir:
++          type: string
++          description: Directorio destino del controlador POS.
++          example: "f:/ALLC_DAT/IN/devs"
++        createdAt:
+           type: string
+           format: date-time
+-          description: Timestamp UTC del momento en que el archivo DV fue generado y escrito en GCS.
+-          example: "2026-06-12T14:35:22.123Z"
++          description: Timestamp UTC de publicacion del evento.
+
+
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -8,7 +8,10 @@
+   SERVER_PORT: "8080"
+   GOOGLE_CLOUD_PROJECT: "modern-suite-cloud-inf"
+   GCS_BUCKET_DEVS: "gcs-cer-suite-core-files"
+-  PUBSUB_TOPIC_DEVOLUTION: "retail.local.devolution.processed.v1"
++  GCS_PATH_DEV: "dev"
++  PUBSUB_TOPIC_SYNCHRO_CONTROLLER: "retail.local.synchro.controller.v1"
+   PUBSUB_SUBSCRIPTION_DEVOLUCION: "retail.local.devolution.request.v1-sub"
++  SYNCHRO_CONTROLLER_TARGET_DIR: "f:/ALLC_DAT/IN/devs"
+   PARAM_NUM_POS_DEVOL: "NUMPOSDEVOL"
+   PARAM_REGION_FRECUENTO: "COD_REGION_FRECUENTO"
++
+
+
+--- Diff for /src/main/java/com/elrosado/integration/application/service/ExecuteDevolutionService.java ---
+--- a//src/main/java/com/elrosado/integration/application/service/ExecuteDevolutionService.java
++++ b//src/main/java/com/elrosado/integration/application/service/ExecuteDevolutionService.java
+@@ -43,6 +43,8 @@
+     private String gcsBucketName;
+     @Value("${app.gcp.storage.path-dev}")
+     private String pathDev;
++    @Value("${app.sync-controller.target-dir}")
++    private String syncControllerTargetDir;
+ 
+     private final DevolutionReadPort devolutionReadPort;
+     private final DevolutionWritePort devolutionWritePort;
+@@ -103,13 +105,14 @@
+ 
+         String messageId = devolutionEventPort.publish(
+                 new DevolutionProcessedEvent(
+-                        idDev,
++                        String.valueOf(idDev),
++                        "file.ready",
++                        "cer-suite-cl-local-integration",
+                         storeData.storeCode(),
+-                        numNc,
+-                        nota,
+                         bucket,
+                         dvFile.gcsPath(),
+                         dvFile.fileName(),
++                        syncControllerTargetDir,
+                         Instant.now()));
+ 
+         log.atInfo()
+@@ -197,3 +200,4 @@
+         return value == null ? BigDecimal.ZERO : BigDecimal.valueOf(value);
+     }
+ }
++
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/adapter/out/pubsub/DevolutionEventAdapter.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/adapter/out/pubsub/DevolutionEventAdapter.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/adapter/out/pubsub/DevolutionEventAdapter.java
+@@ -2,11 +2,11 @@
+ 
+ import com.elrosado.integration.domain.port.out.DevolutionEventPort;
+ import com.elrosado.jlib_pubsub.interfaces.IMessagePublisher;
+-import tools.jackson.databind.ObjectMapper;
+ import lombok.RequiredArgsConstructor;
+ import lombok.extern.slf4j.Slf4j;
+ import org.springframework.beans.factory.annotation.Value;
+ import org.springframework.stereotype.Component;
++import tools.jackson.databind.ObjectMapper;
+ 
+ @Component
+ @RequiredArgsConstructor
+@@ -16,7 +16,7 @@
+     private final IMessagePublisher messagePublisher;
+     private final ObjectMapper objectMapper;
+ 
+-    @Value("${app.gcp.pubsub.topic-devolution}")
++    @Value("${app.gcp.pubsub.topic-synchro-controller}")
+     private String topic;
+ 
+     @Override
+@@ -26,8 +26,10 @@
+             String messageId = messagePublisher.publishAsync(topic, payload).get();
+ 
+             log.atInfo()
+-                    .setMessage("Evento de devolucion publicado en Pub/Sub")
+-                    .addKeyValue("devolutionId", event.devolutionId())
++                    .setMessage("Evento de sincronizacion al controlador publicado en Pub/Sub")
++                    .addKeyValue("eventId", event.eventId())
++                    .addKeyValue("eventType", event.eventType())
++                    .addKeyValue("codStore", event.codStore())
+                     .addKeyValue("topic", topic)
+                     .addKeyValue("messageId", messageId)
+                     .log();
+@@ -35,11 +37,11 @@
+             return messageId;
+         } catch (Exception ex) {
+             log.atError()
+-                    .setMessage("Error publicando evento de devolucion en Pub/Sub")
+-                    .addKeyValue("devolutionId", event.devolutionId())
++                    .setMessage("Error publicando evento de sincronizacion al controlador en Pub/Sub")
++                    .addKeyValue("eventId", event.eventId())
+                     .setCause(ex)
+                     .log();
+-            throw new IllegalStateException("Error publicando evento de devolucion", ex);
++            throw new IllegalStateException("Error publicando evento de sincronizacion al controlador", ex);
+         }
+     }
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/adapter/out/pubsub/DevolutionProcessedEvent.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/adapter/out/pubsub/DevolutionProcessedEvent.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/adapter/out/pubsub/DevolutionProcessedEvent.java
+@@ -3,12 +3,13 @@
+ import java.time.Instant;
+ 
+ public record DevolutionProcessedEvent(
+-        Integer devolutionId,
++        String  eventId,
++        String  eventType,
++        String  source,
+         Integer codStore,
+-        Integer numNc,
+-        String  creditNoteNumber,
+         String  gcsBucket,
+         String  gcsPath,
+         String  fileName,
+-        Instant processedAt
++        String  targetDir,
++        Instant createdAt
+ ) {}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/config/PubSubRoutingProperties.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/config/PubSubRoutingProperties.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/config/PubSubRoutingProperties.java
+@@ -9,7 +9,7 @@
+ @Data
+ public class PubSubRoutingProperties {
+ 
+-    private String topicDevolution = "retail.local.devolution.processed.v1";
++    private String topicSynchroController = "retail.local.synchro.controller.v1";
+     private String subscriptionDevolutionRequest = "retail.local.devolution.request.v1-sub";
+ 
+     public boolean isRequestSubscription(String subscriptionId) {
+
+
+--- Diff for /src/main/resources/application-dev.yaml ---
+--- a//src/main/resources/application-dev.yaml
++++ b//src/main/resources/application-dev.yaml
+@@ -49,30 +49,23 @@
+ 
+ pubsub:
+   subscriptions:
+-    - topic-id: ${PUBSUB_TOPIC_DEVOLUTION}
+-      subscription-id: ${PUBSUB_SUBSCRIPTION_DEVOLUTION}
+-    - topic-id: ${PUBSUB_TOPIC_PROCESSED_DEVOLUTION}
+-      subscription-id: ${PUBSUB_SUBSCRIPTION_DEVOLUTION_PROCESSED}
++    - topic-id: ${PUBSUB_TOPIC_DEVOLUCION_REQUEST:retail.local.devolucion.request.v1}
++      subscription-id: ${PUBSUB_SUBSCRIPTION_DEVOLUCION}
+ 
+ app:
+-  file-transfer:
+-    enabled: ${FILE_TRANSFER_ENABLED}
+-    base-url: ${FILE_TRANSFER_BASE_URL}
+-    files-path: ${FILE_TRANSFER_FILES_PATH}
+-    target-dir: ${FILE_TRANSFER_TARGET_DIR}
+-    timeout-seconds: ${FILE_TRANSFER_TIMEOUT_SECONDS}
+-    bearer-token-secret-id: ${FILE_TRANSFER_BEARER_TOKEN_SECRET_ID}
+-    bearer-token-secret-version: ${FILE_TRANSFER_BEARER_TOKEN_SECRET_VERSION}
+-    bearer-token-cache-ttl-seconds: ${FILE_TRANSFER_BEARER_TOKEN_CACHE_TTL_SECONDS}
+-    param-num-pos-devol: ${PARAM_NUM_POS_DEVOL}
+-    param-region-frecuento: ${PARAM_REGION_FRECUENTO}
++  params:
++    num-pos-devol: ${PARAM_NUM_POS_DEVOL}
++    region-frecuento: ${PARAM_REGION_FRECUENTO}
++  sync-controller:
++    target-dir: ${SYNCHRO_CONTROLLER_TARGET_DIR}
+   gcp:
+     storage:
+       bucket-name: ${GCS_BUCKET_DEVS}
++      path-dev: ${GCS_PATH_DEV:dev}
+     pubsub:
+-      topic-devolution: ${PUBSUB_TOPIC_DEVOLUTION}
++      topic-synchro-controller: ${PUBSUB_TOPIC_SYNCHRO_CONTROLLER}
+       subscription-devolution-request: ${PUBSUB_SUBSCRIPTION_DEVOLUCION}
+-      subscription-devolution-processed: ${PUBSUB_SUBSCRIPTION_DEVOLUTION_PROCESSED}
+   http:
+     connect-timeout-ms: 10000
+-    read-timeout-ms: 30000+    read-timeout-ms: 30000
++
+
+
+--- Diff for /src/main/resources/application-local.yaml ---
+--- a//src/main/resources/application-local.yaml
++++ b//src/main/resources/application-local.yaml
+@@ -56,10 +56,12 @@
+   params:
+     num-pos-devol: ${PARAM_NUM_POS_DEVOL:NUMPOSDEVOL}
+     region-frecuento: ${PARAM_REGION_FRECUENTO:COD_REGION_FRECUENTO}
++  sync-controller:
++    target-dir: ${SYNCHRO_CONTROLLER_TARGET_DIR:f:/ALLC_DAT/IN/devs}
+   gcp:
+     storage:
+       bucket-name: ${GCS_BUCKET_DEVS:gcs-cer-suite-core-files}
+       path-dev: dev
+     pubsub:
+-      topic-devolution: ${PUBSUB_TOPIC_DEVOLUTION:retail.local.devolution.processed.v1}
++      topic-synchro-controller: ${PUBSUB_TOPIC_SYNCHRO_CONTROLLER:retail.local.synchro.controller.v1}
+       subscription-devolution-request: ${PUBSUB_SUBSCRIPTION_DEVOLUCION:retail.local.devolution.request.v1-sub}
+
+
+--- Diff for /src/main/resources/application-prod.yaml ---
+--- a//src/main/resources/application-prod.yaml
++++ b//src/main/resources/application-prod.yaml
+@@ -52,9 +52,13 @@
+   params:
+     num-pos-devol: ${PARAM_NUM_POS_DEVOL}
+     region-frecuento: ${PARAM_REGION_FRECUENTO}
++  sync-controller:
++    target-dir: ${SYNCHRO_CONTROLLER_TARGET_DIR}
+   gcp:
+     storage:
+       bucket-name: ${GCS_BUCKET_DEVS}
++      path-dev: ${GCS_PATH_DEV:dev}
+     pubsub:
+-      topic-devolution: ${PUBSUB_TOPIC_DEVOLUTION}
++      topic-synchro-controller: ${PUBSUB_TOPIC_SYNCHRO_CONTROLLER}
+       subscription-devolution-request: ${PUBSUB_SUBSCRIPTION_DEVOLUCION}
++
+
+
+--- Diff for /src/test/java/com/elrosado/integration/application/service/ExecuteDevolutionServiceTest.java ---
+--- a//src/test/java/com/elrosado/integration/application/service/ExecuteDevolutionServiceTest.java
++++ b//src/test/java/com/elrosado/integration/application/service/ExecuteDevolutionServiceTest.java
+@@ -24,6 +24,7 @@
+ import org.junit.jupiter.api.Test;
+ 
+ import java.time.LocalDate;
++import java.lang.reflect.Field;
+ import java.time.LocalDateTime;
+ import java.util.List;
+ 
+@@ -69,6 +70,9 @@
+         assertThat(fakes.devolutionSequencePort.returnMode).isEqualTo(ReturnMode.CASH);
+         assertThat(fakes.devolutionSequencePort.codSri).isEqualTo("12");
+         assertThat(fakes.devolutionSequencePort.pos).isEqualTo("7");
++        assertThat(fakes.dvFileStoragePort.bucketName).isEqualTo("gcs-cer-suite-core-files/dev");
++        assertThat(fakes.devolutionEventPort.event.targetDir()).isEqualTo("f:/ALLC_DAT/IN/devs");
++        assertThat(fakes.devolutionEventPort.event.gcsBucket()).isEqualTo("gcs-cer-suite-core-files/dev");
+     }
+ 
+     @Test
+@@ -138,7 +142,7 @@
+         private final FakeCreditNoteEligibilityPort creditNoteEligibilityPort = new FakeCreditNoteEligibilityPort();
+ 
+         private ExecuteDevolutionService service() {
+-            return new ExecuteDevolutionService(
++            ExecuteDevolutionService service = new ExecuteDevolutionService(
+                     devolutionReadPort,
+                     devolutionWritePort,
+                     transactionQueryPort,
+@@ -150,6 +154,20 @@
+                     devolutionEventPort,
+                     creditNoteEligibilityPort
+             );
++            setField(service, "gcsBucketName", "gcs-cer-suite-core-files");
++            setField(service, "pathDev", "dev");
++            setField(service, "syncControllerTargetDir", "f:/ALLC_DAT/IN/devs");
++            return service;
++        }
++
++        private void setField(Object target, String fieldName, Object value) {
++            try {
++                Field field = target.getClass().getDeclaredField(fieldName);
++                field.setAccessible(true);
++                field.set(target, value);
++            } catch (ReflectiveOperationException ex) {
++                throw new IllegalStateException(ex);
++            }
+         }
+     }
+ 
+@@ -244,10 +262,12 @@
+     private static class FakeDvFileStoragePort implements DvFileStoragePort {
+         private boolean called;
+         private String response;
+-
+-        @Override
+-        public String upload(DvFile dvFile) {
+-            called = true;
++        private String bucketName;
++
++        @Override
++        public String upload(DvFile dvFile, String bucketName) {
++            called = true;
++            this.bucketName = bucketName;
+             return response;
+         }
+     }
+@@ -255,10 +275,12 @@
+     private static class FakeDevolutionEventPort implements DevolutionEventPort {
+         private boolean called;
+         private String response;
++        private com.elrosado.integration.infrastructure.adapter.out.pubsub.DevolutionProcessedEvent event;
+ 
+         @Override
+         public String publish(com.elrosado.integration.infrastructure.adapter.out.pubsub.DevolutionProcessedEvent event) {
+             called = true;
++            this.event = event;
+             return response;
+         }
+     }
+
+
+--- Diff for /src/test/java/com/elrosado/integration/application/service/TransferDevolutionFileServiceTest.java ---
+--- a//src/test/java/com/elrosado/integration/application/service/TransferDevolutionFileServiceTest.java
++++ b//src/test/java/com/elrosado/integration/application/service/TransferDevolutionFileServiceTest.java
+@@ -1,52 +0,0 @@
+-package com.elrosado.integration.application.service;
+-
+-import com.elrosado.integration.application.command.TransferDevolutionFileCommand;
+-import com.elrosado.integration.domain.model.FileTransferResult;
+-import com.elrosado.integration.domain.port.out.DvFileReaderPort;
+-import com.elrosado.integration.domain.port.out.FileTransferPort;
+-import org.junit.jupiter.api.BeforeEach;
+-import org.junit.jupiter.api.Test;
+-import org.junit.jupiter.api.extension.ExtendWith;
+-import org.mockito.Mock;
+-import org.mockito.junit.jupiter.MockitoExtension;
+-
+-import java.time.Instant;
+-
+-import static org.assertj.core.api.Assertions.assertThat;
+-import static org.mockito.Mockito.verify;
+-import static org.mockito.Mockito.when;
+-
+-@ExtendWith(MockitoExtension.class)
+-class TransferDevolutionFileServiceTest {
+-
+-    @Mock
+-    private DvFileReaderPort dvFileReaderPort;
+-
+-    @Mock
+-    private FileTransferPort fileTransferPort;
+-
+-    private TransferDevolutionFileService service;
+-
+-    @BeforeEach
+-    void setUp() {
+-        service = new TransferDevolutionFileService(dvFileReaderPort, fileTransferPort);
+-    }
+-
+-    @Test
+-    void readsFileFromGcsAndTransfersItUsingFileNameFromPath() {
+-        String gcsPath = "gs://bucket/devs/005/DV000123.005";
+-        byte[] content = "demo".getBytes();
+-        FileTransferResult expected = new FileTransferResult(
+-                "DV000123.005", "https://host/api/v1/files", 201, Instant.now());
+-
+-        when(dvFileReaderPort.read(gcsPath)).thenReturn(content);
+-        when(fileTransferPort.transfer("DV000123.005", content)).thenReturn(expected);
+-
+-        FileTransferResult result = service.transfer(new TransferDevolutionFileCommand(
+-                123, 1, "012007000000001", gcsPath, Instant.now()));
+-
+-        assertThat(result).isEqualTo(expected);
+-        verify(dvFileReaderPort).read(gcsPath);
+-        verify(fileTransferPort).transfer("DV000123.005", content);
+-    }
+-}
+
+
+--- Diff for /src/test/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionPubSubSubscriberTest.java ---
+--- a//src/test/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionPubSubSubscriberTest.java
++++ b//src/test/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionPubSubSubscriberTest.java
+@@ -22,7 +22,6 @@
+ class DevolutionPubSubSubscriberTest {
+ 
+     private static final String REQUEST_SUBSCRIPTION = "retail.local.devolution.request.v1-sub";
+-    private static final String PROCESSED_SUBSCRIPTION = "retail.local.devolution.processed.v1-sub";
+     private static final String BODY = "{}";
+ 
+     @Mock
+@@ -31,21 +30,16 @@
+     @Mock
+     private DevolutionCreationMessageHandler creationMessageHandler;
+ 
+-    @Mock
+-    private DevolutionTransferMessageHandler transferMessageHandler;
+-
+     private DevolutionPubSubSubscriber subscriber;
+ 
+     @BeforeEach
+     void setUp() {
+         PubSubRoutingProperties routingProperties = new PubSubRoutingProperties();
+         routingProperties.setSubscriptionDevolutionRequest(REQUEST_SUBSCRIPTION);
+-        routingProperties.setSubscriptionDevolutionProcessed(PROCESSED_SUBSCRIPTION);
+ 
+         subscriber = new DevolutionPubSubSubscriber(
+                 messageSubscriber,
+                 creationMessageHandler,
+-                transferMessageHandler,
+                 routingProperties
+         );
+     }
+@@ -69,20 +63,6 @@
+ 
+         assertThat(result).isTrue();
+         verify(creationMessageHandler).handle(REQUEST_SUBSCRIPTION, BODY);
+-        verifyNoInteractions(transferMessageHandler);
+-    }
+-
+-    @Test
+-    void routesProcessedSubscriptionToTransferHandler() throws Exception {
+-        when(transferMessageHandler.handle(PROCESSED_SUBSCRIPTION, BODY)).thenReturn(false);
+-
+-        boolean result = captureHandler()
+-                .apply(PROCESSED_SUBSCRIPTION, BODY)
+-                .get(5, TimeUnit.SECONDS);
+-
+-        assertThat(result).isFalse();
+-        verify(transferMessageHandler).handle(PROCESSED_SUBSCRIPTION, BODY);
+-        verifyNoInteractions(creationMessageHandler);
+     }
+ 
+     @Test
+@@ -92,6 +72,6 @@
+                 .get(5, TimeUnit.SECONDS);
+ 
+         assertThat(result).isTrue();
+-        verifyNoInteractions(creationMessageHandler, transferMessageHandler);
++        verifyNoInteractions(creationMessageHandler);
+     }
+ }
+
+
+--- Diff for /src/test/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionTransferMessageHandlerTest.java ---
+--- a//src/test/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionTransferMessageHandlerTest.java
++++ b//src/test/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionTransferMessageHandlerTest.java
+@@ -1,121 +0,0 @@
+-package com.elrosado.integration.infrastructure.adapter.in.pubsub;
+-
+-import com.elrosado.integration.application.command.TransferDevolutionFileCommand;
+-import com.elrosado.integration.domain.exception.FileTransferPermanentException;
+-import com.elrosado.integration.domain.exception.FileTransferTransientException;
+-import com.elrosado.integration.domain.model.FileTransferResult;
+-import com.elrosado.integration.domain.port.in.TransferDevolutionFileUseCase;
+-import com.elrosado.integration.domain.port.out.DevolutionAuditPort;
+-import com.elrosado.integration.infrastructure.config.FileTransferProperties;
+-import org.junit.jupiter.api.BeforeEach;
+-import org.junit.jupiter.api.Test;
+-import org.junit.jupiter.api.extension.ExtendWith;
+-import org.mockito.ArgumentCaptor;
+-import org.mockito.Mock;
+-import org.mockito.junit.jupiter.MockitoExtension;
+-import tools.jackson.databind.ObjectMapper;
+-
+-import java.time.Instant;
+-
+-import static org.assertj.core.api.Assertions.assertThat;
+-import static org.mockito.ArgumentMatchers.any;
+-import static org.mockito.Mockito.doThrow;
+-import static org.mockito.Mockito.verify;
+-import static org.mockito.Mockito.verifyNoInteractions;
+-import static org.mockito.Mockito.when;
+-
+-@ExtendWith(MockitoExtension.class)
+-class DevolutionTransferMessageHandlerTest {
+-
+-    private static final String SUBSCRIPTION_ID = "retail.local.devolution.processed.v1-sub";
+-    private static final String VALID_BODY = """
+-            {"devolutionId":123,"numNc":1,"creditNoteNumber":"012007000000001","gcsPath":"gs://bucket/devs/005/DV000123.005"}
+-            """;
+-    private static final String NULL_ID_BODY = """
+-            {"devolutionId":null,"numNc":1,"creditNoteNumber":"012007000000001","gcsPath":"gs://bucket/devs/005/DV000123.005"}
+-            """;
+-    private static final String INVALID_JSON = "not-json";
+-
+-    @Mock
+-    private TransferDevolutionFileUseCase transferDevolutionFileUseCase;
+-
+-    @Mock
+-    private DevolutionAuditPort devolutionAuditPort;
+-
+-    private FileTransferProperties properties;
+-    private DevolutionTransferMessageHandler handler;
+-
+-    @BeforeEach
+-    void setUp() {
+-        properties = new FileTransferProperties();
+-        handler = new DevolutionTransferMessageHandler(
+-                transferDevolutionFileUseCase,
+-                devolutionAuditPort,
+-                properties,
+-                new ObjectMapper()
+-        );
+-    }
+-
+-    @Test
+-    void returnsAckWhenTransferSucceeds() {
+-        when(transferDevolutionFileUseCase.transfer(any())).thenReturn(
+-                new FileTransferResult("DV000123.005", "https://host/api/v1/files", 201, Instant.now())
+-        );
+-
+-        boolean result = handler.handle(SUBSCRIPTION_ID, VALID_BODY);
+-
+-        assertThat(result).isTrue();
+-        ArgumentCaptor<TransferDevolutionFileCommand> captor =
+-                ArgumentCaptor.forClass(TransferDevolutionFileCommand.class);
+-        verify(transferDevolutionFileUseCase).transfer(captor.capture());
+-        assertThat(captor.getValue().devolutionId()).isEqualTo(123);
+-        assertThat(captor.getValue().gcsPath()).isEqualTo("gs://bucket/devs/005/DV000123.005");
+-    }
+-
+-    @Test
+-    void returnsAckAndAuditsWhenPermanentErrorOccurs() {
+-        doThrow(new FileTransferPermanentException("payload invalido"))
+-                .when(transferDevolutionFileUseCase).transfer(any());
+-
+-        boolean result = handler.handle(SUBSCRIPTION_ID, VALID_BODY);
+-
+-        assertThat(result).isTrue();
+-        verify(devolutionAuditPort).log(123, "file_transfer_permanent_error", "payload invalido");
+-    }
+-
+-    @Test
+-    void returnsNackWhenTransientErrorOccurs() {
+-        doThrow(new FileTransferTransientException("timeout"))
+-                .when(transferDevolutionFileUseCase).transfer(any());
+-
+-        boolean result = handler.handle(SUBSCRIPTION_ID, VALID_BODY);
+-
+-        assertThat(result).isFalse();
+-    }
+-
+-    @Test
+-    void returnsAckWhenTransferIsDisabled() {
+-        properties.setEnabled(false);
+-
+-        boolean result = handler.handle(SUBSCRIPTION_ID, VALID_BODY);
+-
+-        assertThat(result).isTrue();
+-        verifyNoInteractions(transferDevolutionFileUseCase, devolutionAuditPort);
+-    }
+-
+-    @Test
+-    void returnsAckWhenJsonIsInvalid() {
+-        boolean result = handler.handle(SUBSCRIPTION_ID, INVALID_JSON);
+-
+-        assertThat(result).isTrue();
+-        verifyNoInteractions(transferDevolutionFileUseCase, devolutionAuditPort);
+-    }
+-
+-    @Test
+-    void returnsAckWhenDevolutionIdIsNull() {
+-        boolean result = handler.handle(SUBSCRIPTION_ID, NULL_ID_BODY);
+-
+-        assertThat(result).isTrue();
+-        verifyNoInteractions(transferDevolutionFileUseCase, devolutionAuditPort);
+-    }
+-}
+
+
+--- Diff for /src/test/java/com/elrosado/integration/infrastructure/security/SecretManagerBearerTokenProviderTest.java ---
+--- a//src/test/java/com/elrosado/integration/infrastructure/security/SecretManagerBearerTokenProviderTest.java
++++ b//src/test/java/com/elrosado/integration/infrastructure/security/SecretManagerBearerTokenProviderTest.java
+@@ -1,117 +0,0 @@
+-package com.elrosado.integration.infrastructure.security;
+-
+-import com.elrosado.integration.domain.exception.FileTransferPermanentException;
+-import com.elrosado.integration.domain.exception.FileTransferTransientException;
+-import com.elrosado.integration.infrastructure.config.FileTransferProperties;
+-import com.google.cloud.secretmanager.v1.AccessSecretVersionResponse;
+-import com.google.cloud.secretmanager.v1.SecretManagerServiceClient;
+-import com.google.cloud.secretmanager.v1.SecretPayload;
+-import com.google.cloud.secretmanager.v1.SecretVersionName;
+-import com.google.protobuf.ByteString;
+-import org.junit.jupiter.api.BeforeEach;
+-import org.junit.jupiter.api.Test;
+-import org.junit.jupiter.api.extension.ExtendWith;
+-import org.mockito.ArgumentCaptor;
+-import org.mockito.Mock;
+-import org.mockito.junit.jupiter.MockitoExtension;
+-
+-import static org.assertj.core.api.Assertions.assertThat;
+-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+-import static org.mockito.ArgumentMatchers.any;
+-import static org.mockito.Mockito.verify;
+-import static org.mockito.Mockito.verifyNoInteractions;
+-import static org.mockito.Mockito.verifyNoMoreInteractions;
+-import static org.mockito.Mockito.when;
+-
+-@ExtendWith(MockitoExtension.class)
+-class SecretManagerBearerTokenProviderTest {
+-
+-    @Mock
+-    private SecretManagerServiceClient secretManagerServiceClient;
+-
+-    private FileTransferProperties properties;
+-    private SecretManagerBearerTokenProvider provider;
+-
+-    @BeforeEach
+-    void setUp() {
+-        properties = new FileTransferProperties();
+-        properties.setBearerTokenSecretId("integration-file-transfer-bearer-token");
+-        properties.setBearerTokenSecretVersion("latest");
+-        properties.setBearerTokenCacheTtlSeconds(300);
+-        provider = new SecretManagerBearerTokenProvider(secretManagerServiceClient, properties, "test-project");
+-    }
+-
+-    @Test
+-    void readsSecretAndBuildsBearerHeader() {
+-        when(secretManagerServiceClient.accessSecretVersion(any(SecretVersionName.class)))
+-                .thenReturn(secretResponse("token-value"));
+-
+-        String header = provider.authorizationHeader();
+-
+-        assertThat(header).isEqualTo("Bearer token-value");
+-        ArgumentCaptor<SecretVersionName> captor = ArgumentCaptor.forClass(SecretVersionName.class);
+-        verify(secretManagerServiceClient).accessSecretVersion(captor.capture());
+-        assertThat(captor.getValue().toString())
+-                .isEqualTo("projects/test-project/secrets/integration-file-transfer-bearer-token/versions/latest");
+-    }
+-
+-    @Test
+-    void preservesBearerPrefixWhenSecretAlreadyContainsIt() {
+-        when(secretManagerServiceClient.accessSecretVersion(any(SecretVersionName.class)))
+-                .thenReturn(secretResponse("Bearer token-value"));
+-
+-        String header = provider.authorizationHeader();
+-
+-        assertThat(header).isEqualTo("Bearer token-value");
+-    }
+-
+-    @Test
+-    void cachesHeaderWithinConfiguredTtl() {
+-        when(secretManagerServiceClient.accessSecretVersion(any(SecretVersionName.class)))
+-                .thenReturn(secretResponse("token-value"));
+-
+-        assertThat(provider.authorizationHeader()).isEqualTo("Bearer token-value");
+-        assertThat(provider.authorizationHeader()).isEqualTo("Bearer token-value");
+-
+-        verify(secretManagerServiceClient).accessSecretVersion(any(SecretVersionName.class));
+-        verifyNoMoreInteractions(secretManagerServiceClient);
+-    }
+-
+-    @Test
+-    void throwsPermanentExceptionWhenSecretIdIsMissing() {
+-        properties.setBearerTokenSecretId(" ");
+-
+-        assertThatThrownBy(() -> provider.authorizationHeader())
+-                .isInstanceOf(FileTransferPermanentException.class)
+-                .hasMessageContaining("FILE_TRANSFER_BEARER_TOKEN_SECRET_ID");
+-        verifyNoInteractions(secretManagerServiceClient);
+-    }
+-
+-    @Test
+-    void throwsPermanentExceptionWhenSecretPayloadIsBlank() {
+-        when(secretManagerServiceClient.accessSecretVersion(any(SecretVersionName.class)))
+-                .thenReturn(secretResponse(" "));
+-
+-        assertThatThrownBy(() -> provider.authorizationHeader())
+-                .isInstanceOf(FileTransferPermanentException.class)
+-                .hasMessageContaining("esta vacio");
+-    }
+-
+-    @Test
+-    void wrapsUnexpectedSecretManagerErrorsAsTransient() {
+-        when(secretManagerServiceClient.accessSecretVersion(any(SecretVersionName.class)))
+-                .thenThrow(new RuntimeException("secret manager unavailable"));
+-
+-        assertThatThrownBy(() -> provider.authorizationHeader())
+-                .isInstanceOf(FileTransferTransientException.class)
+-                .hasMessageContaining("Secret Manager");
+-    }
+-
+-    private AccessSecretVersionResponse secretResponse(String value) {
+-        return AccessSecretVersionResponse.newBuilder()
+-                .setPayload(SecretPayload.newBuilder()
+-                        .setData(ByteString.copyFromUtf8(value))
+-                        .build())
+-                .build();
+-    }
+-}
+
+

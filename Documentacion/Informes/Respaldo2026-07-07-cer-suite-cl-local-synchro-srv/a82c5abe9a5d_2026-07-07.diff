@@ -1,0 +1,25 @@
+--- Diff for /pom.xml ---
+--- a//pom.xml
++++ b//pom.xml
+@@ -56,10 +56,18 @@
+             <version>${jlib.version}</version>
+         </dependency>
+ 
+-        <!-- Pub/Sub con correlaciÃ³n MDC automÃ¡tica (incluye jlib-pubsub transitivamente) -->
++        <!-- Pub/Sub con correlaciÃ³n MDC automÃ¡tica -->
+         <dependency>
+             <groupId>com.elrosado</groupId>
+             <artifactId>jlib-pubsub-logging</artifactId>
++            <version>${jlib.version}</version>
++        </dependency>
++
++        <!-- Declarada explÃ­citamente: el POM publicado de jlib-pubsub-logging es invalido y Maven no
++             puede resolverla como transitiva (ver WARNING "POM for jlib-pubsub-logging is invalid") -->
++        <dependency>
++            <groupId>com.elrosado</groupId>
++            <artifactId>jlib-pubsub</artifactId>
+             <version>${jlib.version}</version>
+         </dependency>
+ 
+
+

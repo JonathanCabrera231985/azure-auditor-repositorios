@@ -1,0 +1,80 @@
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -2,7 +2,7 @@
+ kind: ConfigMap
+ metadata:
+   name: cer-suite-local-core-config
+-  namespace: default
++  namespace: ns-cer-suite-dev
+   labels:
+     app: cer-suite-local-core
+ data:
+
+
+--- Diff for /k8s/hpa.yaml ---
+--- a//k8s/hpa.yaml
++++ b//k8s/hpa.yaml
+@@ -2,7 +2,7 @@
+ kind: HorizontalPodAutoscaler
+ metadata:
+   name: modern-gcp-microservice-hpa
+-  namespace: default
++  namespace: ns-cer-suite-dev
+   labels:
+     app: modern-gcp-microservice
+ spec:
+
+
+--- Diff for /k8s/namespace.yaml ---
+--- a//k8s/namespace.yaml
++++ b//k8s/namespace.yaml
+@@ -1,4 +0,0 @@
+-apiVersion: v1
+-kind: Namespace
+-metadata:
+-  name: ns-cer-suite-dev
+
+
+--- Diff for /k8s/secret.yaml ---
+--- a//k8s/secret.yaml
++++ b//k8s/secret.yaml
+@@ -2,7 +2,7 @@
+ kind: Secret
+ metadata:
+   name: cer-suite-local-core-secret
+-  namespace: default
++  namespace: ns-cer-suite-dev
+   labels:
+     app: cer-suite-local-core
+ type: Opaque
+
+
+--- Diff for /k8s/service.yaml ---
+--- a//k8s/service.yaml
++++ b//k8s/service.yaml
+@@ -1,16 +1,17 @@
+ apiVersion: v1
+ kind: Service
+ metadata:
+-  name: modern-gcp-microservice-service
+-  namespace: default
++  name: cer-suite-local-core-service
++  namespace: ns-cer-suite-dev
+   labels:
+-    app: modern-gcp-microservice
++    app: cer-suite-local-core
+ spec:
+-  type: ClusterIP
++  type: NodePort
+   ports:
+     - port: 8080
+       targetPort: 8080
++      nodePort: 30060
+       protocol: TCP
+       name: http
+   selector:
+-    app: modern-gcp-microservice
++    app: cer-suite-local-core
+
+

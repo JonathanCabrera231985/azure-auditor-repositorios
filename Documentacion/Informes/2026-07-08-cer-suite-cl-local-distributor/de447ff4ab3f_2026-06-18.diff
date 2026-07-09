@@ -1,0 +1,58 @@
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/TransactionPersistenceAdapter.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/TransactionPersistenceAdapter.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/TransactionPersistenceAdapter.java
+@@ -325,6 +325,9 @@
+             procesarStringUsuario(idTrn, transaction.getSequenceNumber(),
+                     workstationId, operatorId, rtl.getStringsUsuario());
+         }
++        if (rtl.getCouponsDataList() != null) {
++            rtl.getCouponsDataList().forEach(cd -> saveCoupon(idTrn, cd));
++        }
+         if (rtl.getRedeemedcouponsDataList() != null) {
+             rtl.getRedeemedcouponsDataList().forEach(rc -> saveRedeemedCoupon(idTrn, rc));
+         }
+@@ -1204,6 +1207,26 @@
+         }
+     }
+ 
++    /** Persiste en CO_CPN_DT los cupones generados/impresos en la transacciÃ³n (equiv. cascada de couponsDataList del legacy). */
++    private void saveCoupon(Integer idTrn, CouponData cd) {
++        if (cd.getBarcode() == null) return;
++        CoCpnDtEntity entity = new CoCpnDtEntity();
++        entity.setId(new TrnCpnId(idTrn, cd.getBarcode()));
++        entity.setPromoId(cd.getPromoId());
++        entity.setCustomerId(cd.getCustomerId());
++        entity.setFormatId(cd.getFormatId());
++        entity.setImpreso(cd.getImpreso());
++        entity.setItemcode(cd.getItemcode());
++        entity.setValueDisc(cd.getValueDisc());
++        entity.setApply(cd.getApply());
++        entity.setInitDate(cd.getInitDate());
++        entity.setExpDate(cd.getExpDate());
++        entity.setSeparator(cd.getSeparator());
++        entity.setLogoId(cd.getLogoId());
++        entity.setEstado(cd.getEstado());
++        coCpnDtRepository.save(entity);
++    }
++
+     private void saveRedeemedCoupon(Integer idTrn, RedeemedCouponData rc) {
+         if (rc.getBarcode() == null) return;
+         coCpnDtRepository.markRedeemed(rc.getBarcode());
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/artsec/repository/CoCpnDtRepository.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/artsec/repository/CoCpnDtRepository.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/artsec/repository/CoCpnDtRepository.java
+@@ -9,8 +9,8 @@
+ 
+ public interface CoCpnDtRepository extends JpaRepository<CoCpnDtEntity, TrnCpnId> {
+ 
+-    /** Marca el cupÃ³n como canjeado (setCouponRedeemed). */
++    /** Marca el cupÃ³n como canjeado (setCouponRedeemed: UPDATE CO_CPN_DT SET STS = 1 WHERE CPN_ID = barcode). */
+     @Modifying
+-    @Query("UPDATE CoCpnDtEntity c SET c.estado = 'R' WHERE c.id.barcode = :barcode")
++    @Query("UPDATE CoCpnDtEntity c SET c.estado = '1' WHERE c.id.barcode = :barcode")
+     int markRedeemed(@Param("barcode") String barcode);
+ }
+
+

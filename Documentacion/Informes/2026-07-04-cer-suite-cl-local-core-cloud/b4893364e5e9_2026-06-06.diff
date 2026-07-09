@@ -1,0 +1,32 @@
+--- Diff for /.gitignore ---
+--- a//.gitignore
++++ b//.gitignore
+@@ -22,6 +22,8 @@
+ *.iml
+ *.ipr
+ 
++logs/
++
+ ### NetBeans ###
+ /nbproject/private/
+ /nbbuild/
+
+
+--- Diff for /pom.xml ---
+--- a//pom.xml
++++ b//pom.xml
+@@ -37,6 +37,12 @@
+         <dependency>
+             <groupId>com.elrosado</groupId>
+             <artifactId>jlib-pubsub-logging</artifactId>
++            <version>1.0.0</version>
++        </dependency>
++
++        <dependency>
++            <groupId>com.elrosado</groupId>
++            <artifactId>jlib-pubsub</artifactId>
+             <version>1.0.0</version>
+         </dependency>
+ 
+
+

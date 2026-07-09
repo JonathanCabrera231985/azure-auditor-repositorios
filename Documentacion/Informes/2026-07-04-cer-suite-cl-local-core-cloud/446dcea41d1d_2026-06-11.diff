@@ -1,0 +1,654 @@
+--- Diff for /logs/app.log ---
+--- a//logs/app.log
++++ b//logs/app.log
+@@ -1,648 +0,0 @@
+-2026-06-05 18:43:14.051 [main] INFO  c.e.c.CerSuiteCloudLocalCoreCloudApplication - Starting CerSuiteCloudLocalCoreCloudApplication using Java 25.0.3 with PID 29680 (D:\SIPECOM\repository-git\cer-gcp\cer-suite-cloud-local-core-cloud\target\classes started by ricar in D:\SIPECOM\repository-git\cer-gcp\cer-suite-cloud-local-core-cloud)
+-2026-06-05 18:43:14.053 [main] DEBUG c.e.c.CerSuiteCloudLocalCoreCloudApplication - Running with Spring Boot v4.0.6, Spring v7.0.7
+-2026-06-05 18:43:14.054 [main] INFO  c.e.c.CerSuiteCloudLocalCoreCloudApplication - The following 1 profile is active: "local"
+-2026-06-05 18:43:14.898 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Bootstrapping Spring Data Firestore-reactive repositories in DEFAULT mode.
+-2026-06-05 18:43:15.027 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 122 ms. Found 0 Firestore-reactive repository interfaces.
+-2026-06-05 18:43:15.302 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+-2026-06-05 18:43:15.360 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 53 ms. Found 5 JPA repository interfaces.
+-2026-06-05 18:43:15.947 [main] INFO  o.s.boot.tomcat.TomcatWebServer - Tomcat initialized with port 8091 (http)
+-2026-06-05 18:43:15.959 [main] INFO  o.a.catalina.core.StandardService - Starting service [Tomcat]
+-2026-06-05 18:43:15.960 [main] INFO  o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/11.0.21]
+-2026-06-05 18:43:16.044 [main] INFO  o.s.b.w.c.s.WebApplicationContextInitializer - Root WebApplicationContext: initialization completed in 1947 ms
+-2026-06-05 18:43:16.392 [main] INFO  org.hibernate.orm.jpa - HHH008540: Processing PersistenceUnitInfo [name: default]
+-2026-06-05 18:43:16.443 [main] INFO  org.hibernate.orm.core - HHH000001: Hibernate ORM core version 7.2.12.Final
+-2026-06-05 18:43:16.806 [main] INFO  o.s.o.j.p.SpringPersistenceUnitInfo - No LoadTimeWeaver setup: ignoring JPA class transformer
+-2026-06-05 18:43:16.839 [main] INFO  com.zaxxer.hikari.HikariDataSource - hikari-arts-ec - Starting...
+-2026-06-05 18:43:18.011 [main] INFO  com.zaxxer.hikari.pool.HikariPool - hikari-arts-ec - Added connection ConnectionID:1 ClientConnectionId: 52d48757-4074-454b-a0cf-ede78727d23e
+-2026-06-05 18:43:18.013 [main] INFO  com.zaxxer.hikari.HikariDataSource - hikari-arts-ec - Start completed.
+-2026-06-05 18:43:18.187 [main] WARN  org.hibernate.orm.deprecation - HHH90000025: SQLServerDialect does not need to be specified explicitly using 'hibernate.dialect' (remove the property setting and it will be selected by default)
+-2026-06-05 18:43:18.348 [main] INFO  o.hibernate.orm.connections.pooling - HHH10001005: Database info:
+-	Database JDBC URL [jdbc:sqlserver://10.2.7.23:1433;concatNullYieldsNull=ON;quotedIdentifier=ON;connectRetryInterval=10;connectRetryCount=1;maxResultBuffer=-1;sendTemporalDataTypesAsStringForBulkCopy=true;delayLoadingLobs=true;useFmtOnly=false;vectorTypeSupport=v1;cacheBulkCopyMetadata=false;bulkCopyForBatchInsertAllowEncryptedValueModifications=false;bulkCopyForBatchInsertTableLock=false;bulkCopyForBatchInsertKeepNulls=false;bulkCopyForBatchInsertKeepIdentity=false;bulkCopyForBatchInsertFireTriggers=false;bulkCopyForBatchInsertCheckConstraints=false;bulkCopyForBatchInsertBatchSize=0;useBulkCopyForBatchInsert=false;cancelQueryTimeout=-1;sslProtocol=TLS;calcBigDecimalPrecision=false;useDefaultJaasConfig=false;jaasConfigurationName=SQLJDBCDriver;statementPoolingCacheSize=0;serverPreparedStatementDiscardThreshold=10;enablePrepareOnFirstPreparedStatementCall=false;fips=false;socketTimeout=0;authentication=NotSpecified;authenticationScheme=nativeAuthentication;xopenStates=false;datetimeParameterType=datetime2;sendTimeAsDatetime=true;replication=false;trustStoreType=JKS;trustServerCertificate=false;TransparentNetworkIPResolution=true;iPAddressPreference=IPv4First;serverNameAsACE=false;sendStringParametersAsUnicode=true;selectMethod=direct;responseBuffering=adaptive;queryTimeout=-1;packetSize=8000;multiSubnetFailover=false;loginTimeout=30;lockTimeout=-1;lastUpdateCount=true;useDefaultGSSCredential=false;prepareMethod=prepexec;encrypt=false;disableStatementPooling=true;databaseName=ARTS_EC;columnEncryptionSetting=Disabled;applicationName=Microsoft JDBC Driver for SQL Server;applicationIntent=readwrite;]
+-	Database driver: Microsoft JDBC Driver 13.2 for SQL Server
+-	Database dialect: SQLServerDialect
+-	Database version: 12.0
+-	Default catalog/schema: ARTS_EC/dbo
+-	Autocommit mode: undefined/unknown
+-	Isolation level: READ_COMMITTED [default READ_COMMITTED]
+-	JDBC fetch size: 128
+-	Pool: DataSourceConnectionProvider
+-	Minimum pool size: undefined/unknown
+-	Maximum pool size: undefined/unknown
+-2026-06-05 18:43:19.070 [main] INFO  org.hibernate.orm.core - HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+-2026-06-05 18:43:19.074 [main] INFO  org.hibernate.orm.jdbc.batch - HHH100501: Automatic JDBC statement batching enabled (maximum batch size 50)
+-2026-06-05 18:43:19.077 [main] INFO  o.s.o.j.LocalContainerEntityManagerFactoryBean - Initialized JPA EntityManagerFactory for persistence unit 'default'
+-2026-06-05 18:43:19.099 [main] INFO  c.g.c.s.a.c.GcpContextAutoConfiguration - The default project ID is modern-suite-cloud-per-b55b0
+-2026-06-05 18:43:19.138 [main] INFO  c.g.c.s.c.DefaultCredentialsProvider - Default credentials provider for service account firebase-adminsdk-fbsvc@modern-suite-cloud-per-b55b0.iam.gserviceaccount.com
+-2026-06-05 18:43:19.138 [main] INFO  c.g.c.s.c.DefaultCredentialsProvider - Scopes in use by default credentials: [https://www.googleapis.com/auth/pubsub, https://www.googleapis.com/auth/spanner.admin, https://www.googleapis.com/auth/spanner.data, https://www.googleapis.com/auth/datastore, https://www.googleapis.com/auth/sqlservice.admin, https://www.googleapis.com/auth/devstorage.read_only, https://www.googleapis.com/auth/devstorage.read_write, https://www.googleapis.com/auth/cloudruntimeconfig, https://www.googleapis.com/auth/trace.append, https://www.googleapis.com/auth/cloud-platform, https://www.googleapis.com/auth/cloud-vision, https://www.googleapis.com/auth/bigquery, https://www.googleapis.com/auth/monitoring.write]
+-2026-06-05 18:43:19.903 [main] INFO  o.s.d.j.r.q.QueryEnhancerFactories - Hibernate is in classpath; If applicable, HQL parser will be used.
+-2026-06-05 18:43:20.781 [main] WARN  o.s.b.s.a.UserDetailsServiceAutoConfiguration - 
+-
+-Using generated security password: f84208fd-37aa-4f8f-bd73-60f984f80191
+-
+-This generated password is for development use only. Your security configuration must be updated before running your application in production.
+-
+-2026-06-05 18:43:20.793 [main] INFO  o.s.s.c.a.a.c.InitializeUserDetailsBeanManagerConfigurer$InitializeUserDetailsManagerConfigurer - Global AuthenticationManager configured with UserDetailsService bean with name inMemoryUserDetailsManager
+-2026-06-05 18:43:21.666 [main] INFO  o.s.b.a.e.web.EndpointLinksResolver - Exposing 3 endpoints beneath base path '/actuator'
+-2026-06-05 18:43:21.734 [main] INFO  o.s.boot.tomcat.TomcatWebServer - Tomcat started on port 8091 (http) with context path '/'
+-2026-06-05 18:43:21.744 [main] INFO  c.e.c.CerSuiteCloudLocalCoreCloudApplication - Started CerSuiteCloudLocalCoreCloudApplication in 8.269 seconds (process running for 9.146)
+-2026-06-05 18:43:21.751 [main] INFO  c.e.c.i.a.i.event.PubSubSalesAdapter - Registering Sales Pub/Sub subscriber via sharedlibs startListening
+-2026-06-05 18:43:21.753 [main] INFO  c.e.j.services.MessageSubscriber - Iniciando listener de Pub/Sub
+-2026-06-05 18:43:21.764 [main] INFO  c.e.j.services.MessageSubscriber - Listener activo
+-2026-06-05 18:43:22.057 [RMI TCP Connection(1)-10.1.9.111] INFO  o.a.c.c.C.[Tomcat].[localhost].[/] - Initializing Spring DispatcherServlet 'dispatcherServlet'
+-2026-06-05 18:43:22.057 [RMI TCP Connection(1)-10.1.9.111] INFO  o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+-2026-06-05 18:43:22.059 [RMI TCP Connection(1)-10.1.9.111] INFO  o.s.web.servlet.DispatcherServlet - Completed initialization in 2 ms
+-2026-06-05 18:43:39.302 [SpringApplicationShutdownHook] INFO  o.s.boot.tomcat.GracefulShutdown - Commencing graceful shutdown. Waiting for active requests to complete
+-2026-06-05 18:43:39.310 [tomcat-shutdown] INFO  o.s.boot.tomcat.GracefulShutdown - Graceful shutdown complete
+-2026-06-05 18:43:39.319 [SpringApplicationShutdownHook] INFO  c.e.j.services.MessageSubscriber - Deteniendo listeners de Pub/Sub
+-2026-06-05 18:43:39.323 [SpringApplicationShutdownHook] INFO  c.e.j.services.MessageSubscriber - Todos los listeners de Pub/Sub detenidos
+-2026-06-05 18:43:39.324 [SpringApplicationShutdownHook] INFO  o.s.o.j.LocalContainerEntityManagerFactoryBean - Closing JPA EntityManagerFactory for persistence unit 'default'
+-2026-06-05 18:43:39.326 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - hikari-arts-ec - Shutdown initiated...
+-2026-06-05 18:43:39.327 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - hikari-arts-ec - Shutdown completed.
+-2026-06-05 18:43:42.945 [main] INFO  c.e.c.CerSuiteCloudLocalCoreCloudApplication - Starting CerSuiteCloudLocalCoreCloudApplication using Java 25.0.3 with PID 38464 (D:\SIPECOM\repository-git\cer-gcp\cer-suite-cloud-local-core-cloud\target\classes started by ricar in D:\SIPECOM\repository-git\cer-gcp\cer-suite-cloud-local-core-cloud)
+-2026-06-05 18:43:42.946 [main] DEBUG c.e.c.CerSuiteCloudLocalCoreCloudApplication - Running with Spring Boot v4.0.6, Spring v7.0.7
+-2026-06-05 18:43:42.946 [main] INFO  c.e.c.CerSuiteCloudLocalCoreCloudApplication - The following 1 profile is active: "local"
+-2026-06-05 18:43:43.776 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Bootstrapping Spring Data Firestore-reactive repositories in DEFAULT mode.
+-2026-06-05 18:43:43.946 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 162 ms. Found 0 Firestore-reactive repository interfaces.
+-2026-06-05 18:43:44.281 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+-2026-06-05 18:43:44.371 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 80 ms. Found 5 JPA repository interfaces.
+-2026-06-05 18:43:44.966 [main] INFO  o.s.boot.tomcat.TomcatWebServer - Tomcat initialized with port 8091 (http)
+-2026-06-05 18:43:45.054 [main] INFO  o.s.b.w.c.s.WebApplicationContextInitializer - Root WebApplicationContext: initialization completed in 2076 ms
+-2026-06-05 18:43:45.465 [main] INFO  org.hibernate.orm.jpa - HHH008540: Processing PersistenceUnitInfo [name: default]
+-2026-06-05 18:43:45.517 [main] INFO  org.hibernate.orm.core - HHH000001: Hibernate ORM core version 7.2.12.Final
+-2026-06-05 18:43:45.937 [main] INFO  o.s.o.j.p.SpringPersistenceUnitInfo - No LoadTimeWeaver setup: ignoring JPA class transformer
+-2026-06-05 18:43:45.961 [main] INFO  com.zaxxer.hikari.HikariDataSource - hikari-arts-ec - Starting...
+-2026-06-05 18:43:48.702 [main] INFO  c.e.c.CerSuiteCloudLocalCoreCloudApplication - Starting CerSuiteCloudLocalCoreCloudApplication using Java 25.0.3 with PID 28048 (D:\SIPECOM\repository-git\cer-gcp\cer-suite-cloud-local-core-cloud\target\classes started by ricar in D:\SIPECOM\repository-git\cer-gcp\cer-suite-cloud-local-core-cloud)
+-2026-06-05 18:43:48.704 [main] DEBUG c.e.c.CerSuiteCloudLocalCoreCloudApplication - Running with Spring Boot v4.0.6, Spring v7.0.7
+-2026-06-05 18:43:48.704 [main] INFO  c.e.c.CerSuiteCloudLocalCoreCloudApplication - The following 1 profile is active: "local"
+-2026-06-05 18:43:49.491 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Bootstrapping Spring Data Firestore-reactive repositories in DEFAULT mode.
+-2026-06-05 18:43:49.604 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 107 ms. Found 0 Firestore-reactive repository interfaces.
+-2026-06-05 18:43:49.789 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+-2026-06-05 18:43:49.830 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 36 ms. Found 5 JPA repository interfaces.
+-2026-06-05 18:43:50.471 [main] INFO  o.s.boot.tomcat.TomcatWebServer - Tomcat initialized with port 8091 (http)
+-2026-06-05 18:43:50.542 [main] INFO  o.s.b.w.c.s.WebApplicationContextInitializer - Root WebApplicationContext: initialization completed in 1806 ms
+-2026-06-05 18:43:50.847 [main] INFO  org.hibernate.orm.jpa - HHH008540: Processing PersistenceUnitInfo [name: default]
+-2026-06-05 18:43:50.913 [main] INFO  org.hibernate.orm.core - HHH000001: Hibernate ORM core version 7.2.12.Final
+-2026-06-05 18:43:51.447 [main] INFO  o.s.o.j.p.SpringPersistenceUnitInfo - No LoadTimeWeaver setup: ignoring JPA class transformer
+-2026-06-05 18:43:51.476 [main] INFO  com.zaxxer.hikari.HikariDataSource - hikari-arts-ec - Starting...
+-2026-06-05 19:00:28.882 [main] INFO  c.e.c.CerSuiteCloudLocalCoreCloudApplicationTests - Starting CerSuiteCloudLocalCoreCloudApplicationTests using Java 25.0.1 with PID 33056 (started by ricar in D:\SIPECOM\repository-git\cer-gcp\cer-suite-cloud-local-core-cloud)
+-2026-06-05 19:00:28.884 [main] DEBUG c.e.c.CerSuiteCloudLocalCoreCloudApplicationTests - Running with Spring Boot v4.0.6, Spring v7.0.7
+-2026-06-05 19:00:28.884 [main] INFO  c.e.c.CerSuiteCloudLocalCoreCloudApplicationTests - The following 1 profile is active: "local"
+-2026-06-05 19:00:29.762 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Bootstrapping Spring Data Firestore-reactive repositories in DEFAULT mode.
+-2026-06-05 19:00:29.905 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 135 ms. Found 0 Firestore-reactive repository interfaces.
+-2026-06-05 19:00:30.106 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+-2026-06-05 19:00:30.192 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 79 ms. Found 5 JPA repository interfaces.
+-2026-06-05 19:00:31.168 [main] INFO  org.hibernate.orm.jpa - HHH008540: Processing PersistenceUnitInfo [name: default]
+-2026-06-05 19:00:31.250 [main] INFO  org.hibernate.orm.core - HHH000001: Hibernate ORM core version 7.2.12.Final
+-2026-06-05 19:00:31.743 [main] INFO  o.s.o.j.p.SpringPersistenceUnitInfo - No LoadTimeWeaver setup: ignoring JPA class transformer
+-2026-06-05 19:00:31.769 [main] INFO  com.zaxxer.hikari.HikariDataSource - hikari-arts-ec - Starting...
+-2026-06-05 19:00:32.897 [main] INFO  com.zaxxer.hikari.pool.HikariPool - hikari-arts-ec - Added connection ConnectionID:1 ClientConnectionId: e388b604-ae52-41b5-a40c-7a962d49152b
+-2026-06-05 19:00:32.898 [main] INFO  com.zaxxer.hikari.HikariDataSource - hikari-arts-ec - Start completed.
+-2026-06-05 19:00:33.070 [main] WARN  org.hibernate.orm.deprecation - HHH90000025: SQLServerDialect does not need to be specified explicitly using 'hibernate.dialect' (remove the property setting and it will be selected by default)
+-2026-06-05 19:00:33.232 [main] INFO  o.hibernate.orm.connections.pooling - HHH10001005: Database info:
+-	Database JDBC URL [jdbc:sqlserver://10.2.7.23:1433;concatNullYieldsNull=ON;quotedIdentifier=ON;connectRetryInterval=10;connectRetryCount=1;maxResultBuffer=-1;sendTemporalDataTypesAsStringForBulkCopy=true;delayLoadingLobs=true;useFmtOnly=false;vectorTypeSupport=v1;cacheBulkCopyMetadata=false;bulkCopyForBatchInsertAllowEncryptedValueModifications=false;bulkCopyForBatchInsertTableLock=false;bulkCopyForBatchInsertKeepNulls=false;bulkCopyForBatchInsertKeepIdentity=false;bulkCopyForBatchInsertFireTriggers=false;bulkCopyForBatchInsertCheckConstraints=false;bulkCopyForBatchInsertBatchSize=0;useBulkCopyForBatchInsert=false;cancelQueryTimeout=-1;sslProtocol=TLS;calcBigDecimalPrecision=false;useDefaultJaasConfig=false;jaasConfigurationName=SQLJDBCDriver;statementPoolingCacheSize=0;serverPreparedStatementDiscardThreshold=10;enablePrepareOnFirstPreparedStatementCall=false;fips=false;socketTimeout=0;authentication=NotSpecified;authenticationScheme=nativeAuthentication;xopenStates=false;datetimeParameterType=datetime2;sendTimeAsDatetime=true;replication=false;trustStoreType=JKS;trustServerCertificate=false;TransparentNetworkIPResolution=true;iPAddressPreference=IPv4First;serverNameAsACE=false;sendStringParametersAsUnicode=true;selectMethod=direct;responseBuffering=adaptive;queryTimeout=-1;packetSize=8000;multiSubnetFailover=false;loginTimeout=30;lockTimeout=-1;lastUpdateCount=true;useDefaultGSSCredential=false;prepareMethod=prepexec;encrypt=false;disableStatementPooling=true;databaseName=ARTS_EC;columnEncryptionSetting=Disabled;applicationName=Microsoft JDBC Driver for SQL Server;applicationIntent=readwrite;]
+-	Database driver: Microsoft JDBC Driver 13.2 for SQL Server
+-	Database dialect: SQLServerDialect
+-	Database version: 12.0
+-	Default catalog/schema: ARTS_EC/dbo
+-	Autocommit mode: undefined/unknown
+-	Isolation level: READ_COMMITTED [default READ_COMMITTED]
+-	JDBC fetch size: 128
+-	Pool: DataSourceConnectionProvider
+-	Minimum pool size: undefined/unknown
+-	Maximum pool size: undefined/unknown
+-2026-06-05 19:00:34.166 [main] INFO  org.hibernate.orm.core - HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+-2026-06-05 19:00:34.170 [main] INFO  org.hibernate.orm.jdbc.batch - HHH100501: Automatic JDBC statement batching enabled (maximum batch size 50)
+-2026-06-05 19:00:34.173 [main] INFO  o.s.o.j.LocalContainerEntityManagerFactoryBean - Initialized JPA EntityManagerFactory for persistence unit 'default'
+-2026-06-05 19:00:34.224 [main] INFO  c.g.c.s.a.c.GcpContextAutoConfiguration - The default project ID is modern-suite-cloud-per-b55b0
+-2026-06-05 19:00:34.279 [main] INFO  c.g.c.s.c.DefaultCredentialsProvider - Default credentials provider for service account firebase-adminsdk-fbsvc@modern-suite-cloud-per-b55b0.iam.gserviceaccount.com
+-2026-06-05 19:00:34.280 [main] INFO  c.g.c.s.c.DefaultCredentialsProvider - Scopes in use by default credentials: [https://www.googleapis.com/auth/pubsub, https://www.googleapis.com/auth/spanner.admin, https://www.googleapis.com/auth/spanner.data, https://www.googleapis.com/auth/datastore, https://www.googleapis.com/auth/sqlservice.admin, https://www.googleapis.com/auth/devstorage.read_only, https://www.googleapis.com/auth/devstorage.read_write, https://www.googleapis.com/auth/cloudruntimeconfig, https://www.googleapis.com/auth/trace.append, https://www.googleapis.com/auth/cloud-platform, https://www.googleapis.com/auth/cloud-vision, https://www.googleapis.com/auth/bigquery, https://www.googleapis.com/auth/monitoring.write]
+-2026-06-05 19:00:35.360 [main] INFO  o.s.d.j.r.q.QueryEnhancerFactories - Hibernate is in classpath; If applicable, HQL parser will be used.
+-2026-06-05 19:00:37.148 [main] WARN  o.s.b.s.a.UserDetailsServiceAutoConfiguration - 
+-
+-Using generated security password: b3cf5969-b687-46a4-a73a-8533898a6691
+-
+-This generated password is for development use only. Your security configuration must be updated before running your application in production.
+-
+-2026-06-05 19:00:37.171 [main] INFO  o.s.s.c.a.a.c.InitializeUserDetailsBeanManagerConfigurer$InitializeUserDetailsManagerConfigurer - Global AuthenticationManager configured with UserDetailsService bean with name inMemoryUserDetailsManager
+-2026-06-05 19:00:37.344 [main] INFO  o.s.b.a.e.web.EndpointLinksResolver - Exposing 3 endpoints beneath base path '/actuator'
+-2026-06-05 19:00:37.584 [main] INFO  c.e.c.CerSuiteCloudLocalCoreCloudApplicationTests - Started CerSuiteCloudLocalCoreCloudApplicationTests in 9.194 seconds (process running for 10.615)
+-2026-06-05 19:00:37.656 [main] INFO  c.e.c.i.a.i.event.PubSubSalesAdapter - Registering Sales Pub/Sub subscriber via sharedlibs startListening
+-2026-06-05 19:00:37.657 [main] INFO  c.e.j.services.MessageSubscriber - Iniciando listener de Pub/Sub
+-2026-06-05 19:00:37.670 [main] INFO  c.e.j.services.MessageSubscriber - Listener activo
+-2026-06-05 19:00:38.355 [main] INFO  c.e.c.i.a.i.event.PubSubSalesAdapter - Registering Sales Pub/Sub subscriber via sharedlibs startListening
+-2026-06-05 19:00:38.364 [main] INFO  c.e.c.i.a.i.event.PubSubSalesAdapter - Sale message received from Generador
+-2026-06-05 19:00:38.366 [main] ERROR c.e.c.i.a.i.event.PubSubSalesAdapter - Error processing sale message — NACK for retry
+-java.lang.RuntimeException: Parse error
+-	at com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.event.PubSubSalesAdapter.lambda$registerSubscriber$1(PubSubSalesAdapter.java:66)
+-	at com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.event.PubSubSalesAdapterTest.lambda$setUp$0(PubSubSalesAdapterTest.java:45)
+-	at com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.event.PubSubSalesAdapter.lambda$registerSubscriber$0(PubSubSalesAdapter.java:53)
+-	at com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.event.PubSubSalesAdapterTest.onMessage_processSaleThrows_completesWithNack(PubSubSalesAdapterTest.java:86)
+-	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104)
+-	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+-	at org.junit.platform.commons.util.ReflectionUtils.invokeMethod(ReflectionUtils.java:701)
+-	at org.junit.platform.commons.support.ReflectionSupport.invokeMethod(ReflectionSupport.java:502)
+-	at org.junit.jupiter.engine.support.MethodReflectionUtils.invoke(MethodReflectionUtils.java:45)
+-	at org.junit.jupiter.engine.execution.MethodInvocation.proceed(MethodInvocation.java:61)
+-	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$ValidatingInvocation.proceed(InvocationInterceptorChain.java:124)
+-	at org.junit.jupiter.engine.extension.TimeoutExtension.intercept(TimeoutExtension.java:163)
+-	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestableMethod(TimeoutExtension.java:148)
+-	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestMethod(TimeoutExtension.java:86)
+-	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker$ReflectiveInterceptorCall.lambda$ofVoidMethod$0(InterceptingExecutableInvoker.java:123)
+-	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.lambda$invoke$0(InterceptingExecutableInvoker.java:105)
+-	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$InterceptedInvocation.proceed(InvocationInterceptorChain.java:99)
+-	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.proceed(InvocationInterceptorChain.java:66)
+-	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.chainAndInvoke(InvocationInterceptorChain.java:47)
+-	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.invoke(InvocationInterceptorChain.java:39)
+-	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:104)
+-	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:98)
+-	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invokeVoid(InterceptingExecutableInvoker.java:71)
+-	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.lambda$invokeTestMethod$0(TestMethodTestDescriptor.java:219)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.invokeTestMethod(TestMethodTestDescriptor.java:215)
+-	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:157)
+-	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:70)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:176)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166)
+-	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116)
+-	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+-	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:42)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:180)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166)
+-	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116)
+-	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+-	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:42)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:180)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166)
+-	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116)
+-	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.submit(SameThreadHierarchicalTestExecutorService.java:36)
+-	at org.junit.platform.engine.support.hierarchical.HierarchicalTestExecutor.execute(HierarchicalTestExecutor.java:52)
+-	at org.junit.platform.engine.support.hierarchical.HierarchicalTestEngine.execute(HierarchicalTestEngine.java:58)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.executeEngine(EngineExecutionOrchestrator.java:246)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.failOrExecuteEngine(EngineExecutionOrchestrator.java:218)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:179)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:108)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.lambda$execute$0(EngineExecutionOrchestrator.java:66)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.withInterceptedStreams(EngineExecutionOrchestrator.java:157)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:65)
+-	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:125)
+-	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:114)
+-	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:58)
+-	at org.junit.platform.launcher.core.InterceptingLauncher.lambda$execute$2(InterceptingLauncher.java:57)
+-	at org.junit.platform.launcher.core.ClasspathAlignmentCheckingLauncherInterceptor.intercept(ClasspathAlignmentCheckingLauncherInterceptor.java:25)
+-	at org.junit.platform.launcher.core.InterceptingLauncher.execute(InterceptingLauncher.java:56)
+-	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:58)
+-	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104)
+-	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+-	at org.apache.maven.surefire.api.util.ReflectionUtils.invokeMethodWithArray(ReflectionUtils.java:125)
+-	at org.apache.maven.surefire.junitplatform.LauncherAdapter.executeWithCancellationToken(LauncherAdapter.java:68)
+-	at org.apache.maven.surefire.junitplatform.LauncherAdapter.execute(LauncherAdapter.java:54)
+-	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.execute(JUnitPlatformProvider.java:203)
+-	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invokeAllTests(JUnitPlatformProvider.java:168)
+-	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invoke(JUnitPlatformProvider.java:136)
+-	at org.apache.maven.surefire.booter.ForkedBooter.runSuitesInProcess(ForkedBooter.java:385)
+-	at org.apache.maven.surefire.booter.ForkedBooter.execute(ForkedBooter.java:162)
+-	at org.apache.maven.surefire.booter.ForkedBooter.run(ForkedBooter.java:507)
+-	at org.apache.maven.surefire.booter.ForkedBooter.main(ForkedBooter.java:495)
+-2026-06-05 19:00:38.380 [main] INFO  c.e.c.i.a.i.event.PubSubSalesAdapter - Registering Sales Pub/Sub subscriber via sharedlibs startListening
+-2026-06-05 19:00:38.385 [main] INFO  c.e.c.i.a.i.event.PubSubSalesAdapter - Registering Sales Pub/Sub subscriber via sharedlibs startListening
+-2026-06-05 19:00:38.386 [main] INFO  c.e.c.i.a.i.event.PubSubSalesAdapter - Sale message received from Generador
+-2026-06-05 19:00:38.386 [main] INFO  c.e.c.i.a.i.event.PubSubSalesAdapter - Sale processed and message acknowledged
+-2026-06-05 19:00:38.387 [main] INFO  c.e.c.i.a.i.event.PubSubSalesAdapter - Sale message received from Generador
+-2026-06-05 19:00:38.387 [main] INFO  c.e.c.i.a.i.event.PubSubSalesAdapter - Sale processed and message acknowledged
+-2026-06-05 19:00:38.390 [main] INFO  c.e.c.i.a.i.event.PubSubSalesAdapter - Registering Sales Pub/Sub subscriber via sharedlibs startListening
+-2026-06-05 19:00:38.391 [main] INFO  c.e.c.i.a.i.event.PubSubSalesAdapter - Sale message received from Generador
+-2026-06-05 19:00:38.391 [main] INFO  c.e.c.i.a.i.event.PubSubSalesAdapter - Sale processed and message acknowledged
+-2026-06-05 19:00:38.394 [main] INFO  c.e.c.i.a.i.event.PubSubSalesAdapter - Registering Sales Pub/Sub subscriber via sharedlibs startListening
+-2026-06-05 19:00:38.394 [main] INFO  c.e.c.i.a.i.event.PubSubSalesAdapter - Sale message received from Generador
+-2026-06-05 19:00:38.394 [main] INFO  c.e.c.i.a.i.event.PubSubSalesAdapter - Sale processed and message acknowledged
+-2026-06-05 19:00:38.800 [main] INFO  c.e.c.service.ProcessSaleService - Starting sale processing
+-2026-06-05 19:00:38.803 [main] ERROR c.e.c.service.ProcessSaleService - Error processing sale
+-java.lang.IllegalStateException: RetailStore not found for storeCode: 100
+-	at com.elrosado.cersuitecloudlocalcore.service.ProcessSaleService.lambda$processSale$0(ProcessSaleService.java:78)
+-	at java.base/java.util.Optional.orElseThrow(Optional.java:403)
+-	at com.elrosado.cersuitecloudlocalcore.service.ProcessSaleService.processSale(ProcessSaleService.java:77)
+-	at com.elrosado.cersuitecloudlocalcore.service.ProcessSaleServiceTest.lambda$processSale_storeNotFound_throwsAndRecordsError$0(ProcessSaleServiceTest.java:145)
+-	at org.junit.jupiter.api.AssertThrows.assertThrows(AssertThrows.java:54)
+-	at org.junit.jupiter.api.AssertThrows.assertThrows(AssertThrows.java:35)
+-	at org.junit.jupiter.api.Assertions.assertThrows(Assertions.java:3223)
+-	at com.elrosado.cersuitecloudlocalcore.service.ProcessSaleServiceTest.processSale_storeNotFound_throwsAndRecordsError(ProcessSaleServiceTest.java:144)
+-	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104)
+-	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+-	at org.junit.platform.commons.util.ReflectionUtils.invokeMethod(ReflectionUtils.java:701)
+-	at org.junit.platform.commons.support.ReflectionSupport.invokeMethod(ReflectionSupport.java:502)
+-	at org.junit.jupiter.engine.support.MethodReflectionUtils.invoke(MethodReflectionUtils.java:45)
+-	at org.junit.jupiter.engine.execution.MethodInvocation.proceed(MethodInvocation.java:61)
+-	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$ValidatingInvocation.proceed(InvocationInterceptorChain.java:124)
+-	at org.junit.jupiter.engine.extension.TimeoutExtension.intercept(TimeoutExtension.java:163)
+-	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestableMethod(TimeoutExtension.java:148)
+-	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestMethod(TimeoutExtension.java:86)
+-	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker$ReflectiveInterceptorCall.lambda$ofVoidMethod$0(InterceptingExecutableInvoker.java:123)
+-	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.lambda$invoke$0(InterceptingExecutableInvoker.java:105)
+-	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$InterceptedInvocation.proceed(InvocationInterceptorChain.java:99)
+-	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.proceed(InvocationInterceptorChain.java:66)
+-	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.chainAndInvoke(InvocationInterceptorChain.java:47)
+-	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.invoke(InvocationInterceptorChain.java:39)
+-	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:104)
+-	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:98)
+-	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invokeVoid(InterceptingExecutableInvoker.java:71)
+-	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.lambda$invokeTestMethod$0(TestMethodTestDescriptor.java:219)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.invokeTestMethod(TestMethodTestDescriptor.java:215)
+-	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:157)
+-	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:70)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:176)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166)
+-	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116)
+-	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+-	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:42)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:180)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166)
+-	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116)
+-	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+-	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:42)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:180)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166)
+-	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116)
+-	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.submit(SameThreadHierarchicalTestExecutorService.java:36)
+-	at org.junit.platform.engine.support.hierarchical.HierarchicalTestExecutor.execute(HierarchicalTestExecutor.java:52)
+-	at org.junit.platform.engine.support.hierarchical.HierarchicalTestEngine.execute(HierarchicalTestEngine.java:58)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.executeEngine(EngineExecutionOrchestrator.java:246)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.failOrExecuteEngine(EngineExecutionOrchestrator.java:218)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:179)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:108)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.lambda$execute$0(EngineExecutionOrchestrator.java:66)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.withInterceptedStreams(EngineExecutionOrchestrator.java:157)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:65)
+-	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:125)
+-	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:114)
+-	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:58)
+-	at org.junit.platform.launcher.core.InterceptingLauncher.lambda$execute$2(InterceptingLauncher.java:57)
+-	at org.junit.platform.launcher.core.ClasspathAlignmentCheckingLauncherInterceptor.intercept(ClasspathAlignmentCheckingLauncherInterceptor.java:25)
+-	at org.junit.platform.launcher.core.InterceptingLauncher.execute(InterceptingLauncher.java:56)
+-	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:58)
+-	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104)
+-	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+-	at org.apache.maven.surefire.api.util.ReflectionUtils.invokeMethodWithArray(ReflectionUtils.java:125)
+-	at org.apache.maven.surefire.junitplatform.LauncherAdapter.executeWithCancellationToken(LauncherAdapter.java:68)
+-	at org.apache.maven.surefire.junitplatform.LauncherAdapter.execute(LauncherAdapter.java:54)
+-	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.execute(JUnitPlatformProvider.java:203)
+-	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invokeAllTests(JUnitPlatformProvider.java:168)
+-	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invoke(JUnitPlatformProvider.java:136)
+-	at org.apache.maven.surefire.booter.ForkedBooter.runSuitesInProcess(ForkedBooter.java:385)
+-	at org.apache.maven.surefire.booter.ForkedBooter.execute(ForkedBooter.java:162)
+-	at org.apache.maven.surefire.booter.ForkedBooter.run(ForkedBooter.java:507)
+-	at org.apache.maven.surefire.booter.ForkedBooter.main(ForkedBooter.java:495)
+-2026-06-05 19:00:38.823 [main] INFO  c.e.c.service.ProcessSaleService - Starting sale processing
+-2026-06-05 19:00:38.825 [main] INFO  c.e.c.service.ProcessSaleService - TSL frame parsed successfully
+-2026-06-05 19:00:38.826 [main] ERROR c.e.c.service.ProcessSaleService - Error processing sale
+-java.lang.IllegalStateException: DOM error
+-	at com.elrosado.cersuitecloudlocalcore.service.XmlGeneratorService.generate(XmlGeneratorService.java:46)
+-	at com.elrosado.cersuitecloudlocalcore.service.ProcessSaleService.processSale(ProcessSaleService.java:94)
+-	at com.elrosado.cersuitecloudlocalcore.service.ProcessSaleServiceTest.lambda$processSale_xmlGenerationError_recordsErrorAndRethrows$0(ProcessSaleServiceTest.java:184)
+-	at org.junit.jupiter.api.AssertThrows.assertThrows(AssertThrows.java:54)
+-	at org.junit.jupiter.api.AssertThrows.assertThrows(AssertThrows.java:35)
+-	at org.junit.jupiter.api.Assertions.assertThrows(Assertions.java:3223)
+-	at com.elrosado.cersuitecloudlocalcore.service.ProcessSaleServiceTest.processSale_xmlGenerationError_recordsErrorAndRethrows(ProcessSaleServiceTest.java:184)
+-	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104)
+-	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+-	at org.junit.platform.commons.util.ReflectionUtils.invokeMethod(ReflectionUtils.java:701)
+-	at org.junit.platform.commons.support.ReflectionSupport.invokeMethod(ReflectionSupport.java:502)
+-	at org.junit.jupiter.engine.support.MethodReflectionUtils.invoke(MethodReflectionUtils.java:45)
+-	at org.junit.jupiter.engine.execution.MethodInvocation.proceed(MethodInvocation.java:61)
+-	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$ValidatingInvocation.proceed(InvocationInterceptorChain.java:124)
+-	at org.junit.jupiter.engine.extension.TimeoutExtension.intercept(TimeoutExtension.java:163)
+-	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestableMethod(TimeoutExtension.java:148)
+-	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestMethod(TimeoutExtension.java:86)
+-	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker$ReflectiveInterceptorCall.lambda$ofVoidMethod$0(InterceptingExecutableInvoker.java:123)
+-	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.lambda$invoke$0(InterceptingExecutableInvoker.java:105)
+-	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$InterceptedInvocation.proceed(InvocationInterceptorChain.java:99)
+-	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.proceed(InvocationInterceptorChain.java:66)
+-	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.chainAndInvoke(InvocationInterceptorChain.java:47)
+-	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.invoke(InvocationInterceptorChain.java:39)
+-	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:104)
+-	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:98)
+-	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invokeVoid(InterceptingExecutableInvoker.java:71)
+-	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.lambda$invokeTestMethod$0(TestMethodTestDescriptor.java:219)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.invokeTestMethod(TestMethodTestDescriptor.java:215)
+-	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:157)
+-	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:70)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:176)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166)
+-	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116)
+-	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+-	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:42)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:180)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166)
+-	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116)
+-	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+-	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:42)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:180)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166)
+-	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116)
+-	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.submit(SameThreadHierarchicalTestExecutorService.java:36)
+-	at org.junit.platform.engine.support.hierarchical.HierarchicalTestExecutor.execute(HierarchicalTestExecutor.java:52)
+-	at org.junit.platform.engine.support.hierarchical.HierarchicalTestEngine.execute(HierarchicalTestEngine.java:58)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.executeEngine(EngineExecutionOrchestrator.java:246)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.failOrExecuteEngine(EngineExecutionOrchestrator.java:218)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:179)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:108)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.lambda$execute$0(EngineExecutionOrchestrator.java:66)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.withInterceptedStreams(EngineExecutionOrchestrator.java:157)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:65)
+-	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:125)
+-	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:114)
+-	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:58)
+-	at org.junit.platform.launcher.core.InterceptingLauncher.lambda$execute$2(InterceptingLauncher.java:57)
+-	at org.junit.platform.launcher.core.ClasspathAlignmentCheckingLauncherInterceptor.intercept(ClasspathAlignmentCheckingLauncherInterceptor.java:25)
+-	at org.junit.platform.launcher.core.InterceptingLauncher.execute(InterceptingLauncher.java:56)
+-	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:58)
+-	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104)
+-	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+-	at org.apache.maven.surefire.api.util.ReflectionUtils.invokeMethodWithArray(ReflectionUtils.java:125)
+-	at org.apache.maven.surefire.junitplatform.LauncherAdapter.executeWithCancellationToken(LauncherAdapter.java:68)
+-	at org.apache.maven.surefire.junitplatform.LauncherAdapter.execute(LauncherAdapter.java:54)
+-	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.execute(JUnitPlatformProvider.java:203)
+-	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invokeAllTests(JUnitPlatformProvider.java:168)
+-	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invoke(JUnitPlatformProvider.java:136)
+-	at org.apache.maven.surefire.booter.ForkedBooter.runSuitesInProcess(ForkedBooter.java:385)
+-	at org.apache.maven.surefire.booter.ForkedBooter.execute(ForkedBooter.java:162)
+-	at org.apache.maven.surefire.booter.ForkedBooter.run(ForkedBooter.java:507)
+-	at org.apache.maven.surefire.booter.ForkedBooter.main(ForkedBooter.java:495)
+-2026-06-05 19:00:38.839 [main] INFO  c.e.c.service.ProcessSaleService - Starting sale processing
+-2026-06-05 19:00:38.840 [main] INFO  c.e.c.service.ProcessSaleService - TSL frame parsed successfully
+-2026-06-05 19:00:38.841 [main] INFO  c.e.c.service.ProcessSaleService - XML generated successfully
+-2026-06-05 19:00:38.841 [main] INFO  c.e.c.service.ProcessSaleService - Sale processed successfully — XML_GENERATED
+-2026-06-05 19:00:38.854 [main] INFO  c.e.c.service.ProcessSaleService - Starting sale processing
+-2026-06-05 19:00:38.855 [main] INFO  c.e.c.service.ProcessSaleService - TSL frame parsed successfully
+-2026-06-05 19:00:38.856 [main] INFO  c.e.c.service.ProcessSaleService - XML generated successfully
+-2026-06-05 19:00:38.856 [main] ERROR c.e.c.service.ProcessSaleService - Error processing sale
+-java.lang.RuntimeException: Write failed
+-	at com.elrosado.cersuitecloudlocalcore.service.ProcessSaleService.processSale(ProcessSaleService.java:105)
+-	at com.elrosado.cersuitecloudlocalcore.service.ProcessSaleServiceTest.lambda$processSale_saveXmlPayloadThrows_recordsErrorAndRethrows$0(ProcessSaleServiceTest.java:206)
+-	at org.junit.jupiter.api.AssertThrows.assertThrows(AssertThrows.java:54)
+-	at org.junit.jupiter.api.AssertThrows.assertThrows(AssertThrows.java:35)
+-	at org.junit.jupiter.api.Assertions.assertThrows(Assertions.java:3223)
+-	at com.elrosado.cersuitecloudlocalcore.service.ProcessSaleServiceTest.processSale_saveXmlPayloadThrows_recordsErrorAndRethrows(ProcessSaleServiceTest.java:206)
+-	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104)
+-	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+-	at org.junit.platform.commons.util.ReflectionUtils.invokeMethod(ReflectionUtils.java:701)
+-	at org.junit.platform.commons.support.ReflectionSupport.invokeMethod(ReflectionSupport.java:502)
+-	at org.junit.jupiter.engine.support.MethodReflectionUtils.invoke(MethodReflectionUtils.java:45)
+-	at org.junit.jupiter.engine.execution.MethodInvocation.proceed(MethodInvocation.java:61)
+-	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$ValidatingInvocation.proceed(InvocationInterceptorChain.java:124)
+-	at org.junit.jupiter.engine.extension.TimeoutExtension.intercept(TimeoutExtension.java:163)
+-	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestableMethod(TimeoutExtension.java:148)
+-	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestMethod(TimeoutExtension.java:86)
+-	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker$ReflectiveInterceptorCall.lambda$ofVoidMethod$0(InterceptingExecutableInvoker.java:123)
+-	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.lambda$invoke$0(InterceptingExecutableInvoker.java:105)
+-	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$InterceptedInvocation.proceed(InvocationInterceptorChain.java:99)
+-	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.proceed(InvocationInterceptorChain.java:66)
+-	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.chainAndInvoke(InvocationInterceptorChain.java:47)
+-	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.invoke(InvocationInterceptorChain.java:39)
+-	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:104)
+-	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:98)
+-	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invokeVoid(InterceptingExecutableInvoker.java:71)
+-	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.lambda$invokeTestMethod$0(TestMethodTestDescriptor.java:219)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.invokeTestMethod(TestMethodTestDescriptor.java:215)
+-	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:157)
+-	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:70)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:176)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166)
+-	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116)
+-	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+-	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:42)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:180)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166)
+-	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116)
+-	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+-	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:42)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:180)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166)
+-	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116)
+-	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.submit(SameThreadHierarchicalTestExecutorService.java:36)
+-	at org.junit.platform.engine.support.hierarchical.HierarchicalTestExecutor.execute(HierarchicalTestExecutor.java:52)
+-	at org.junit.platform.engine.support.hierarchical.HierarchicalTestEngine.execute(HierarchicalTestEngine.java:58)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.executeEngine(EngineExecutionOrchestrator.java:246)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.failOrExecuteEngine(EngineExecutionOrchestrator.java:218)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:179)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:108)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.lambda$execute$0(EngineExecutionOrchestrator.java:66)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.withInterceptedStreams(EngineExecutionOrchestrator.java:157)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:65)
+-	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:125)
+-	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:114)
+-	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:58)
+-	at org.junit.platform.launcher.core.InterceptingLauncher.lambda$execute$2(InterceptingLauncher.java:57)
+-	at org.junit.platform.launcher.core.ClasspathAlignmentCheckingLauncherInterceptor.intercept(ClasspathAlignmentCheckingLauncherInterceptor.java:25)
+-	at org.junit.platform.launcher.core.InterceptingLauncher.execute(InterceptingLauncher.java:56)
+-	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:58)
+-	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104)
+-	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+-	at org.apache.maven.surefire.api.util.ReflectionUtils.invokeMethodWithArray(ReflectionUtils.java:125)
+-	at org.apache.maven.surefire.junitplatform.LauncherAdapter.executeWithCancellationToken(LauncherAdapter.java:68)
+-	at org.apache.maven.surefire.junitplatform.LauncherAdapter.execute(LauncherAdapter.java:54)
+-	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.execute(JUnitPlatformProvider.java:203)
+-	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invokeAllTests(JUnitPlatformProvider.java:168)
+-	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invoke(JUnitPlatformProvider.java:136)
+-	at org.apache.maven.surefire.booter.ForkedBooter.runSuitesInProcess(ForkedBooter.java:385)
+-	at org.apache.maven.surefire.booter.ForkedBooter.execute(ForkedBooter.java:162)
+-	at org.apache.maven.surefire.booter.ForkedBooter.run(ForkedBooter.java:507)
+-	at org.apache.maven.surefire.booter.ForkedBooter.main(ForkedBooter.java:495)
+-2026-06-05 19:00:38.865 [main] INFO  c.e.c.service.ProcessSaleService - Starting sale processing
+-2026-06-05 19:00:38.866 [main] INFO  c.e.c.service.ProcessSaleService - TSL frame parsed successfully
+-2026-06-05 19:00:38.866 [main] INFO  c.e.c.service.ProcessSaleService - XML generated successfully
+-2026-06-05 19:00:38.866 [main] INFO  c.e.c.service.ProcessSaleService - Sale processed successfully — XML_GENERATED
+-2026-06-05 19:00:38.875 [main] INFO  c.e.c.service.ProcessSaleService - Starting sale processing
+-2026-06-05 19:00:38.877 [main] ERROR c.e.c.service.ProcessSaleService - Error processing sale
+-java.lang.RuntimeException: Firestore unavailable
+-	at com.elrosado.cersuitecloudlocalcore.service.ProcessSaleService.processSale(ProcessSaleService.java:69)
+-	at com.elrosado.cersuitecloudlocalcore.service.ProcessSaleServiceTest.lambda$processSale_readPayloadThrows_recordsErrorAndRethrows$0(ProcessSaleServiceTest.java:164)
+-	at org.junit.jupiter.api.AssertThrows.assertThrows(AssertThrows.java:54)
+-	at org.junit.jupiter.api.AssertThrows.assertThrows(AssertThrows.java:35)
+-	at org.junit.jupiter.api.Assertions.assertThrows(Assertions.java:3223)
+-	at com.elrosado.cersuitecloudlocalcore.service.ProcessSaleServiceTest.processSale_readPayloadThrows_recordsErrorAndRethrows(ProcessSaleServiceTest.java:163)
+-	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104)
+-	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+-	at org.junit.platform.commons.util.ReflectionUtils.invokeMethod(ReflectionUtils.java:701)
+-	at org.junit.platform.commons.support.ReflectionSupport.invokeMethod(ReflectionSupport.java:502)
+-	at org.junit.jupiter.engine.support.MethodReflectionUtils.invoke(MethodReflectionUtils.java:45)
+-	at org.junit.jupiter.engine.execution.MethodInvocation.proceed(MethodInvocation.java:61)
+-	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$ValidatingInvocation.proceed(InvocationInterceptorChain.java:124)
+-	at org.junit.jupiter.engine.extension.TimeoutExtension.intercept(TimeoutExtension.java:163)
+-	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestableMethod(TimeoutExtension.java:148)
+-	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestMethod(TimeoutExtension.java:86)
+-	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker$ReflectiveInterceptorCall.lambda$ofVoidMethod$0(InterceptingExecutableInvoker.java:123)
+-	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.lambda$invoke$0(InterceptingExecutableInvoker.java:105)
+-	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$InterceptedInvocation.proceed(InvocationInterceptorChain.java:99)
+-	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.proceed(InvocationInterceptorChain.java:66)
+-	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.chainAndInvoke(InvocationInterceptorChain.java:47)
+-	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.invoke(InvocationInterceptorChain.java:39)
+-	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:104)
+-	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:98)
+-	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invokeVoid(InterceptingExecutableInvoker.java:71)
+-	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.lambda$invokeTestMethod$0(TestMethodTestDescriptor.java:219)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.invokeTestMethod(TestMethodTestDescriptor.java:215)
+-	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:157)
+-	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:70)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:176)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166)
+-	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116)
+-	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+-	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:42)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:180)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166)
+-	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116)
+-	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+-	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:42)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$2(NodeTestTask.java:180)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$1(NodeTestTask.java:166)
+-	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:138)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$0(NodeTestTask.java:164)
+-	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:74)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:163)
+-	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:116)
+-	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.submit(SameThreadHierarchicalTestExecutorService.java:36)
+-	at org.junit.platform.engine.support.hierarchical.HierarchicalTestExecutor.execute(HierarchicalTestExecutor.java:52)
+-	at org.junit.platform.engine.support.hierarchical.HierarchicalTestEngine.execute(HierarchicalTestEngine.java:58)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.executeEngine(EngineExecutionOrchestrator.java:246)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.failOrExecuteEngine(EngineExecutionOrchestrator.java:218)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:179)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:108)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.lambda$execute$0(EngineExecutionOrchestrator.java:66)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.withInterceptedStreams(EngineExecutionOrchestrator.java:157)
+-	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:65)
+-	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:125)
+-	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:114)
+-	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:58)
+-	at org.junit.platform.launcher.core.InterceptingLauncher.lambda$execute$2(InterceptingLauncher.java:57)
+-	at org.junit.platform.launcher.core.ClasspathAlignmentCheckingLauncherInterceptor.intercept(ClasspathAlignmentCheckingLauncherInterceptor.java:25)
+-	at org.junit.platform.launcher.core.InterceptingLauncher.execute(InterceptingLauncher.java:56)
+-	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:58)
+-	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104)
+-	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+-	at org.apache.maven.surefire.api.util.ReflectionUtils.invokeMethodWithArray(ReflectionUtils.java:125)
+-	at org.apache.maven.surefire.junitplatform.LauncherAdapter.executeWithCancellationToken(LauncherAdapter.java:68)
+-	at org.apache.maven.surefire.junitplatform.LauncherAdapter.execute(LauncherAdapter.java:54)
+-	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.execute(JUnitPlatformProvider.java:203)
+-	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invokeAllTests(JUnitPlatformProvider.java:168)
+-	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invoke(JUnitPlatformProvider.java:136)
+-	at org.apache.maven.surefire.booter.ForkedBooter.runSuitesInProcess(ForkedBooter.java:385)
+-	at org.apache.maven.surefire.booter.ForkedBooter.execute(ForkedBooter.java:162)
+-	at org.apache.maven.surefire.booter.ForkedBooter.run(ForkedBooter.java:507)
+-	at org.apache.maven.surefire.booter.ForkedBooter.main(ForkedBooter.java:495)
+-2026-06-05 19:00:38.922 [main] DEBUG c.e.c.service.TslFrameParserService - UserData sub-tipo ignorado
+-2026-06-05 19:00:38.922 [main] DEBUG c.e.c.service.TslFrameParserService - UserData sub-tipo ignorado
+-2026-06-05 19:00:38.930 [main] DEBUG c.e.c.service.TslFrameParserService - UserData sub-tipo ignorado
+-2026-06-05 19:00:38.930 [main] DEBUG c.e.c.service.TslFrameParserService - UserData sub-tipo ignorado
+-2026-06-05 19:00:38.940 [main] DEBUG c.e.c.service.TslFrameParserService - TillChange fondo de caja
+-2026-06-05 19:00:39.040 [main] DEBUG c.e.c.service.TslFrameParserService - UserData sub-tipo ignorado
+-2026-06-05 19:00:39.040 [main] DEBUG c.e.c.service.TslFrameParserService - UserData sub-tipo ignorado
+-2026-06-05 19:00:39.044 [main] DEBUG c.e.c.service.TslFrameParserService - TillChange fondo de caja
+-2026-06-05 19:00:39.049 [main] DEBUG c.e.c.service.TslFrameParserService - UserData sub-tipo ignorado
+-2026-06-05 19:00:39.050 [main] DEBUG c.e.c.service.TslFrameParserService - UserData sub-tipo ignorado
+-2026-06-05 19:00:39.055 [main] DEBUG c.e.c.service.TslFrameParserService - DataEntry registro
+-2026-06-05 19:00:39.056 [main] DEBUG c.e.c.service.TslFrameParserService - UserData sub-tipo ignorado
+-2026-06-05 19:00:39.056 [main] DEBUG c.e.c.service.TslFrameParserService - UserData sub-tipo ignorado
+-2026-06-05 19:00:39.056 [main] DEBUG c.e.c.service.TslFrameParserService - DataEntry cliente frecuente EE
+-2026-06-05 19:00:39.059 [main] DEBUG c.e.c.service.TslFrameParserService - UserData sub-tipo ignorado
+-2026-06-05 19:00:39.059 [main] DEBUG c.e.c.service.TslFrameParserService - UserData sub-tipo ignorado
+-2026-06-05 19:00:39.082 [main] DEBUG c.e.c.service.TslFrameParserService - UserData sub-tipo ignorado
+-2026-06-05 19:00:39.082 [main] DEBUG c.e.c.service.TslFrameParserService - UserData sub-tipo ignorado
+-2026-06-05 19:00:39.089 [main] DEBUG c.e.c.service.TslFrameParserService - DataEntry registro
+-2026-06-05 19:00:39.090 [main] DEBUG c.e.c.service.TslFrameParserService - UserData sub-tipo ignorado
+-2026-06-05 19:00:39.090 [main] DEBUG c.e.c.service.TslFrameParserService - UserData sub-tipo ignorado
+-2026-06-05 19:00:39.090 [main] DEBUG c.e.c.service.TslFrameParserService - DataEntry registro
+-2026-06-05 19:00:39.090 [main] DEBUG c.e.c.service.TslFrameParserService - DataEntry cliente frecuente EE
+-2026-06-05 19:00:39.102 [main] DEBUG c.e.c.service.TslFrameParserService - TillChange fondo de caja
+-2026-06-05 19:00:39.106 [main] DEBUG c.e.c.service.TslFrameParserService - UserData sub-tipo ignorado
+-2026-06-05 19:00:39.106 [main] DEBUG c.e.c.service.TslFrameParserService - UserData sub-tipo ignorado
+-2026-06-05 19:00:39.108 [main] DEBUG c.e.c.service.TslFrameParserService - DataEntry registro
+-2026-06-05 19:00:39.109 [main] DEBUG c.e.c.service.TslFrameParserService - UserData sub-tipo ignorado
+-2026-06-05 19:00:39.109 [main] DEBUG c.e.c.service.TslFrameParserService - UserData sub-tipo ignorado
+-2026-06-05 19:00:39.109 [main] DEBUG c.e.c.service.TslFrameParserService - DataEntry cliente frecuente EE
+-2026-06-05 19:00:39.130 [main] DEBUG c.e.c.service.TslFrameParserService - UserData sub-tipo ignorado
+-2026-06-05 19:00:39.130 [main] DEBUG c.e.c.service.TslFrameParserService - UserData sub-tipo ignorado
+-2026-06-05 19:00:39.132 [main] DEBUG c.e.c.service.TslFrameParserService - UserData sub-tipo ignorado
+-2026-06-05 19:00:39.132 [main] DEBUG c.e.c.service.TslFrameParserService - UserData sub-tipo ignorado
+-2026-06-05 19:00:39.134 [main] DEBUG c.e.c.service.TslFrameParserService - UserData sub-tipo ignorado
+-2026-06-05 19:00:39.135 [main] DEBUG c.e.c.service.TslFrameParserService - UserData sub-tipo ignorado
+-2026-06-05 19:00:39.143 [main] DEBUG c.e.c.service.TslFrameParserService - TillChange fondo de caja
+-2026-06-05 19:00:39.373 [SpringApplicationShutdownHook] INFO  c.e.j.services.MessageSubscriber - Deteniendo listeners de Pub/Sub
+-2026-06-05 19:00:39.388 [SpringApplicationShutdownHook] INFO  c.e.j.services.MessageSubscriber - Todos los listeners de Pub/Sub detenidos
+-2026-06-05 19:00:39.394 [SpringApplicationShutdownHook] INFO  o.s.o.j.LocalContainerEntityManagerFactoryBean - Closing JPA EntityManagerFactory for persistence unit 'default'
+-2026-06-05 19:00:39.399 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - hikari-arts-ec - Shutdown initiated...
+-2026-06-05 19:00:39.403 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - hikari-arts-ec - Shutdown completed.
+
+

@@ -1,0 +1,234 @@
+--- Diff for /AGENTS.md ---
+--- a//AGENTS.md
++++ b//AGENTS.md
+@@ -0,0 +1,62 @@
++# AGENTS.md — SuiteCloud Ventas
++
++Quick-reference for agents working in this repo. See `CLAUDE.md` for full domain docs.
++
++## Build & Test
++
++```bash
++mvn clean compile                     # needs --enable-preview (pom.xml handles it)
++mvn clean package -DskipTests         # full jar
++mvn test -Dtest=TslFrameParserServiceTest#buildTransaction_checkout_oneLineItem
++```
++
++- **Java 25 + `--enable-preview`** — compiled/test/run via pom.xml `<compilerArgs>`. Never remove.
++- **Private Maven repo** at `azdevops1.sipecom.com` — builds fail outside VPN.
++- **Unit tests**: `@ExtendWith(MockitoExtension.class)` — zero Spring context.
++- **Known failure** (don't fix): `XmlGeneratorServiceTest.generate_omitDeclaration_false_hasXmlDeclaration` — Spring XML transformer difference.
++- **Maven wrapper** available (`mvnw.cmd`).
++
++## Architecture non-negotiables
++
++- **Hexagonal layers**: `domain/` has zero framework deps; `infrastructure/` holds all adapters.
++- **Virtual threads**: `spring.threads.virtual.enabled=true` — never use `synchronized`. Use `ReentrantLock`/`Semaphore`.
++- **Domain models**: immutable Java `record`s — mutations return `with*()` copies. Collections wrapped in `List.copyOf()`.
++- **Two datasources**: primary `ARTS_EC` (`datasource`), secondary `DEVS_EC` (`datasource-devs`).
++- **JPA `ddl-auto: none`** — DevTicketEntity cross-database ref (`DEVS_EC.dbo.DV_TICKET`) can't be validated by Hibernate.
++
++## Code style (will be flagged by review)
++
++- Identifiers (classes, methods, vars, packages): **English**.
++- Comments, logs, Javadoc: **Spanish**.
++- Logging: SLF4J 2.0+ fluent API only — `log.atInfo().setMessage("...").addKeyValue("k", v).log()`. Never concatenate into message string.
++- Lombok `@Slf4j`, `@RequiredArgsConstructor`, `@Builder`, `@Data` are project standard.
++
++## Profiles
++
++| Profile | Port | DB | GCP auth | KMS | Logs |
++|---------|------|----|----------|-----|------|
++| `local` | 8091 | `10.2.7.23` hardcoded | creds file at `D:/SIPECOM/.../credentials_per.json` | **disabled** (payload read raw) | plain-text |
++| `dev` | 8080 | env vars | Workload Identity | enabled | plain-text |
++| `prod` | 8080 | env vars | Workload Identity | enabled | structured GCP JSON |
++
++## Build/deploy
++
++- **`build.sh`** uses **Podman** (not Docker) — pushes to `localhost:30500` with `--tls-verify=false`.
++- **Skaffold** (`v4beta11`): `skaffold.yaml` watches `src/` + `pom.xml`, custom build via `build.sh`.
++- Container base: `eclipse-temurin:25-jre`. Non-root user (`uid=10001`).
++- K8s manifests in `k8s/` — namespace `ns-cer-suite-dev`.
++
++## Test fixtures
++
++- `TslFrameParserServiceTest` has 3 embedded real TSLs: `TRAMA_TILL_CHANGE`, `TRAMA_CHECKOUT`, `TRAMA_CHECKOUT_CLIENTE`. Reuse these, don't create new raw strings.
++- Reference tramas in `.claude_analytics/tramas_tipo10.txt` (~3 MB production log).
++- **`.claude*` dirs are gitignored** — don't commit them.
++
++## Key gotchas
++
++- `--enable-preview` required at compile, test, AND runtime.
++- Amounts are raw cents — **never divide by 100** (ISSUE-01).
++- `99|06|41` UserData applies tax via FIFO queue per `itemCode` (ISSUE-V3-06).
++- XML amounts formatted as `"171.0"` (long + `.0`) — no decimal arithmetic.
++- `<IsPromo>` emitted only when `promoFlag` is non-null (`true`/`false`). Normal items omit the tag entirely.
++- README.md is a template stub — ignore it. Reference `CLAUDE.md` instead.
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/event/PubSubSalesAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/event/PubSubSalesAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/event/PubSubSalesAdapter.java
+@@ -10,7 +10,10 @@
+ import org.springframework.context.event.EventListener;
+ import org.springframework.core.task.AsyncTaskExecutor;
+ import org.springframework.stereotype.Component;
++import tools.jackson.core.type.TypeReference;
++import tools.jackson.databind.ObjectMapper;
+ 
++import java.util.Map;
+ import java.util.UUID;
+ import java.util.concurrent.CompletableFuture;
+ 
+@@ -18,7 +21,7 @@
+  * Adaptador de entrada: suscriptor Pub/Sub para ventas (operaciÃ³n 10).
+  * <p>
+  * Escucha las suscripciones declaradas en pubsub.subscriptions (sharedlibs).
+- * El payload de cada mensaje es el transactionId (ID del doc Firestore).
++ * El payload de cada mensaje es un JSON con al menos {"transactionId": "..."}.
+  * Delega el procesamiento al pool de Virtual Threads para mÃ¡xima concurrencia.
+  * <p>
+  * Migra: el despacho de TSLReaderOperation desde OperationsServer (socket TCP)
+@@ -28,23 +31,27 @@
+ public class PubSubSalesAdapter {
+ 
+     private static final Logger log = LoggerFactory.getLogger(PubSubSalesAdapter.class);
++    private static final String FIELD_TRANSACTION_ID = "transactionId";
+ 
+     private final IMessageSubscriber messageSubscriber;
+     private final ProcessSaleUseCase processSaleUseCase;
+     private final AsyncTaskExecutor virtualThreadTaskExecutor;
++    private final ObjectMapper objectMapper;
+ 
+     public PubSubSalesAdapter(
+             IMessageSubscriber messageSubscriber,
+             ProcessSaleUseCase processSaleUseCase,
+-            @Qualifier("virtualThreadTaskExecutor") AsyncTaskExecutor virtualThreadTaskExecutor) {
++            @Qualifier("virtualThreadTaskExecutor") AsyncTaskExecutor virtualThreadTaskExecutor,
++            ObjectMapper objectMapper) {
+         this.messageSubscriber = messageSubscriber;
+         this.processSaleUseCase = processSaleUseCase;
+         this.virtualThreadTaskExecutor = virtualThreadTaskExecutor;
++        this.objectMapper = objectMapper;
+     }
+ 
+     @EventListener(ApplicationReadyEvent.class)
+     public void registerSubscriber() {
+-        log.info("Registering Sales Pub/Sub subscriber via sharedlibs startListening");
++        log.info("Registrando suscriptor Pub/Sub de ventas via sharedlibs startListening");
+ 
+         messageSubscriber.startListening((subscriptionId, payload) -> {
+             CompletableFuture<Boolean> result = new CompletableFuture<>();
+@@ -55,10 +62,13 @@
+                 MDC.put("pubsub.subscription", subscriptionId);
+ 
+                 try {
+-                    String transactionId = payload.trim();
++                    // Deserializa el payload JSON recibido desde Generador
++                    Map<String, Object> message = objectMapper.readValue(
++                            payload, new TypeReference<Map<String, Object>>() {});
++                    String transactionId = (String) message.get(FIELD_TRANSACTION_ID);
+ 
+                     log.atInfo()
+-                            .setMessage("Sale message received from Generador")
++                            .setMessage("Mensaje de venta recibido desde Generador")
+                             .addKeyValue("transactionId", transactionId)
+                             .addKeyValue("subscription", subscriptionId)
+                             .log();
+@@ -68,13 +78,13 @@
+                     result.complete(true); // ack
+ 
+                     log.atInfo()
+-                            .setMessage("Sale processed and message acknowledged")
++                            .setMessage("Venta procesada y mensaje confirmado (ack)")
+                             .addKeyValue("transactionId", transactionId)
+                             .log();
+ 
+                 } catch (Exception e) {
+                     log.atError()
+-                            .setMessage("Error processing sale message â NACK for retry")
++                            .setMessage("Error al procesar mensaje de venta â NACK para reintento")
+                             .addKeyValue("subscription", subscriptionId)
+                             .setCause(e)
+                             .log();
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/messaging/PubSubDistributorPublisher.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/messaging/PubSubDistributorPublisher.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/messaging/PubSubDistributorPublisher.java
+@@ -6,40 +6,60 @@
+ import org.slf4j.LoggerFactory;
+ import org.springframework.beans.factory.annotation.Value;
+ import org.springframework.stereotype.Component;
++import tools.jackson.databind.ObjectMapper;
++
++import java.time.Instant;
++import java.util.Map;
+ 
+ /**
+  * Adaptador de salida: publica el evento XML_GENERATED al tÃ³pico de Distributor Cloud.
++ * El payload se serializa como JSON con transactionId, storeCode, eventType y publishedAt.
+  */
+ @Component
+ public class PubSubDistributorPublisher implements EventPublisherPort {
+ 
+     private static final Logger log = LoggerFactory.getLogger(PubSubDistributorPublisher.class);
++    private static final String EVENT_TYPE_XML_GENERATED = "XML_GENERATED";
+ 
+     private final IMessagePublisher messagePublisher;
++    private final ObjectMapper objectMapper;
+ 
+     @Value("${app.gcp.pubsub.topic-distributor}")
+     private String distributorTopic;
+ 
+-    public PubSubDistributorPublisher(IMessagePublisher messagePublisher) {
++    public PubSubDistributorPublisher(IMessagePublisher messagePublisher, ObjectMapper objectMapper) {
+         this.messagePublisher = messagePublisher;
++        this.objectMapper = objectMapper;
+     }
+ 
+     @Override
+     public void publishXmlGenerated(String transactionId, String storeCode) {
+         try {
+-            messagePublisher.publishAsync(distributorTopic, transactionId)
++            // Construye el payload JSON del evento antes de publicar
++            Map<String, Object> message = Map.of(
++                    "transactionId", transactionId,
++                    "storeCode",     storeCode,
++                    "eventType",     EVENT_TYPE_XML_GENERATED,
++                    "publishedAt",   Instant.now().toString()
++            );
++
++            String payload = objectMapper.writeValueAsString(message);
++
++            messagePublisher.publishAsync(distributorTopic, payload)
+                .whenComplete((msgId, ex) -> {
+                    if (ex != null) {
+                        log.atError()
+-                          .setMessage("Failed to publish XML_GENERATED event")
++                          .setMessage("Error al publicar evento XML_GENERATED hacia Distributor Cloud")
+                           .addKeyValue("transactionId", transactionId)
++                          .addKeyValue("storeCode", storeCode)
+                           .addKeyValue("topic", distributorTopic)
+                           .setCause(ex)
+                           .log();
+                    } else {
+                        log.atInfo()
+-                          .setMessage("XML_GENERATED event published to Distributor Cloud")
++                          .setMessage("Evento XML_GENERATED publicado hacia Distributor Cloud")
+                           .addKeyValue("transactionId", transactionId)
++                          .addKeyValue("storeCode", storeCode)
+                           .addKeyValue("topic", distributorTopic)
+                           .addKeyValue("messageId", msgId)
+                           .log();
+@@ -48,7 +68,7 @@
+ 
+         } catch (Exception e) {
+             throw new IllegalStateException(
+-                "Error publishing XML_GENERATED event for transaction: " + transactionId, e);
++                "Error al serializar o publicar evento XML_GENERATED para transacciÃ³n: " + transactionId, e);
+         }
+     }
+ }
+
+

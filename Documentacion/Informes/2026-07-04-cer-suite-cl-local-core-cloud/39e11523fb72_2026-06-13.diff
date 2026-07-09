@@ -1,0 +1,1479 @@
+--- Diff for /.claude_rules/ALCANCE_COMPONENTE.md ---
+--- a//.claude_rules/ALCANCE_COMPONENTE.md
++++ b//.claude_rules/ALCANCE_COMPONENTE.md
+@@ -0,0 +1,139 @@
++# ALCANCE POR COMPONENTE
++
++Sipecom S.A. | 2026
++
++Documento de referencia para el equipo de desarrollo. Define de forma precisa qué hace y qué **no** hace cada servicio de la plataforma cloud de ventas. Basado en RTD_VENTAS_CLOUD.md v1.1.
++
++---
++
++## 1. Suite Cloud – Ventas (Asíncrono)
++
++### Qué hace
++
++| # | Acción |
++|---|--------|
++| 1 | Suscribe al tópico Pub/Sub de ventas publicado por el Generador. |
++| 2 | Descarga la trama cifrada desde Firestore usando el ID de transacción recibido en el mensaje. |
++| 3 | Determina el tipo de operación (venta, devolución, cierre, etc.) según el código de la trama. |
++| 4 | Aplica la lógica de negocio correspondiente al tipo de operación identificado. |
++| 5 | Genera el documento XML de la transacción en memoria. |
++| 6 | Persiste el XML generado en Firestore junto al registro de la trama. |
++| 7 | Actualiza el estado de la transacción en Firestore a `XML_GENERATED`. |
++| 8 | Publica un evento en Pub/Sub notificando a Distributor Cloud que el XML está disponible. |
++
++### Qué NO hace
++
++| # | Restricción |
++|---|-------------|
++| 1 | **No** persiste datos en Cloud SQL Server (Multi Local). Esa responsabilidad es exclusiva de Distributor Cloud. |
++| 2 | **No** se comunica directamente con las cajas ni con el Controlador. No habla TCP. |
++| 3 | **No** transfiere información a la base de datos Central de El Rosado. Eso es responsabilidad de Transaction Cloud. |
++| 4 | **No** responde consultas en tiempo real (precios, stock, clientes). Eso lo gestiona Suite Cloud – Consultas. |
++| 5 | **No** espera confirmación de Distributor Cloud antes de completar su ejecución. |
++| 6 | **No** maneja el ACK al Controlador/Caja. El Generador ya lo entregó antes de que este proceso comience. |
++| 7 | **No** administra archivos de cierre de día ni journals. |
++| 8 | **No** recupera ventas depuradas desde Central. |
++
++---
++
++## 2. Suite Cloud – Consultas (Síncrono)
++
++### Qué hace
++
++| # | Acción |
++|---|--------|
++| 1 | Suscribe al canal síncrono de Pub/Sub de consultas publicado por el Generador. |
++| 2 | Recibe solicitudes de consulta: precios, stock, validación de cédula/RUC, retenciones, arqueo de medios de pago, datos de tienda, claves sociedad, reservas, entre otros. |
++| 3 | Ejecuta la consulta correspondiente sobre Cloud SQL Server (base de datos Multi Local en la nube). |
++| 4 | Devuelve el resultado al Generador para que este lo retransmita al Controlador en tiempo real. |
++
++### Qué NO hace
++
++| # | Restricción |
++|---|-------------|
++| 1 | **No** procesa ventas. No genera XML ni escribe transacciones. |
++| 2 | **No** escribe ni modifica datos en la base de datos; solo realiza lecturas para responder consultas. |
++| 3 | **No** se comunica directamente con las cajas ni con el Controlador. La comunicación TCP es exclusiva del Generador. |
++| 4 | **No** persiste eventos en Firestore ni actualiza estados de transacciones. |
++| 5 | **No** publica mensajes en Pub/Sub de ventas ni notifica a otros servicios. |
++| 6 | **No** consulta la base de datos Central de El Rosado. Sus fuentes de datos son únicamente Cloud SQL Server Multi Local. |
++| 7 | **No** opera de forma asíncrona; su modelo de ejecución es siempre síncrono (request-response). |
++
++---
++
++## 3. Distributor Cloud (Asíncrono)
++
++### Qué hace
++
++| # | Acción |
++|---|--------|
++| 1 | Suscribe al tópico Pub/Sub publicado por Suite Cloud – Ventas indicando que el XML de la venta está listo. |
++| 2 | Descarga el XML de la venta desde Firestore usando el ID del documento. |
++| 3 | Persiste la venta en Cloud SQL Server (base de datos Multi Local), reemplazando la función de los servidores locales por tienda. |
++| 4 | Actualiza el estado de la transacción en Firestore a `PROCESSED`. |
++| 5 | Publica un evento en el tópico `retail.local.distributor.processed.v1` indicando que la persistencia en Multi Local ha concluido. |
++| 6 | Suscribe al tópico `retail.local.distributor.processed.v1-sub` (suscripción propia) para desencadenar la replicación a BD Central. |
++| 7 | Obtiene el ID del documento de Firestore y lee el XML del payload según el tipo de transacción. |
++| 8 | Para transacciones SALE (tipo 10) y TM (tipo 67 – OperatorPerformance), inserta el XML en la tabla `TBL_XML_GENERATOR` de BD Central con estado `PE` (Pendiente), registrando: `COD_TIENDA`, `FECHA_TRANS`, `COD_DISTRIBUTOR`, `XML_GEN`, `FILE_NAME` y `FECHA_REGISTRO`. |
++| 9 | Actualiza el estado de la transacción en Firestore a `PROCESSED_CENTRAL` una vez confirmada la inserción en BD Central. |
++| 10 | Ante un fallo de persistencia en Multi Local o en BD Central, **no** hace ACK al mensaje para que Pub/Sub lo reintente automáticamente. |
++| 11 | Si los reintentos de Pub/Sub se agotan, el mensaje pasa al Dead Letter Topic (DLQ) y se genera alerta operacional. |
++| 12 | Ejecuta un Cron Job periódico que busca documentos en estado de error y los reintenta de forma autónoma hasta N veces. |
++
++### Qué NO hace
++
++| # | Restricción |
++|---|-------------|
++| 1 | **No** genera el XML de la transacción. Ese documento llega ya creado por Suite Cloud – Ventas. |
++| 2 | **No** aplica lógica de negocio sobre la trama de venta. Solo persiste el resultado ya procesado. |
++| 3 | **No** se comunica directamente con las cajas ni con el Controlador. |
++| 4 | **No** responde consultas en tiempo real. No opera de forma síncrona. |
++| 5 | **No** gestiona archivos de cierre de día, journals ni réplica de clientes. |
++| 6 | **No** recupera ventas depuradas desde Central para devoluciones; ese flujo es responsabilidad exclusiva de Transaction Cloud. Su acceso a BD Central se limita a la inserción en `TBL_XML_GENERATOR`. |
++| 7 | **No** cifra ni descifra tramas; opera directamente sobre el XML ya generado. |
++
++---
++
++## 4. Transaction Cloud (Asíncrono)
++
++### Qué hace
++
++| # | Responsabilidad | Detalle |
++|---|-----------------|---------|
++| 1 | **Cierre de día** | Recibe el evento de cierre desde Portal Suite o desde Cloud Scheduler como respaldo. Descarga el archivo ZIP desde Cloud Storage y lo transfiere al endpoint de Central. Mueve el archivo a la carpeta de PROCESADOS al confirmar éxito. |
++| 2 | **Journal de operaciones** | Detecta automáticamente cuando se deposita un archivo de journal en Cloud Storage (evento de creación) y dispara su envío a Central sin sondeo periódico. |
++| 3 | **Réplica de clientes** | Consulta periódicamente a Central la lista de archivos de clientes pendientes, los descarga, decodifica y almacena en Cloud Storage. Persiste los datos de clientes certificados en la base de datos Multi Local para consultas desde Portal Suite. |
++| 4 | **Devoluciones antiguas** | Expone un endpoint que Portal Suite invoca al no encontrar una venta en BD local. Busca la venta en la base de datos Central por número de comprobante. Si la encuentra, la registra directamente en la base de datos Multi Local mediante ORM para habilitar el proceso de devolución. Registra trazabilidad de cada recuperación. |
++| 5 | **Resiliencia** | Reintenta con backoff exponencial ante errores en Central. Tras agotar intentos, el mensaje pasa al DLQ y se genera alerta operacional. Un Cron Job detecta ventas en estado de error y las reintenta autónomamente. |
++
++### Qué NO hace
++
++| # | Restricción |
++|---|-------------|
++| 1 | **No** genera XML de transacciones. Opera sobre documentos ya creados por Suite Cloud y almacenados en Firestore. |
++| 2 | **No** se comunica directamente con las cajas ni con el Controlador. No habla TCP. |
++| 3 | **No** persiste ventas regulares en Cloud SQL Server Multi Local. Esa responsabilidad es de Distributor Cloud. La única excepción es la recuperación de ventas depuradas para devoluciones antiguas. |
++| 4 | **No** lee el registro XML de Firestore para persistirlo en BD Central. Esa responsabilidad pertenece a Distributor Cloud. |
++| 5 | **No** actualiza el estado de las transacciones de venta a `PROCESSED_CENTRAL`. Esa responsabilidad pertenece a Distributor Cloud. |
++| 6 | **No** interviene en el flujo regular de ventas (desde `PENDING` hasta `PROCESSED_CENTRAL`). Su ámbito se limita a cierre de día, journal, réplica de clientes y devoluciones antiguas. |
++| 7 | **No** modifica ni elimina registros en la base de datos Central; solo lee (réplica, devoluciones antiguas). |
++| 8 | **No** responde consultas en tiempo real (precios, stock, clientes). Eso es responsabilidad de Suite Cloud – Consultas. |
++| 9 | **No** accede a Cloud SQL Server Multi Local para operaciones regulares de venta; su acceso a esa base de datos está limitado al flujo de recuperación de ventas depuradas. |
++
++---
++
++## Resumen de fronteras entre servicios
++
++| Acción | Suite Cloud Ventas | Suite Cloud Consultas | Distributor Cloud | Transaction Cloud |
++|--------|:-----------------:|:--------------------:|:-----------------:|:-----------------:|
++| Recibir trama TCP de la caja | No | No | No | No |
++| Generar XML de la transacción | **Sí** | No | No | No |
++| Responder consultas en tiempo real | No | **Sí** | No | No |
++| Persistir en Cloud SQL Server Multi Local | No | No | **Sí** | Solo devoluciones antiguas |
++| Insertar en `TBL_XML_GENERATOR` de BD Central (SALE/TM) | No | No | **Sí** | No |
++| Gestionar cierre de día | No | No | No | **Sí** |
++| Gestionar journal | No | No | No | **Sí** |
++| Réplica de clientes desde Central | No | No | No | **Sí** |
++| Recuperar ventas depuradas para devolución | No | No | No | **Sí** |
++| Actualizar estado en Firestore | **Sí** | No | **Sí** (`PROCESSED`, `PROCESSED_CENTRAL`) | **Sí** (cierre/journal/réplica) |
++| Publicar eventos en Pub/Sub | **Sí** | No | **Sí** | No |
+
+
+--- Diff for /.claude_rules/RTD_VENTAS_CLOUD.md ---
+--- a//.claude_rules/RTD_VENTAS_CLOUD.md
++++ b//.claude_rules/RTD_VENTAS_CLOUD.md
+@@ -0,0 +1,328 @@
++**REQUERIMIENTOS CAMBIO DE ARQUITECTURA SUITE**
++
++**PROCESO DE VENTAS – GENERADOR, SUITE CLOUD, DISTRIBUTOR CLOUD Y TRANSACTION CLOUD**
++
++Sipecom S.A. | 2026
++
++**Historia del Documento**
++
++|  |  |  |  |
++| --- | --- | --- | --- |
++| **Fecha** | **Versión** | **Descripción** | **Autor** |
++| 2026/04/20 | 1.0 | Versión inicial: Generador, Suite Cloud, Distributor Cloud, Transaction Cloud | Ricardo Muñoz |
++| 2026/05/05 | 1.1 | Se incorpora flujo de Devoluciones en Transaction Cloud. Documento adaptado para presentación al cliente. | Ricardo Muñoz |
++
++# 1. Introducción
++
++Este documento describe el diseño funcional y arquitectónico de la nueva plataforma en la nube para el proceso de ventas de Suite. Está orientado a brindar una visión clara de qué hace cada servicio, cómo se comunican entre sí y qué beneficios aporta el cambio respecto al modelo actual.
++
++La solución migra la lógica de procesamiento de ventas de los servidores locales de cada tienda hacia una plataforma serverless en Google Cloud Platform (GCP), manteniendo total compatibilidad con los controladores y cajas existentes y eliminando la necesidad de administrar infraestructura local por punto de venta.
++
++# 2. Visión General de la Arquitectura
++
++La nueva arquitectura distingue dos tipos de operación:
++
++* **Proceso Asíncrono (ventas): La caja registra la venta, recibe confirmación inmediata y el procesamiento continúa en la nube sin bloquear la operación.**
++* **Proceso Síncrono (consultas): El controlador solicita información (precios, stock, clientes) y recibe respuesta en tiempo real.**
++
++Los cinco servicios que componen el ecosistema son:
++
++|  |  |  |
++| --- | --- | --- |
++| **Servicio** | **Tipo de proceso** | **Función principal** |
++| **Generador** | Síncrono | Puerta de entrada: recibe las transacciones desde las cajas y los terminales, las registra y notifica al ecosistema. |
++| **Suite Cloud – Ventas** | Asíncrono | Procesa la trama de venta, genera el documento de registro (XML) y lo persiste en firestore. |
++| **Suite Cloud – Consultas** | Síncrono | Responde consultas del controlador en tiempo real: precios, stock, clientes, etc. |
++| **Distributor Cloud** | Asíncrono | Descarga el registro de venta y lo persiste en la base de datos local (SQL Server). Notifica a Transaction Cloud. |
++| **Transaction Cloud** | Asíncrono | Centraliza y transfiere ventas, cierres de día, journals y réplica de clientes al servidor central de El Rosado. |
++
++*Todos los servicios se comunican mediante Google Cloud Pub/Sub (mensajería desacoplada), Cloud Firestore (trazabilidad de eventos) y Cloud SQL Server (base de datos Multi Local que reemplaza los servidores locales por tienda).*
++
++# 3. Ciclo de Vida de una Transacción
++
++Toda transacción que ingresa al sistema pasa por los siguientes estados. El estado es visible en tiempo real para operaciones de monitoreo:
++
++|  |  |  |
++| --- | --- | --- |
++| **Paso** | **Estado** | **¿Qué significa?** |
++| 1 | `PENDING` | La transacción fue recibida y está en cola para ser procesada. |
++| 2 | `IN_PROCESS` | Suite Cloud está procesando la información de venta. |
++| 3 | `XML_GENERATED` | Suite Cloud finalizó: el registro de venta fue creado correctamente. |
++| 4 | `DISTRIBUTING` | Distributor Cloud está persistiendo la información en Cloud SQL Server (Multi Local). |
++| 5 | `PROCESSED` | La transacción fue persistida correctamente en Cloud SQL Server (Multi Local). |
++| 6 | `PROCESSED_CENTRAL` | Distributor Cloud insertó el XML en la tabla `TBL_XML_GENERATOR` de la BD Central. |
++
++En caso de error en cualquier etapa, el sistema registra el fallo, reintenta automáticamente y, de persistir, genera una alerta para el equipo de operaciones. La transacción no se pierde: permanece almacenada en Firestore hasta ser resuelta.
++
++# 4. Flujo del Proceso de Ventas (Asíncrono)
++
++El siguiente flujo describe paso a paso cómo una venta registrada en la caja es procesada, almacenada y transferida a Central, siguiendo el diagrama de arquitectura del proceso síncrono y asíncrono:
++
++|  |  |  |
++| --- | --- | --- |
++| **#** | **Actor / Servicio** | **Acción** |
++| 1 | Controlador / Caja | Envía la trama de venta al Generador mediante conexión TCP (mismo protocolo actual). |
++| 2 | Generador | Recibe la trama, la valida, la cifra y la guarda en Firestore (base de datos de eventos en la nube). Responde inmediatamente al Controlador (ACK) sin esperar el procesamiento completo. |
++| 3 | Generador - Pub/Sub | Publica una notificación en el canal de mensajería indicando que hay una nueva venta disponible (ID de venta). |
++| 4 | Suite Cloud – Ventas | (Asíncrono) Recibe la notificación, descarga la trama desde Firestore, procesa la venta, genera el XML de la transacción y lo persiste firestore. |
++| 5 | Suite Cloud - Pub/Sub | Notifica a Distributor Cloud que el XML de venta está listo. |
++| 6 | Distributor Cloud | Obtiene el XML del payload de Firestore, lo persiste en Cloud SQL Server (Multi Local) y actualiza el estado del documento en Firestore a `PROCESSED`. |
++| 7 | Distributor Cloud – Pub/Sub | Publica un evento en el tópico `retail.local.distributor.processed.v1` indicando que la venta fue persistida en Multi Local. |
++| 8 | Distributor Cloud (`retail.local.distributor.processed.v1-sub`) | Suscribe al tópico propio, obtiene el ID del documento de Firestore, lee el XML del payload y, según el tipo de transacción (SALE tipo 10 / TM tipo 67 – OperatorPerformance), inserta el registro en la tabla `TBL_XML_GENERATOR` de BD Central con estado `PE`. Actualiza el estado en Firestore a `PROCESSED_CENTRAL`. |
++
++Punto clave: La caja recibe confirmación de recepción de inmediato (paso 2), sin esperar que el procesamiento completo concluya. Esto garantiza la velocidad de atención al cliente y evita que una demora en la nube bloquee la operación en tienda.
++
++## 4.1 Flujo de Consultas (Síncrono)
++
++Las consultas - como verificar un precio, consultar stock o validar una cédula - siguen un canal separado para garantizar respuesta inmediata:
++
++|  |  |  |
++| --- | --- | --- |
++| **#** | **Actor / Servicio** | **Acción** |
++| 1 | Controlador / Caja | Envía una consulta al Generador (precio, stock, cliente, etc.). |
++| 2 | Generador | Identifica que es una consulta (operación síncrona) y publica en el canal de mensajería de consultas, aguardando la respuesta. |
++| 3 | Suite Cloud – Consultas | Recibe la solicitud, consulta la base de datos SQL Server local/Cloud y devuelve el resultado. |
++| 4 | Generador - Controlador | Retorna la respuesta al Controlador/Caja en tiempo real. |
++
++Ambos flujos conviven en paralelo: mientras Suite Cloud Ventas procesa una venta en background, Suite Cloud Consultas atiende consultas en tiempo real de otras cajas.
++
++# 5. Servicio: Generador
++
++El Generador es el punto de entrada de todo el ecosistema. Es el único servicio que mantiene comunicación directa con las cajas y terminales mediante el protocolo TCP existente, por lo que los controladores y el POS no requieren ningún cambio.
++
++### Responsabilidades principales
++
++* Recibir las tramas TCP enviadas por el Controlador de caja.
++* Validar y clasificar cada trama según el tipo de operación (venta, consulta, cierre, devolución, etc.).
++* Almacenarla de forma la trama en Firestore.
++* Responder de inmediato al Controlador (ACK) sin esperar el procesamiento completo.
++* Publicar una notificación en el sistema de mensajería (Pub/Sub) para activar el servicio correspondiente.
++
++### Transparencia para el operador
++
++Desde la perspectiva de la caja y del operador, el Generador se comporta exactamente igual que el ArmsServer actual. La única diferencia es que la dirección IP del servidor cambia para apuntar al balanceador de carga en GCP. El protocolo, los tiempos de respuesta y los formatos de mensaje se mantienen idénticos.
++
++### Tecnología utilizada
++
++Implementado en Java 25 sobre Spring Boot 4.x, desplegado como servicio serverless en Google Cloud Run. La comunicación TCP se gestiona con Netty. La configuración de cada tienda se administra centralizadamente a través de Google Secret Manager, eliminando los archivos de propiedades locales.
++
++# 6. Servicio: Suite Cloud
++
++Suite Cloud agrupa dos responsabilidades diferenciadas según el tipo de operación:
++
++## 6.1 Suite Cloud – Ventas (Proceso Asíncrono)
++
++Recibe la notificación de nueva venta desde el Generador a través de Pub/Sub. Su función es procesar la trama, aplicar la lógica de negocio correspondiente al tipo de operación y generar el documento XML que representa la transacción.
++
++* Descarga la trama cifrada desde Firestore.
++* Determina el tipo de transacción (venta, devolución, cierre, etc.) y ejecuta el procesamiento específico.
++* Genera el documento XML de la venta en memoria y lo almacena en Firestore junto a la trama.
++* Actualiza el estado de la transacción y notifica a Distributor Cloud.
++
++Este procesamiento ocurre en segundo plano (asíncrono). La caja ya recibió su confirmación antes de que este proceso empiece, lo que desacopla completamente la experiencia del operador del tiempo de procesamiento en la nube.
++
++## 6.2 Suite Cloud – Consultas (Proceso Síncrono)
++
++Atiende todas las operaciones que requieren respuesta inmediata: consultas de precios, validaciones de clientes, consultas de retención, arqueo de medios de pago, etc.
++
++* Recibe la solicitud de consulta a través del canal síncrono de Pub/Sub.
++* Ejecuta la consulta correspondiente sobre Cloud SQL Server (base de datos local en la nube).
++* Devuelve el resultado al Generador para que este lo retransmita al Controlador.
++
++La separación entre ventas y consultas garantiza que una alta carga de procesamiento asíncrono nunca afecte los tiempos de respuesta de las consultas en tiempo real.
++
++## 6.3 Operaciones identificadas de suite
++
++Las operaciones son procesos que se ejecutan mediante demanda por TCP de acuerdo con el código definido y obtenido de la trama enviada. Se define el tipo con el cual serán identificadas en Firestore
++
++Se resaltan con amarillos cuyas operaciones no se evidenciaron en los registros logs. Que pueden ser consideradas como no usadas.
++
++|  |  |  |
++| --- | --- | --- |
++| **Código** | **Tipo** | **Operación** |
++| 7 | OPERATOR\_UPDATE | OperatorUpdateOperation |
++| 10 | SALE | TSLReaderOperation |
++| 11 | EL\_READER | ELReaderOperation |
++| 13 | CONSULT\_CED\_PAD\_RUC | ConsultaCedPadRucOperation |
++| 14 | CONSULT\_RETENCION | ConsultaRetencionOperation |
++| 15 | UPDATE\_ITEM | UpdateItemOperation |
++| 16 | SUSP\_TRANS | GenerateSuspTransOperation |
++| 19 | FILE\_RECEIVER | FileReceiverOperation |
++| 22 | CONSULT\_MOTO | ConsultaMotoOperation |
++| 23 | CONSULT\_GERENTES\_TIENDA | ConsultaGerentesTiendaOperation |
++| 24 | LOAD\_PARAMS | LoadParamsOperation |
++| 25 | CONSULT\_CLAVE\_SOCIEDAD | ConsultaClaveSociedadOperation |
++| 27 | CONSULT\_STORE | ConsultaStoreOperation |
++| 28 | ARQUEO\_MEDIO\_PAGO | ConsultaArqueoPorMedioDePago |
++| 29 | UPDATE\_CODE\_OPERA | UpdateCodeOperaOperation |
++| 33 | CONSULT\_RESERVA | ConsultaReservaOperation |
++| 35 | FILE\_UPDATER\_DOWN | FileUpdaterDownOperation |
++| 40 | SEND\_CLOSED\_PINPAD | SendClosedToPinPadOperation |
++| 41 | RETURN | ConsultaDevolucionOperation |
++| 42 | REGISTER\_ITEM\_FILES | RegisterItemFilesOperation |
++| 43 | FILE\_SENDER | FileSenderOperation |
++| 44 | RECEIVE\_RESPONSE\_SYSCARD | ReceiveResponseSyscardOperation |
++| 46 | ACTIVATE\_GIFTCARD | ActivateGiftcardOperation |
++| 47 | RECEIVE\_PUNTOS | ReceivePuntosOperation |
++| 48 | GENERATE\_SYSCARD\_CONCILIACION | GenerateSyscardConciliacionOperation |
++| 49 | REGISTER\_TRAMA\_FROM\_POS | RegisterTramaFromPosOperation |
++| 51 | REGISTER\_TRAMA\_FROM\_SERVER | RegisterTramaFromServerOperation |
++| 54 | REVERSE\_ILIMITADA | ReversarIlimitadaOperation |
++| 55 | GENERATE\_CONCILIACIONES | GenerateConciliacionesOperation |
++| 56 | TSL\_RENDER | TSLRenderOperation |
++| 61 | ACTIVATE\_VIRTUAL\_CARD | ActivateVirtualCardOperation |
++| 63 | CONSULT\_TARJETA | ConsultaTarjetaOperation |
++| 64 | UPDATE\_TARJETA | ActualizacionTarjetaOperation |
++| 65 | RECEIVE\_RESPONSE\_KIDCOIN | ReceiveResponseKidcoinOperation |
++| 66 | REVERSE\_KIDCOIN\_VC | ReverseKidcoinVCOperation |
++| 67 | OPERATOR\_PERFORMANCE | OperatorPerformanceOperation |
++| 68 | IMPRESION\_PAN\_POS | ImpresionPandPos |
++| 71 | FACTURA | FacturaOperation |
++|  | UNKNOWN | Código no mapeado |
++
++# 7. Servicio: Distributor Cloud
++
++Distributor Cloud es el puente entre el procesamiento en la nube y la base de datos local. Una vez que Suite Cloud ha generado el XML de la venta, Distributor Cloud lo toma y lo persiste en la base de datos Multi Local (Cloud SQL Server), que reemplaza a los servidores locales por tienda.
++
++### Responsabilidades principales
++
++* Recibir la notificación de Pub/Sub indicando que el XML de venta está disponible.
++* Descargar el XML desde Firestore.
++* Persistir la venta en Cloud SQL Server (base de datos Multi Local, accesible para todas las tiendas).
++* Actualizar el estado del documento en Firestore a `PROCESSED`.
++* Publicar un evento en el tópico `retail.local.distributor.processed.v1` para iniciar la replicación a BD Central.
++* Suscribir al tópico `retail.local.distributor.processed.v1-sub` (suscripción propia), obtener el ID del documento Firestore y leer el XML del payload.
++* Para transacciones SALE (tipo 10) y TM (tipo 67 – OperatorPerformance), insertar el XML en la tabla `TBL_XML_GENERATOR` de BD Central con estado `PE`, registrando: `COD_TIENDA`, `FECHA_TRANS`, `COD_DISTRIBUTOR`, `XML_GEN`, `FILE_NAME` y `FECHA_REGISTRO`.
++* Actualizar el estado del documento en Firestore a `PROCESSED_CENTRAL` una vez confirmada la inserción en BD Central.
++
++### Arquitectura Multi Local
++
++A diferencia del modelo actual, donde cada tienda tiene su propio servidor físico con base de datos local independiente, el nuevo modelo centraliza todas las tiendas en una única instancia Cloud SQL Server gestionada en GCP. Esta instancia soporta hasta 50 tiendas simultáneamente, con total aislamiento de datos por tienda. Las configuraciones específicas de cada tienda se administran desde Google Secret Manager.
++
++### Manejo de errores
++
++Si la persistencia falla, Distributor Cloud no hace ACK al mensaje de Pub/Sub. El sistema reintenta automáticamente. Si los reintentos se agotan, el mensaje va al Dead Letter Topic (DLQ) y se genera una alerta para el equipo de operaciones. Adicionalmente, un proceso programado (Cron Job) busca periódicamente documentos en estado de error y los reintenta de forma autónoma.
++
++# 8. Servicio: Transaction Cloud
++
++Transaction Cloud es el servicio encargado de toda la comunicación con el servidor Central de El Rosado. Agrupa los procesos que actualmente se ejecutan de forma local o manual y la orquesta de manera automatizada y resiliente desde la nube.
++
++### Responsabilidades
++
++|  |  |
++| --- | --- |
++| **Responsabilidad** | **Detalle** |
++| **Cierre de día** | Recoge los archivos de cierre de día generados por Portal Suite, los empaqueta y los transfiere a Central. |
++| **Journal de operaciones** | Al depositarse el archivo de journal en almacenamiento cloud (GCS), se dispara automáticamente el envío a Central. |
++| **Réplica de clientes** | Consulta periódicamente a Central para descargar actualizaciones de clientes y sincronizarlos en la base de datos local. |
++| **Devoluciones antiguas** | Permite recuperar ventas depuradas (más de 3 meses) desde la base de datos Central para registrarlas en el sistema local y habilitar el proceso de devolución. |
++
++## 8.1 Cierre de Día
++
++El cierre de día puede activarse desde Portal Suite (al generar el cierre) o desde un Cloud Scheduler como respaldo programado. Transaction Cloud recibe el evento, descarga el archivo ZIP desde Cloud Storage y lo transfiere al endpoint de Central correspondiente. El archivo se mueve a la carpeta de PROCESADOS una vez confirmada la transferencia exitosa.
++
++## 8.2 Journal de Operaciones
++
++Cuando se deposita un archivo de journal en Cloud Storage, el evento de creación del archivo dispara automáticamente el envío a Central. Este mecanismo reemplaza el sondeo cada 20 segundos del sistema actual, siendo más eficiente y reactivo.
++
++## 8.3 Réplica de Clientes
++
++De forma periódica y configurable, Transaction Cloud consulta a Central la lista de archivos de clientes pendientes de sincronización, los descarga, los decodifica y los almacena en Cloud Storage. Los datos de clientes certificados se persisten adicionalmente en la base de datos local para consultas del Portal Suite.
++
++# 9. Proceso de Devoluciones Antiguas
++
++## 9.1 Problemática Actual
++
++Actualmente, la base de datos local de cada tienda se depura cada 3 meses, eliminando registros de ventas antiguas para liberar espacio. Cuando un cliente solicita una devolución de una compra realizada hace más de 3 meses, la venta ya no existe en el sistema local, lo que impide iniciar el proceso de devolución desde el portal Suite.
++
++La solución actual es manual y operativamente costosa:
++
++* El operador busca el archivo XML de la venta en los respaldos del servidor local.
++* Coloca manualmente el archivo en la ruta de procesamiento del sistema.
++* Espera a que el sistema lo reinserte como si fuera una venta nueva.
++* Solo entonces puede proceder con la devolución desde el portal.
++
++Este proceso puede tomar varios minutos, requiere acceso a los respaldos y depende del criterio operativo de quien lo ejecuta. No existe trazabilidad ni registro automático de esta operación.
++
++## 9.2 Solución con Transaction Cloud
++
++Con la nueva arquitectura, Transaction Cloud cuenta con acceso directo a la base de datos Central de El Rosado, donde todas las ventas se conservan permanentemente. Esto permite implementar un flujo automatizado que resuelve el problema de forma transparente para el operador:
++
++|  |  |  |
++| --- | --- | --- |
++| **#** | **Actor** | **Acción** |
++| 1 | Operador / Portal Suite | Busca una venta por número de comprobante en el portal de devoluciones. |
++| 2 | Portal Suite – BD Local | El sistema consulta la base de datos local. Si la venta existe, se presenta en pantalla normalmente para continuar el proceso. |
++| 3 | Portal Suite – Venta no encontrada | Si la venta no existe en la BD local (fue depurada por tener más de 3 meses), se muestra un botón de «Buscar en Central». |
++| 4 | Transaction Cloud – BD Central | Transaction Cloud consulta la base de datos Central de El Rosado buscando la venta por número de comprobante. |
++| 5 | Transaction Cloud – BD Multi Local | Si la venta es encontrada en Central, Transaction Cloud la registra directamente en la base de datos Multi Local mediante ORM, restituyendo el registro de venta. |
++| 6 | Portal Suite | El portal muestra la venta recuperada. El operador puede registrar la devolución de forma normal. |
++
++## 9.3 Beneficios para la Operación
++
++* Eliminación del proceso manual: el operador no necesita buscar archivos ni intervenir en el sistema de archivos.
++* Rapidez: la recuperación de la venta desde Central es inmediata una vez presionado el botón.
++* Trazabilidad completa: el sistema registra cada recuperación, quién la solicitó y cuándo.
++* Sin impacto en ventas activas: el proceso de recuperación ocurre de forma aislada, sin interferir con las transacciones en curso.
++* Base para futuros requerimientos: el canal a Central ya disponible abre la puerta a consultas adicionales (auditorías, reportes históricos, etc.).
++
++### Nota técnica resumida
++
++La recuperación se realiza mediante ORM (acceso a base de datos con mapeo objeto-relacional) directamente sobre la base de datos Multi Local, replicando el mismo modelo de datos que usa el proceso normal de ventas. No se modifican ni crean registros en Central.
++
++# 10. Diagrama de proceso
++
++![](data:image/png;base64...)
++
++# 11. Resiliencia y Manejo de Errores
++
++El sistema fue diseñado bajo el principio de que ninguna transacción debe perderse. Todos los mecanismos de fallo son automáticos y transparentes para la operación en tienda:
++
++|  |  |
++| --- | --- |
++| **Mecanismo** | **Descripción** |
++| **Dead Letter Topic (DLQ)** | Mensajes que no pudieron ser procesados luego de varios intentos son redirigidos a una cola de errores para revisión sin afectar la operación. |
++| **Reintento automático** | El sistema reintenta automáticamente los mensajes fallidos con espera creciente entre intentos (backoff exponencial). |
++| **Cron Job – Distributor** | Proceso programado que busca documentos en estado fallido y los reintenta hasta N veces. |
++| **Cron Job – Transaction** | Proceso programado que detecta ventas en estado fallido de replicación y las reintenta hacia Central. |
++| **Firestore como respaldo** | Todos los eventos y sus estados están almacenados en Firestore. Ante cualquier fallo, el sistema puede recuperarse releyendo el estado real sin pérdida de información. |
++
++Ante un fallo en el servidor Central (por ejemplo, respuesta HTTP 5xx), el flujo de reintento es:
++
++* Intento 1 - Error - Reintento automático con espera corta.
++* Intento 2 - Error - Reintento automático con espera mayor.
++* Intento 3 - Error - Reintento automático con espera aún mayor.
++* Intento 4 - Error persistente - Mensaje pasa al Dead Letter Topic. El equipo de operaciones recibe alerta. El archivo permanece disponible en Cloud Storage para revisión.
++
++# 12. Infraestructura y Tecnología
++
++A continuación, los componentes de plataforma utilizados. Toda la infraestructura es serverless y administrada por GCP, eliminando la necesidad de gestionar servidores físicos o máquinas virtuales:
++
++|  |  |
++| --- | --- |
++| **Componente GCP** | **Función en el sistema** |
++| **Cloud Run (Serverless)** | Ejecuta todos los servicios (Generador, Suite Cloud, Distributor Cloud, Transaction Cloud). Escala automáticamente según demanda. |
++| **Cloud Firestore** | Base de datos de eventos. Almacena el ciclo de vida completo de cada transacción y sirve como mecanismo de trazabilidad y recuperación. |
++| **Cloud Pub/Sub** | Sistema de mensajería que desacopla los servicios. Garantiza la entrega de mensajes incluso ante fallos temporales. |
++| **Cloud SQL Server (Multi Local)** | Base de datos relacional que reemplaza los servidores locales por tienda. Una sola instancia soporta hasta 50 tiendas. |
++| **Cloud Storage (GCS)** | Almacenamiento de archivos: cierres de día, journals, réplica de clientes y respaldo de XMLs. |
++| **Secret Manager** | Centraliza la configuración de todas las tiendas: credenciales, parámetros de operación, mapas de operaciones. Sin archivos de propiedades locales. |
++| **Cloud KMS** | Cifra las tramas almacenadas en Firestore. Garantiza que el payload sensible nunca viaje ni se almacene en texto plano. |
++| **Cloud Scheduler** | Reemplaza los Cron Jobs locales. Dispara tareas programadas (cierre de día, réplica de clientes) de forma centralizada. |
++| **Cloud Monitoring / Logging** | Observabilidad unificada: logs estructurados, métricas de rendimiento y alertas automáticas ante fallos. |
++
++*Todos los servicios están implementados en Java 25 con Spring Boot 3.5.x, siguiendo estándares de gobierno de APIs REST y manejo de errores RFC 7807.*
++
++# 13. Alcance y Consideraciones
++
++### Dentro del alcance de este RTD
++
++* Diseño y construcción de los cuatro servicios: Generador, Suite Cloud, Distributor Cloud y Transaction Cloud.
++* Migración de los procesos de ventas, consultas, cierre de día, journal, réplica de clientes y devoluciones antiguas.
++* Configuración de infraestructura GCP: Cloud Run, Firestore, Pub/Sub, Cloud SQL Server Multi Local, Cloud Storage, Secret Manager, KMS.
++* Flujo de devoluciones antiguas con recuperación desde Base de Datos Central.
++
++### Dependencias y consideraciones
++
++* El proceso de devoluciones requiere conectividad entre Transaction Cloud y la Base de Datos Central de El Rosado.
++* Los Controladores y cajas no requieren cambio de software; únicamente se actualiza la IP del servidor destino.
+
+--- Diff for /.gitignore ---
+--- a//.gitignore
++++ b//.gitignore
+@@ -17,7 +17,6 @@
+ .idea
+ .claude
+ .claude_analytics
+-.claude_rules
+ *.iws
+ *.iml
+ *.ipr
+
+
+--- Diff for /CLAUDE.md ---
+--- a//CLAUDE.md
++++ b//CLAUDE.md
+@@ -1,6 +1,15 @@
+ # CLAUDE.md
+ 
+ This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
++
++## Reglas del proyecto (cargadas automáticamente)
++
++Los siguientes archivos definen las reglas de arquitectura, tecnología y diseño que **deben aplicarse en toda sesión y consulta**:
++
++@../.claude_rules/rules_and_prompt.md
++@../.claude_rules/sharedlibs.md
++@.claude_rules/RTD_VENTAS_CLOUD.md
++@.claude_rules/ALCANCE_COMPONENTE.md
+ 
+ ## Project Overview
+ 
+@@ -221,19 +230,19 @@
+ | **Generador** | Sync | Entry point: receives TCP frames from POS terminals, stores in Firestore, sends ACK, publishes to Pub/Sub. |
+ | **SuiteCloud – Ventas** *(this service)* | Async | Processes TSL frame, applies business logic, generates XML, persists in Firestore, notifies Distributor Cloud. |
+ | **SuiteCloud – Consultas** | Sync | Answers real-time queries (prices, stock, customers) from Cloud SQL Multi Local. |
+-| **Distributor Cloud** | Async | Persists XML to Cloud SQL Multi Local, updates Firestore state to `PROCESADO`, notifies Transaction Cloud. |
++| **Distributor Cloud** | Async | Persists XML to Cloud SQL Multi Local, updates Firestore state to `PROCESSED`, inserts XML into `TBL_XML_GENERATOR` in Central DB, updates Firestore state to `PROCESSED_CENTRAL`. |
+ | **Transaction Cloud** | Async | Transfers XML to Central DB, manages day-close, journal, customer replica, and old-return recovery. |
+ 
+ ### Transaction Lifecycle (Firestore states)
+ 
+ | Step | State | Meaning |
+ |------|-------|---------|
+-| 1 | `PENDIENTE` | Received and queued. |
+-| 2 | `EN_PROCESO` | SuiteCloud – Ventas is processing. |
+-| 3 | `XML_GENERADO` | SuiteCloud – Ventas finished; XML created. |
+-| 4 | `DISTRIBUYENDO` | Distributor Cloud persisting to SQL. |
+-| 5 | `PROCESADO` | Persisted in Cloud SQL Multi Local. |
+-| 6 | `TRANSFERIDO` | Transaction Cloud sent to Central DB. |
++| 1 | `PENDING` | Received and queued. |
++| 2 | `IN_PROCESS` | SuiteCloud – Ventas is processing. |
++| 3 | `XML_GENERATED` | SuiteCloud – Ventas finished; XML created. |
++| 4 | `DISTRIBUTING` | Distributor Cloud persisting to Cloud SQL Multi Local. |
++| 5 | `PROCESSED` | Persisted in Cloud SQL Multi Local. |
++| 6 | `PROCESSED_CENTRAL` | Distributor Cloud inserted XML into `TBL_XML_GENERATOR` in Central DB. |
+ 
+ No transaction is ever lost: Firestore holds state at every step; failed messages go to Dead Letter Topic (DLQ) with automatic backoff retry.
+ 
+@@ -248,7 +257,7 @@
+ 4. Applies the corresponding business logic for that operation type.
+ 5. Generates the transaction XML document in memory.
+ 6. Persists the XML in Firestore alongside the frame record.
+-7. Updates the transaction state in Firestore to `XML_GENERADO`.
++7. Updates the transaction state in Firestore to `XML_GENERATED`.
+ 8. Publishes a Pub/Sub event notifying Distributor Cloud that the XML is available.
+ 
+ ### What this service does NOT do
+
+
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -9,13 +9,19 @@
+   SPRING_PROFILES_ACTIVE: "dev"
+   SERVER_PORT: "8080"
+   # Identificación de Proyecto en Google Cloud Platform
+-  GCP_PROJECT_ID: "modern-suite-cloud-per-b55b0"
++  GCP_PROJECT_ID: "modern-suite-cloud-inf"
+   
+   # Parámetros de Tópicos y Suscripciones en GCP Pub/Sub
+   GCP_PUBSUB_SUB_VENTAS: "retail.local.ventas.request.v1-sub"
+   GCP_PUBSUB_TOPIC_VENTAS: "retail.local.ventas.request.v1"
+   GCP_PUBSUB_TOPIC_DISTRIBUTOR: "retail.local.distributor.request.v1"
+   GCP_FIRESTORE_COLLECTION: "frames"
++  GCP_FIRESTORE_COLLECTION_REPRO: "frames-repro"
++
++  # Configuración del scheduler de reproceso
++  REPRO_ENABLED: "true"
++  REPRO_POLLING_MS: "30000"
++  REPRO_BATCH_SIZE: "10"
+ 
+   # Nivel de logging global y de frameworks
+   LOGGING_LEVEL_ROOT: "INFO"
+
+
+--- Diff for /pom.xml ---
+--- a//pom.xml
++++ b//pom.xml
+@@ -123,25 +123,6 @@
+ 
+     </dependencies>
+ 
+-    <dependencyManagement>
+-        <!--<dependencies>
+-            <dependency>
+-                <groupId>com.google.cloud</groupId>
+-                <artifactId>spring-cloud-gcp-dependencies</artifactId>
+-                <version>${spring-cloud-gcp.version}</version>
+-                <type>pom</type>
+-                <scope>import</scope>
+-            </dependency>
+-            <dependency>
+-                <groupId>com.google.cloud</groupId>
+-                <artifactId>libraries-bom</artifactId>
+-                <version>26.34.0</version>
+-                <type>pom</type>
+-                <scope>import</scope>
+-            </dependency>
+-        </dependencies>-->
+-    </dependencyManagement>
+-
+     <build>
+         <plugins>
+             <plugin>
+@@ -161,6 +142,26 @@
+                     </compilerArgs>
+                 </configuration>
+             </plugin>
++
++            <plugin>
++                <groupId>org.jacoco</groupId>
++                <artifactId>jacoco-maven-plugin</artifactId>
++                <version>0.8.13</version>
++                <executions>
++                    <execution>
++                        <goals>
++                            <goal>prepare-agent</goal>
++                        </goals>
++                    </execution>
++                    <execution>
++                        <id>report</id>
++                        <phase>test</phase>
++                        <goals>
++                            <goal>report</goal>
++                        </goals>
++                    </execution>
++                </executions>
++            </plugin>
+         </plugins>
+     </build>
+ 
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/FrameRepro.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/FrameRepro.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/FrameRepro.java
+@@ -0,0 +1,10 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++/**
++ * Representa un documento de la colecciÃ³n frames-repro.
++ * El operador inserta solo id_repro; el campo status lo agrega la rÃ©plica que lo toma.
++ */
++public record FrameRepro(
++        String reproId,       // ID del documento en frames-repro
++        String transactionId  // id_repro â transactionId en colecciÃ³n frames
++) {}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/ReproUseCase.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/ReproUseCase.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/ReproUseCase.java
+@@ -0,0 +1,9 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.in;
++
++/**
++ * Caso de uso: reprocesar una transacciÃ³n con error de XML ya corregido manualmente en Firestore.
++ */
++public interface ReproUseCase {
++
++    void executeRepro(String reproId, String transactionId);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/FrameReproFirestorePort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/FrameReproFirestorePort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/FrameReproFirestorePort.java
+@@ -0,0 +1,36 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.FrameRepro;
++
++import java.util.List;
++
++/**
++ * Puerto de salida para operaciones sobre la colecciÃ³n frames-repro.
++ */
++public interface FrameReproFirestorePort {
++
++    /**
++     * Consulta documentos donde el campo status no existe (whereEqualTo("status", null)).
++     * Estos son los documentos insertados manualmente y aÃºn no tomados por ninguna rÃ©plica.
++     */
++    List<FrameRepro> queryPending(int maxResults);
++
++    /**
++     * Reclama atÃ³micamente el documento via Firestore Transaction.
++     * CondiciÃ³n: campo status ausente. Escribe status="PROCESSING" si gana.
++     * Retorna true si esta rÃ©plica ganÃ³; false si otra ya lo tomÃ³.
++     */
++    boolean claimDocument(String reproId, String instanceId);
++
++    /**
++     * Elimina el documento frames-repro tras procesamiento exitoso.
++     * La eliminaciÃ³n garantiza que no sea procesado nuevamente.
++     */
++    void deleteDocument(String reproId);
++
++    /**
++     * Libera el documento en caso de error: elimina el campo status con FieldValue.delete()
++     * para que vuelva a la condiciÃ³n inicial y sea tomable en el prÃ³ximo ciclo del scheduler.
++     */
++    void releaseDocument(String reproId);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/TransactionFirestorePort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/TransactionFirestorePort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/TransactionFirestorePort.java
+@@ -27,4 +27,17 @@
+      * Almacena el XML generado dentro del documento de Firestore como campo xmlGenerated.
+      */
+     void saveXmlPayload(String transactionId, String xmlString);
++
++    /**
++     * Lee el storeId del documento frames/{transactionId} para usarlo en la publicaciÃ³n al Distributor.
++     */
++    String readStoreIdForRepro(String transactionId);
++
++    /**
++     * Limpia el estado de error del documento frames para republicaciÃ³n al Distributor Cloud:
++     * - status = XML_GENERATED
++     * - errorMessageDistributor eliminado (FieldValue.delete)
++     * - updatedAt = now()
++     */
++    void clearErrorForRepro(String transactionId);
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/FrameReproSchedulerAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/FrameReproSchedulerAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/FrameReproSchedulerAdapter.java
+@@ -0,0 +1,96 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.scheduler;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.FrameRepro;
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.ReproUseCase;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.FrameReproFirestorePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.ReproProperties;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.scheduling.annotation.Scheduled;
++import org.springframework.stereotype.Component;
++
++import java.net.InetAddress;
++import java.util.List;
++
++/**
++ * Poller periÃ³dico de la colecciÃ³n frames-repro.
++ * Cada rÃ©plica ejecuta este mÃ©todo de forma independiente; el claim atÃ³mico en Firestore
++ * garantiza que cada documento sea procesado por exactamente una rÃ©plica.
++ */
++@Component
++public class FrameReproSchedulerAdapter {
++
++    private static final Logger log = LoggerFactory.getLogger(FrameReproSchedulerAdapter.class);
++    private static final String INSTANCE_ID = resolveInstanceId();
++
++    private final FrameReproFirestorePort reproFirestorePort;
++    private final ReproUseCase reproUseCase;
++    private final ReproProperties reproProperties;
++
++    public FrameReproSchedulerAdapter(
++            FrameReproFirestorePort reproFirestorePort,
++            ReproUseCase reproUseCase,
++            ReproProperties reproProperties) {
++        this.reproFirestorePort = reproFirestorePort;
++        this.reproUseCase = reproUseCase;
++        this.reproProperties = reproProperties;
++    }
++
++    @Scheduled(fixedDelayString = "${app.repro.polling-interval-ms:30000}")
++    public void poll() {
++        if (!reproProperties.enabled()) {
++            return;
++        }
++
++        List<FrameRepro> pending = reproFirestorePort.queryPending(reproProperties.batchSize());
++
++        if (pending.isEmpty()) {
++            log.atDebug().setMessage("Sin documentos frames-repro pendientes").log();
++            return;
++        }
++
++        log.atInfo()
++                .setMessage("Documentos frames-repro detectados")
++                .addKeyValue("count", pending.size())
++                .addKeyValue("instanceId", INSTANCE_ID)
++                .log();
++
++        for (FrameRepro repro : pending) {
++            processOne(repro);
++        }
++    }
++
++    private void processOne(FrameRepro repro) {
++        boolean claimed = reproFirestorePort.claimDocument(repro.reproId(), INSTANCE_ID);
++
++        if (!claimed) {
++            log.atDebug()
++                    .setMessage("frames-repro ya tomado por otra rÃ©plica â skip")
++                    .addKeyValue("reproId", repro.reproId())
++                    .log();
++            return;
++        }
++
++        try {
++            reproUseCase.executeRepro(repro.reproId(), repro.transactionId());
++            reproFirestorePort.deleteDocument(repro.reproId());
++
++        } catch (Exception e) {
++            log.atError()
++                    .setMessage("Error en reproceso â liberando documento para reintento")
++                    .addKeyValue("reproId", repro.reproId())
++                    .addKeyValue("transactionId", repro.transactionId())
++                    .setCause(e)
++                    .log();
++            reproFirestorePort.releaseDocument(repro.reproId());
++        }
++    }
++
++    private static String resolveInstanceId() {
++        try {
++            return InetAddress.getLocalHost().getHostName();
++        } catch (Exception e) {
++            return "unknown-" + ProcessHandle.current().pid();
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestoreTransactionAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestoreTransactionAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestoreTransactionAdapter.java
+@@ -5,12 +5,15 @@
+ import com.elrosado.cersuitecloudlocalcore.domain.model.TransactionStatus;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.TransactionFirestorePort;
+ import com.google.cloud.Timestamp;
++import com.google.cloud.firestore.FieldValue;
++import com.google.cloud.firestore.Firestore;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ import org.springframework.beans.factory.annotation.Value;
+ import org.springframework.stereotype.Component;
+ 
+ import java.util.Map;
++import java.util.concurrent.ExecutionException;
+ 
+ /**
+  * Adaptador de salida: lectura de payload y actualizaciÃ³n de estados en Firestore.
+@@ -33,16 +36,20 @@
+     private static final Logger log = LoggerFactory.getLogger(FirestoreTransactionAdapter.class);
+ 
+     // Nombres de campo en Firestore (escritos por el Generador â no modificar payload/status/storeId/typeTrama)
+-    private static final String FIELD_PAYLOAD = "payload";
+-    private static final String FIELD_STATUS = "status";
+-    private static final String FIELD_XML_GENERATED = "xmlGenerated";
+-    private static final String FIELD_ERROR = "errorMessage";
+-    private static final String FIELD_UPDATED = "updatedAt";
++    private static final String FIELD_PAYLOAD              = "payload";
++    private static final String FIELD_STATUS               = "status";
++    private static final String FIELD_XML_GENERATED        = "xmlGenerated";
++    private static final String FIELD_ERROR                = "errorMessage";
++    private static final String FIELD_ERROR_DISTRIBUTOR    = "errorMessageDistributor";
++    private static final String FIELD_STORE_ID             = "storeId";
++    private static final String FIELD_UPDATED              = "updatedAt";
+ 
+     private final IFirestoreService firestoreService;
++    private final Firestore firestore;
+ 
+-    public FirestoreTransactionAdapter(IFirestoreService firestoreService) {
++    public FirestoreTransactionAdapter(IFirestoreService firestoreService, Firestore firestore) {
+         this.firestoreService = firestoreService;
++        this.firestore = firestore;
+     }
+ 
+     @Value("${app.gcp.firestore.collection:frames}")
+@@ -95,4 +102,50 @@
+                 FIELD_UPDATED, Timestamp.now()
+         ));
+     }
++
++    @Override
++    public String readStoreIdForRepro(String transactionId) {
++        Map<String, Object> doc = firestoreService.getDocument(collection, transactionId);
++
++        Object storeId = doc.get(FIELD_STORE_ID);
++        if (storeId == null || storeId.toString().isBlank()) {
++            throw new IllegalStateException(
++                    "Campo storeId ausente en frames/" + transactionId);
++        }
++
++        log.atDebug()
++                .setMessage("storeId leÃ­do para reproceso")
++                .addKeyValue("transactionId", transactionId)
++                .addKeyValue("storeId", storeId.toString())
++                .log();
++
++        return storeId.toString();
++    }
++
++    @Override
++    public void clearErrorForRepro(String transactionId) {
++        try {
++            // update() con FieldValue.delete() requiere el bean Firestore nativo â
++            // IFirestoreService no expone FieldValue directamente.
++            firestore.collection(collection)
++                    .document(transactionId)
++                    .update(
++                            FIELD_STATUS,            TransactionStatus.XML_GENERATED.name(),
++                            FIELD_ERROR_DISTRIBUTOR, FieldValue.delete(),
++                            FIELD_UPDATED,           Timestamp.now()
++                    )
++                    .get();
++
++            log.atInfo()
++                    .setMessage("Frame limpiado para reproceso â XML_GENERATED")
++                    .addKeyValue("transactionId", transactionId)
++                    .log();
++
++        } catch (InterruptedException e) {
++            Thread.currentThread().interrupt();
++            throw new IllegalStateException("clearErrorForRepro interrumpido: " + transactionId, e);
++        } catch (ExecutionException e) {
++            throw new IllegalStateException("Error limpiando frame para reproceso: " + transactionId, e.getCause());
++        }
++    }
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FrameReproFirestoreAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FrameReproFirestoreAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FrameReproFirestoreAdapter.java
+@@ -0,0 +1,147 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.firestore;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.FrameRepro;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.FrameReproFirestorePort;
++import com.google.cloud.Timestamp;
++import com.google.cloud.firestore.DocumentReference;
++import com.google.cloud.firestore.DocumentSnapshot;
++import com.google.cloud.firestore.FieldValue;
++import com.google.cloud.firestore.Firestore;
++import com.google.cloud.firestore.QuerySnapshot;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.beans.factory.annotation.Value;
++import org.springframework.stereotype.Component;
++
++import java.util.ArrayList;
++import java.util.List;
++import java.util.Map;
++import java.util.concurrent.ExecutionException;
++
++/**
++ * Operaciones Firestore sobre la colecciÃ³n frames-repro.
++ * Usa el bean Firestore directamente (Spring Cloud GCP auto-config) para
++ * queries con filtro null y transacciones atÃ³micas.
++ */
++@Component
++public class FrameReproFirestoreAdapter implements FrameReproFirestorePort {
++
++    private static final Logger log = LoggerFactory.getLogger(FrameReproFirestoreAdapter.class);
++
++    private final Firestore firestore;
++
++    @Value("${app.gcp.firestore.collection-repro:frames-repro}")
++    private String reproCollection;
++
++    public FrameReproFirestoreAdapter(Firestore firestore) {
++        this.firestore = firestore;
++    }
++
++    @Override
++    public List<FrameRepro> queryPending(int maxResults) {
++        try {
++            // whereEqualTo("status", null) captura documentos donde el campo status
++            // estÃ¡ ausente o es explÃ­citamente null â ambos indican inserciÃ³n manual sin procesar.
++            QuerySnapshot snapshot = firestore
++                    .collection(reproCollection)
++                    .whereEqualTo("status", null)
++                    .limit(maxResults)
++                    .get()
++                    .get();
++
++            List<FrameRepro> result = new ArrayList<>();
++            for (DocumentSnapshot doc : snapshot.getDocuments()) {
++                String transactionId = doc.getString("id_repro");
++                if (transactionId != null && !transactionId.isBlank()) {
++                    result.add(new FrameRepro(doc.getId(), transactionId));
++                }
++            }
++            return result;
++
++        } catch (InterruptedException e) {
++            Thread.currentThread().interrupt();
++            throw new IllegalStateException("Consulta frames-repro interrumpida", e);
++        } catch (ExecutionException e) {
++            throw new IllegalStateException("Error consultando frames-repro pendientes", e.getCause());
++        }
++    }
++
++    @Override
++    public boolean claimDocument(String reproId, String instanceId) {
++        DocumentReference ref = firestore.collection(reproCollection).document(reproId);
++
++        try {
++            return firestore.runTransaction(transaction -> {
++                DocumentSnapshot snap = transaction.get(ref).get();
++
++                // CondiciÃ³n de claim: campo status debe estar ausente (null).
++                // Cualquier valor indica que otra rÃ©plica ya lo tomÃ³.
++                if (snap.getString("status") != null) {
++                    return false;
++                }
++
++                transaction.update(ref, Map.of(
++                        "status",     "PROCESSING",
++                        "claimedAt",  Timestamp.now(),
++                        "instanceId", instanceId
++                ));
++                return true;
++
++            }).get();
++
++        } catch (InterruptedException e) {
++            Thread.currentThread().interrupt();
++            throw new IllegalStateException("Claim frames-repro interrumpido: " + reproId, e);
++        } catch (ExecutionException e) {
++            log.atWarn()
++                    .setMessage("Conflicto de claim â otra rÃ©plica ganÃ³")
++                    .addKeyValue("reproId", reproId)
++                    .log();
++            return false;
++        }
++    }
++
++    @Override
++    public void deleteDocument(String reproId) {
++        try {
++            firestore.collection(reproCollection)
++                    .document(reproId)
++                    .delete()
++                    .get();
++
++            log.atInfo()
++                    .setMessage("Documento frames-repro eliminado tras reproceso exitoso")
++                    .addKeyValue("reproId", reproId)
++                    .log();
++
++        } catch (InterruptedException e) {
++            Thread.currentThread().interrupt();
++            throw new IllegalStateException("deleteDocument interrumpido: " + reproId, e);
++        } catch (ExecutionException e) {
++            throw new IllegalStateException("Error eliminando frames-repro: " + reproId, e.getCause());
++        }
++    }
++
++    @Override
++    public void releaseDocument(String reproId) {
++        try {
++            // Eliminar el campo status devuelve el documento al estado inicial
++            // (sin campo status), haciÃ©ndolo tomable en el prÃ³ximo ciclo del scheduler.
++            firestore.collection(reproCollection)
++                    .document(reproId)
++                    .update("status", FieldValue.delete())
++                    .get();
++
++            log.atWarn()
++                    .setMessage("Documento frames-repro liberado para reintento")
++                    .addKeyValue("reproId", reproId)
++                    .log();
++
++        } catch (InterruptedException e) {
++            Thread.currentThread().interrupt();
++            throw new IllegalStateException("releaseDocument interrumpido: " + reproId, e);
++        } catch (ExecutionException e) {
++            throw new IllegalStateException("Error liberando frames-repro: " + reproId, e.getCause());
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/ReproProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/ReproProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/ReproProperties.java
+@@ -0,0 +1,15 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.boot.context.properties.ConfigurationProperties;
++
++/**
++ * Propiedades de configuraciÃ³n del scheduler de reproceso frames-repro.
++ * Prefijo: {@code app.repro.*} en application.yml.
++ */
++@ConfigurationProperties(prefix = "app.repro")
++public record ReproProperties(boolean enabled, long pollingIntervalMs, int batchSize) {
++
++    public ReproProperties() {
++        this(true, 30_000L, 10);
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java
+@@ -0,0 +1,14 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.boot.context.properties.EnableConfigurationProperties;
++import org.springframework.context.annotation.Configuration;
++import org.springframework.scheduling.annotation.EnableScheduling;
++
++/**
++ * Habilita @Scheduled para el proceso de reproceso frames-repro.
++ */
++@Configuration
++@EnableScheduling
++@EnableConfigurationProperties(ReproProperties.class)
++public class SchedulingConfig {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/ReproService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/ReproService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/ReproService.java
+@@ -0,0 +1,52 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.ReproUseCase;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.EventPublisherPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.TransactionFirestorePort;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Service;
++
++/**
++ * Orquesta el reproceso de una transacciÃ³n cuyo XML fue corregido manualmente en Firestore.
++ *
++ * Flujo:
++ * 1. Leer storeId del documento frames
++ * 2. Limpiar errorMessageDistributor y marcar XML_GENERATED
++ * 3. Publicar al tÃ³pico de Distributor Cloud
++ */
++@Service
++public class ReproService implements ReproUseCase {
++
++    private static final Logger log = LoggerFactory.getLogger(ReproService.class);
++
++    private final TransactionFirestorePort firestorePort;
++    private final EventPublisherPort distributorPublisher;
++
++    public ReproService(TransactionFirestorePort firestorePort, EventPublisherPort distributorPublisher) {
++        this.firestorePort = firestorePort;
++        this.distributorPublisher = distributorPublisher;
++    }
++
++    @Override
++    public void executeRepro(String reproId, String transactionId) {
++        log.atInfo()
++                .setMessage("Iniciando reproceso de transacciÃ³n")
++                .addKeyValue("reproId", reproId)
++                .addKeyValue("transactionId", transactionId)
++                .log();
++
++        String storeId = firestorePort.readStoreIdForRepro(transactionId);
++
++        firestorePort.clearErrorForRepro(transactionId);
++
++        distributorPublisher.publishXmlGenerated(transactionId, storeId);
++
++        log.atInfo()
++                .setMessage("Reproceso completado â XML_GENERATED publicado al Distributor Cloud")
++                .addKeyValue("reproId", reproId)
++                .addKeyValue("transactionId", transactionId)
++                .addKeyValue("storeId", storeId)
++                .log();
++    }
++}
+
+
+--- Diff for /src/main/resources/application-local.yml ---
+--- a//src/main/resources/application-local.yml
++++ b//src/main/resources/application-local.yml
+@@ -85,9 +85,12 @@
+ 
+ app:
+   gcp:
+-    kms:
+-      enabled: false   # KMS deshabilitado en local — el payload se lee sin descifrar
+     pubsub:
+       topic-distributor: retail.local.distributor.request.v1
+     firestore:
+       collection: frames
++      collection-repro: frames-repro
++  repro:
++    enabled: true
++    polling-interval-ms: 30000
++    batch-size: 10
+
+
+--- Diff for /src/main/resources/application-prod.yml ---
+--- a//src/main/resources/application-prod.yml
++++ b//src/main/resources/application-prod.yml
+@@ -62,12 +62,6 @@
+     - subscription-id: ${GCP_PUBSUB_SUB_VENTAS}
+       topic-id: ${GCP_PUBSUB_TOPIC_VENTAS}
+ 
+-google:
+-  kms:
+-    project-id: ${GCP_PROJECT_ID}
+-    location-id: ${KMS_LOCATION_ID:global}
+-    key-ring-id: ${KMS_KEY_RING_ID}
+-    crypto-key-id: ${KMS_CRYPTO_KEY_ID}
+ 
+ app:
+   gcp:
+@@ -75,3 +69,8 @@
+       topic-distributor: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR}
+     firestore:
+       collection: ${GCP_FIRESTORE_COLLECTION:frames}
++      collection-repro: ${GCP_FIRESTORE_COLLECTION_REPRO:frames-repro}
++  repro:
++    enabled: ${REPRO_ENABLED:true}
++    polling-interval-ms: ${REPRO_POLLING_MS:30000}
++    batch-size: ${REPRO_BATCH_SIZE:10}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/event/PubSubSalesAdapterTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/event/PubSubSalesAdapterTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/event/PubSubSalesAdapterTest.java
+@@ -38,7 +38,9 @@
+ 
+     @BeforeEach
+     void setUp() {
+-        adapter = new PubSubSalesAdapter(messageSubscriber, processSaleUseCase, virtualThreadTaskExecutor);
++        adapter = new PubSubSalesAdapter(
++                messageSubscriber, processSaleUseCase, virtualThreadTaskExecutor,
++                new tools.jackson.databind.ObjectMapper());
+ 
+         // Ejecuta el Runnable en el hilo del test â elimina la asincronÃ­a del Virtual Thread.
+         // lenient() porque no todos los tests despachan mensajes (registerSubscriber_calledOnce no llama execute).
+@@ -67,7 +69,7 @@
+     void onMessage_processSaleSuccess_completesWithAck() throws Exception {
+         BiFunction<String, String, CompletableFuture<Boolean>> handler = captureHandler();
+ 
+-        CompletableFuture<Boolean> result = handler.apply("sub-ventas", "trx-001");
++        CompletableFuture<Boolean> result = handler.apply("sub-ventas", "{\"transactionId\":\"trx-001\"}");
+ 
+         assertTrue(result.isDone(), "El resultado debe estar completo");
+         assertTrue(result.get(), "processSale exitoso â ACK (true)");
+@@ -83,7 +85,7 @@
+         doThrow(new RuntimeException("Parse error")).when(processSaleUseCase).processSale(any());
+         BiFunction<String, String, CompletableFuture<Boolean>> handler = captureHandler();
+ 
+-        CompletableFuture<Boolean> result = handler.apply("sub-ventas", "trx-002");
++        CompletableFuture<Boolean> result = handler.apply("sub-ventas", "{\"transactionId\":\"trx-002\"}");
+ 
+         assertTrue(result.isDone(), "El resultado debe estar completo incluso en error");
+         assertFalse(result.get(), "processSale con excepciÃ³n â NACK (false)");
+@@ -94,14 +96,12 @@
+     // -----------------------------------------------------------------------
+ 
+     @Test
+-    void onMessage_payloadWithWhitespace_trimmedBeforeProcessing() throws Exception {
++    void onMessage_payloadJson_transactionIdExtraido() throws Exception {
+         BiFunction<String, String, CompletableFuture<Boolean>> handler = captureHandler();
+ 
+-        handler.apply("sub-ventas", "  trx-003  ").get();
++        handler.apply("sub-ventas", "{\"transactionId\":\"trx-003\",\"extra\":\"ignored\"}").get();
+ 
+-        // El transactionId enviado al use case debe estar sin espacios
+         verify(processSaleUseCase).processSale("trx-003");
+-        verify(processSaleUseCase, never()).processSale("  trx-003  ");
+     }
+ 
+     // -----------------------------------------------------------------------
+@@ -123,11 +123,12 @@
+     void onMessage_transactionIdComesFromPayload_notFromSubscriptionId() throws Exception {
+         BiFunction<String, String, CompletableFuture<Boolean>> handler = captureHandler();
+ 
+-        // Diferentes subscriptionIds pero el mismo payload â siempre procesa el payload
+-        handler.apply("sub-ventas-store-100", "trx-payload-001").get();
+-        handler.apply("sub-ventas-store-200", "trx-payload-001").get();
++        String payload = "{\"transactionId\":\"trx-payload-001\"}";
+ 
+-        // processSale recibe el transactionId del payload, dos veces
++        // Diferentes subscriptionIds pero el mismo payload â siempre procesa el transactionId del JSON
++        handler.apply("sub-ventas-store-100", payload).get();
++        handler.apply("sub-ventas-store-200", payload).get();
++
+         verify(processSaleUseCase, times(2)).processSale("trx-payload-001");
+     }
+ }
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/FrameReproSchedulerAdapterTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/FrameReproSchedulerAdapterTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/FrameReproSchedulerAdapterTest.java
+@@ -0,0 +1,111 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.scheduler;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.FrameRepro;
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.ReproUseCase;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.FrameReproFirestorePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.ReproProperties;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.InjectMocks;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.util.List;
++
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.ArgumentMatchers.eq;
++import static org.mockito.Mockito.*;
++
++@ExtendWith(MockitoExtension.class)
++class FrameReproSchedulerAdapterTest {
++
++    @Mock
++    FrameReproFirestorePort reproFirestorePort;
++    @Mock
++    ReproUseCase reproUseCase;
++    @Mock
++    ReproProperties reproProperties;
++
++    @InjectMocks
++    FrameReproSchedulerAdapter scheduler;
++
++    @BeforeEach
++    void setUp() {
++        lenient().when(reproProperties.enabled()).thenReturn(true);
++        lenient().when(reproProperties.batchSize()).thenReturn(10);
++    }
++
++    @Test
++    void poll_deshabilitado_noConsultaFirestore() {
++        when(reproProperties.enabled()).thenReturn(false);
++
++        scheduler.poll();
++
++        verifyNoInteractions(reproFirestorePort, reproUseCase);
++    }
++
++    @Test
++    void poll_sinDocumentos_noInvocaUseCase() {
++        when(reproFirestorePort.queryPending(10)).thenReturn(List.of());
++
++        scheduler.poll();
++
++        verifyNoInteractions(reproUseCase);
++    }
++
++    @Test
++    void poll_claimFalla_skipSinProcesar() {
++        FrameRepro repro = new FrameRepro("r1", "tx1");
++        when(reproFirestorePort.queryPending(10)).thenReturn(List.of(repro));
++        when(reproFirestorePort.claimDocument(eq("r1"), any())).thenReturn(false);
++
++        scheduler.poll();
++
++        verifyNoInteractions(reproUseCase);
++        verify(reproFirestorePort, never()).deleteDocument(any());
++        verify(reproFirestorePort, never()).releaseDocument(any());
++    }
++
++    @Test
++    void poll_claimExitoso_ejecutaReproYEliminaDocumento() {
++        FrameRepro repro = new FrameRepro("r2", "tx2");
++        when(reproFirestorePort.queryPending(10)).thenReturn(List.of(repro));
++        when(reproFirestorePort.claimDocument(eq("r2"), any())).thenReturn(true);
++
++        scheduler.poll();
++
++        verify(reproUseCase).executeRepro("r2", "tx2");
++        verify(reproFirestorePort).deleteDocument("r2");
++        verify(reproFirestorePort, never()).releaseDocument(any());
++    }
++
++    @Test
++    void poll_reproFalla_liberaDocumentoParaReintento() {
++        FrameRepro repro = new FrameRepro("r3", "tx3");
++        when(reproFirestorePort.queryPending(10)).thenReturn(List.of(repro));
++        when(reproFirestorePort.claimDocument(eq("r3"), any())).thenReturn(true);
++        doThrow(new RuntimeException("Firestore timeout"))
++                .when(reproUseCase).executeRepro(any(), any());
++
++        scheduler.poll();
++
++        verify(reproFirestorePort).releaseDocument("r3");
++        verify(reproFirestorePort, never()).deleteDocument(any());
++    }
++
++    @Test
++    void poll_variosDocumentos_procesaCadaUnoIndependientemente() {
++        FrameRepro r1 = new FrameRepro("r1", "tx1");
++        FrameRepro r2 = new FrameRepro("r2", "tx2");
++        when(reproFirestorePort.queryPending(10)).thenReturn(List.of(r1, r2));
++        when(reproFirestorePort.claimDocument(eq("r1"), any())).thenReturn(true);
++        when(reproFirestorePort.claimDocument(eq("r2"), any())).thenReturn(false);
++
++        scheduler.poll();
++
++        verify(reproUseCase).executeRepro("r1", "tx1");
++        verify(reproFirestorePort).deleteDocument("r1");
++        verify(reproUseCase, never()).executeRepro(eq("r2"), any());
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/ReproServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/ReproServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/ReproServiceTest.java
+@@ -0,0 +1,60 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.EventPublisherPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.TransactionFirestorePort;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.InjectMocks;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import static org.junit.jupiter.api.Assertions.assertThrows;
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.Mockito.*;
++
++@ExtendWith(MockitoExtension.class)
++class ReproServiceTest {
++
++    @Mock
++    TransactionFirestorePort firestorePort;
++    @Mock
++    EventPublisherPort distributorPublisher;
++
++    @InjectMocks
++    ReproService reproService;
++
++    @Test
++    void executeRepro_flujoCompleto_leeStoreIdLimpiaErrorPublica() {
++        when(firestorePort.readStoreIdForRepro("txId")).thenReturn("002");
++
++        reproService.executeRepro("repro1", "txId");
++
++        verify(firestorePort).readStoreIdForRepro("txId");
++        verify(firestorePort).clearErrorForRepro("txId");
++        verify(distributorPublisher).publishXmlGenerated("txId", "002");
++    }
++
++    @Test
++    void executeRepro_storeIdAusente_lanzaExcepcionSinPublicar() {
++        when(firestorePort.readStoreIdForRepro("txId"))
++                .thenThrow(new IllegalStateException("Campo storeId ausente en frames/txId"));
++
++        assertThrows(IllegalStateException.class,
++                () -> reproService.executeRepro("repro1", "txId"));
++
++        verify(firestorePort, never()).clearErrorForRepro(any());
++        verifyNoInteractions(distributorPublisher);
++    }
++
++    @Test
++    void executeRepro_errorAlLimpiar_lanzaExcepcionSinPublicar() {
++        when(firestorePort.readStoreIdForRepro("txId")).thenReturn("005");
++        doThrow(new IllegalStateException("Firestore timeout"))
++                .when(firestorePort).clearErrorForRepro("txId");
++
++        assertThrows(IllegalStateException.class,
++                () -> reproService.executeRepro("repro1", "txId"));
++
++        verifyNoInteractions(distributorPublisher);
++    }
++}
+
+

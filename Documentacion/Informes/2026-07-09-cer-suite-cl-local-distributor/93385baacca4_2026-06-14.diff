@@ -1,0 +1,2006 @@
+--- Diff for /.gitignore ---
+--- a//.gitignore
++++ b//.gitignore
+@@ -1,5 +1,6 @@
+ HELP.md
+ target/
++.claude_analytics
+ .mvn/wrapper/maven-wrapper.jar
+ !**/src/main/**/target/
+ !**/src/test/**/target/
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/application/service/CentralReplicationService.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/application/service/CentralReplicationService.java
++++ b//src/main/java/com/elrosado/distributor_cloud/application/service/CentralReplicationService.java
+@@ -0,0 +1,156 @@
++package com.elrosado.distributor_cloud.application.service;
++
++import com.elrosado.distributor_cloud.domain.model.CentralReplicationPayload;
++import com.elrosado.distributor_cloud.domain.model.CentralXmlRecord;
++import com.elrosado.distributor_cloud.domain.model.TmTransactionData;
++import com.elrosado.distributor_cloud.domain.port.in.ReplicateToCentralUseCase;
++import com.elrosado.distributor_cloud.domain.port.out.DistributorFirestorePort;
++import com.elrosado.distributor_cloud.domain.port.out.SaleXmlGeneratorPort;
++import com.elrosado.distributor_cloud.domain.port.out.TmTransactionPort;
++import com.elrosado.distributor_cloud.infrastructure.config.properties.DistributorProperties;
++import lombok.RequiredArgsConstructor;
++import lombok.extern.slf4j.Slf4j;
++import org.springframework.stereotype.Service;
++import org.w3c.dom.Document;
++import org.w3c.dom.NodeList;
++import org.xml.sax.InputSource;
++
++import javax.xml.parsers.DocumentBuilderFactory;
++import java.io.StringReader;
++import java.time.LocalDate;
++import java.time.LocalDateTime;
++import java.time.LocalTime;
++import java.time.format.DateTimeFormatter;
++
++/**
++ * Caso de uso: replicaciÃ³n de transacciones hacia BD Central (ARTS_EC).
++ * Bifurca entre TBL_XML_GENERATOR (SALE tipo 10) y TR_TM_TRN (TM tipo 67).
++ * Reemplaza completamente la lÃ³gica de SP_TRANSACCIONES_PROCESSED y el endpoint
++ * POST /transactions/compress del servicio legacy cer-suite-central-serv-suite-service.
++ */
++@Service
++@RequiredArgsConstructor
++@Slf4j
++public class CentralReplicationService implements ReplicateToCentralUseCase {
++
++    private static final String TYPE_SALE = "10";
++    private static final String TYPE_TM   = "67";
++
++    private final DistributorFirestorePort firestorePort;
++    private final SaleXmlGeneratorPort     salePort;
++    private final TmTransactionPort        tmPort;
++    private final DistributorProperties    distributorProps;
++
++    @Override
++    public void replicate(String transactionId) {
++        CentralReplicationPayload payload = firestorePort.readReplicationPayload(transactionId);
++
++        switch (payload.typeTrama()) {
++            case TYPE_SALE -> replicateSale(transactionId, payload);
++            case TYPE_TM   -> replicateTm(transactionId, payload);
++            default -> {
++                log.atWarn()
++                   .setMessage("typeTrama no soportado para replicaciÃ³n central â se omite sin error")
++                   .addKeyValue("transactionId", transactionId)
++                   .addKeyValue("typeTrama", payload.typeTrama())
++                   .log();
++                firestorePort.updateReplicationError(transactionId,
++                        "typeTrama no soportado para replicaciÃ³n central: " + payload.typeTrama());
++                return;
++            }
++        }
++
++        firestorePort.updateStatusProcessedCentral(transactionId);
++    }
++
++    // --- SALE (tipo 10) â TBL_XML_GENERATOR ---
++
++    private void replicateSale(String transactionId, CentralReplicationPayload payload) {
++        String codDistributor = distributorProps.resolveCode(payload.storeId());
++        LocalDateTime fechaTrans = payload.createdAt();
++        String fileName = buildSaleFileName(transactionId, payload.storeId(), fechaTrans);
++
++        salePort.insert(new CentralXmlRecord(
++                payload.storeId(),
++                fechaTrans,
++                codDistributor,
++                payload.xmlGenerated(),
++                fileName));
++
++        log.atInfo()
++           .setMessage("XML SALE replicado en TBL_XML_GENERATOR")
++           .addKeyValue("transactionId", transactionId)
++           .addKeyValue("storeId", payload.storeId())
++           .addKeyValue("codDistributor", codDistributor)
++           .addKeyValue("fileName", fileName)
++           .log();
++    }
++
++    // --- TM (tipo 67) â TR_TM_TRN (lÃ³gica migrada de SP_TRANSACCIONES_PROCESSED) ---
++
++    private void replicateTm(String transactionId, CentralReplicationPayload payload) {
++        TmTransactionData data = parseTmXml(payload.xmlGenerated());
++
++        // Dedup idempotente â equivale al LEFT JOIN â¦ WHERE t.NUMERO_FACTURA IS NULL del SP
++        if (tmPort.existsByInvoiceNumber(data.invoiceNumber())) {
++            log.atWarn()
++               .setMessage("TM duplicado â ya existe en TR_TM_TRN, se omite inserciÃ³n")
++               .addKeyValue("transactionId", transactionId)
++               .addKeyValue("invoiceNumber", data.invoiceNumber())
++               .log();
++            return;
++        }
++
++        tmPort.insert(data);
++
++        log.atInfo()
++           .setMessage("XML TM replicado en TR_TM_TRN")
++           .addKeyValue("transactionId", transactionId)
++           .addKeyValue("invoiceNumber", data.invoiceNumber())
++           .addKeyValue("storeCode", data.storeCode())
++           .log();
++    }
++
++    // --- Parsing DOM del XML TM (reemplaza XQuery de SP_TRANSACCIONES_PROCESSED) ---
++
++    private TmTransactionData parseTmXml(String xmlContent) {
++        try {
++            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
++            // PrevenciÃ³n de XXE â SonarQube S2755
++            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
++            factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
++            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
++            factory.setExpandEntityReferences(false);
++
++            Document doc = factory.newDocumentBuilder()
++                    .parse(new InputSource(new StringReader(xmlContent)));
++            doc.getDocumentElement().normalize();
++
++            return new TmTransactionData(
++                    Integer.parseInt(getText(doc, "StoreCode")),
++                    getText(doc, "InvoiceNumber"),
++                    LocalDate.parse(getText(doc, "TransactionDate")),
++                    LocalTime.parse(getText(doc, "BeginTime")),
++                    LocalTime.parse(getText(doc, "PayTime")),
++                    LocalTime.parse(getText(doc, "EndTime")),
++                    Integer.parseInt(getText(doc, "AssuredTime")),
++                    Integer.parseInt(getText(doc, "IdleTime")));
++        } catch (Exception ex) {
++            throw new IllegalArgumentException(
++                    "XML TM malformado â no se puede parsear para TR_TM_TRN", ex);
++        }
++    }
++
++    private String getText(Document doc, String tag) {
++        NodeList nodes = doc.getElementsByTagName(tag);
++        if (nodes.getLength() == 0 || nodes.item(0) == null) {
++            throw new IllegalArgumentException("Elemento XML no encontrado: " + tag);
++        }
++        return nodes.item(0).getTextContent().strip();
++    }
++
++    private String buildSaleFileName(String transactionId, String storeId, LocalDateTime fechaTrans) {
++        String fecha = fechaTrans.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
++        return "%s_%s_SALE_%s.xml".formatted(storeId, fecha, transactionId);
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/domain/model/CentralReplicationPayload.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/domain/model/CentralReplicationPayload.java
++++ b//src/main/java/com/elrosado/distributor_cloud/domain/model/CentralReplicationPayload.java
+@@ -0,0 +1,14 @@
++package com.elrosado.distributor_cloud.domain.model;
++
++import java.time.LocalDateTime;
++
++/**
++ * Campos del documento Firestore necesarios para replicar una transacciÃ³n en BD Central.
++ */
++public record CentralReplicationPayload(
++        String transactionId,
++        String xmlGenerated,
++        String storeId,
++        String typeTrama,
++        LocalDateTime createdAt
++) {}
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/domain/model/CentralXmlRecord.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/domain/model/CentralXmlRecord.java
++++ b//src/main/java/com/elrosado/distributor_cloud/domain/model/CentralXmlRecord.java
+@@ -0,0 +1,14 @@
++package com.elrosado.distributor_cloud.domain.model;
++
++import java.time.LocalDateTime;
++
++/**
++ * Datos necesarios para insertar una transacciÃ³n SALE en TBL_XML_GENERATOR de BD Central.
++ */
++public record CentralXmlRecord(
++        String codTienda,
++        LocalDateTime fechaTrans,
++        String codDistributor,
++        String xmlGen,
++        String fileName
++) {}
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/domain/model/TmTransactionData.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/domain/model/TmTransactionData.java
++++ b//src/main/java/com/elrosado/distributor_cloud/domain/model/TmTransactionData.java
+@@ -0,0 +1,19 @@
++package com.elrosado.distributor_cloud.domain.model;
++
++import java.time.LocalDate;
++import java.time.LocalTime;
++
++/**
++ * Datos extraÃ­dos del XML TM (OperatorPerformance) para insertar en TR_TM_TRN de BD Central.
++ * Equivale a los campos que el SP_TRANSACCIONES_PROCESSED extraÃ­a con XQuery.
++ */
++public record TmTransactionData(
++        int storeCode,
++        String invoiceNumber,
++        LocalDate transactionDate,
++        LocalTime beginTime,
++        LocalTime payTime,
++        LocalTime endTime,
++        int assuredTime,
++        int idleTime
++) {}
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/domain/port/in/ReplicateToCentralUseCase.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/domain/port/in/ReplicateToCentralUseCase.java
++++ b//src/main/java/com/elrosado/distributor_cloud/domain/port/in/ReplicateToCentralUseCase.java
+@@ -0,0 +1,15 @@
++package com.elrosado.distributor_cloud.domain.port.in;
++
++/**
++ * Puerto de entrada: caso de uso de replicaciÃ³n de una transacciÃ³n en BD Central.
++ */
++public interface ReplicateToCentralUseCase {
++
++    /**
++     * Replica el XML de la transacciÃ³n identificada por {@code transactionId} en BD Central.
++     * Bifurca entre TBL_XML_GENERATOR (SALE tipo 10) y TR_TM_TRN (TM tipo 67).
++     *
++     * @param transactionId ID del documento Firestore con los datos de la transacciÃ³n
++     */
++    void replicate(String transactionId);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/domain/port/out/DistributorFirestorePort.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/domain/port/out/DistributorFirestorePort.java
++++ b//src/main/java/com/elrosado/distributor_cloud/domain/port/out/DistributorFirestorePort.java
+@@ -0,0 +1,27 @@
++package com.elrosado.distributor_cloud.domain.port.out;
++
++import com.elrosado.distributor_cloud.domain.model.CentralReplicationPayload;
++
++/**
++ * Puerto de salida: operaciones Firestore especÃ­ficas del flujo de replicaciÃ³n central.
++ * Separado de TlogDocumentPort para no mezclar responsabilidades de los dos flujos.
++ */
++public interface DistributorFirestorePort {
++
++    /**
++     * Lee los campos necesarios para la replicaciÃ³n central: xmlGenerated, storeId,
++     * typeTrama y created_at.
++     */
++    CentralReplicationPayload readReplicationPayload(String transactionId);
++
++    /**
++     * Actualiza el estado del documento a PROCESSED_CENTRAL tras inserciÃ³n exitosa en BD Central.
++     */
++    void updateStatusProcessedCentral(String transactionId);
++
++    /**
++     * Registra un error de replicaciÃ³n en el campo errorMessageDistributor, sin modificar
++     * el campo status ni el errorMessage escrito por SuiteCloud â Ventas.
++     */
++    void updateReplicationError(String transactionId, String errorMessage);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/domain/port/out/SaleXmlGeneratorPort.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/domain/port/out/SaleXmlGeneratorPort.java
++++ b//src/main/java/com/elrosado/distributor_cloud/domain/port/out/SaleXmlGeneratorPort.java
+@@ -0,0 +1,15 @@
++package com.elrosado.distributor_cloud.domain.port.out;
++
++import com.elrosado.distributor_cloud.domain.model.CentralXmlRecord;
++
++/**
++ * Puerto de salida: inserta transacciones SALE en TBL_XML_GENERATOR de BD Central.
++ */
++public interface SaleXmlGeneratorPort {
++
++    /**
++     * Inserta el XML de una transacciÃ³n SALE (tipo 10) en TBL_XML_GENERATOR con estado PE.
++     * No verifica duplicados â el estado es gestionado por el sistema central downstream.
++     */
++    void insert(CentralXmlRecord record);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/domain/port/out/TmTransactionPort.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/domain/port/out/TmTransactionPort.java
++++ b//src/main/java/com/elrosado/distributor_cloud/domain/port/out/TmTransactionPort.java
+@@ -0,0 +1,21 @@
++package com.elrosado.distributor_cloud.domain.port.out;
++
++import com.elrosado.distributor_cloud.domain.model.TmTransactionData;
++
++/**
++ * Puerto de salida: gestiona registros de rendimiento de operador (TM) en TR_TM_TRN de BD Central.
++ */
++public interface TmTransactionPort {
++
++    /**
++     * Verifica si el nÃºmero de factura ya existe en TR_TM_TRN.
++     * Equivale al LEFT JOIN â¦ WHERE t.NUMERO_FACTURA IS NULL del SP_TRANSACCIONES_PROCESSED.
++     */
++    boolean existsByInvoiceNumber(String invoiceNumber);
++
++    /**
++     * Inserta los datos de rendimiento de operador en TR_TM_TRN.
++     * Equivale a la lÃ³gica de inserciÃ³n migrada de SP_TRANSACCIONES_PROCESSED.
++     */
++    void insert(TmTransactionData data);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/in/pubsub/CentralReplicationMessageHandler.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/in/pubsub/CentralReplicationMessageHandler.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/in/pubsub/CentralReplicationMessageHandler.java
+@@ -0,0 +1,71 @@
++package com.elrosado.distributor_cloud.infrastructure.adapter.in.pubsub;
++
++import com.elrosado.distributor_cloud.domain.port.in.ReplicateToCentralUseCase;
++import com.elrosado.distributor_cloud.domain.port.out.DistributorFirestorePort;
++import lombok.RequiredArgsConstructor;
++import lombok.extern.slf4j.Slf4j;
++import org.springframework.stereotype.Component;
++
++import java.util.concurrent.CompletableFuture;
++
++/**
++ * Handler del flujo BD Multi-Local â BD Central.
++ * Procesa mensajes de retail.local.distributor.processed.v1-sub y replica el XML
++ * en TBL_XML_GENERATOR (SALE) o TR_TM_TRN (TM) segÃºn el typeTrama del documento Firestore.
++ *
++ * <p>ACK/NACK:
++ * <ul>
++ *   <li>ACK â procesado OK, duplicado TM (idempotente), typeTrama no soportado (no reintentable)</li>
++ *   <li>NACK â cualquier excepciÃ³n de infraestructura (BD Central / Firestore): Pub/Sub reintenta con backoff</li>
++ * </ul>
++ */
++@Component
++@RequiredArgsConstructor
++@Slf4j
++public class CentralReplicationMessageHandler {
++
++    private final ReplicateToCentralUseCase replicateUseCase;
++    private final DistributorFirestorePort  firestorePort;
++
++    public CompletableFuture<Boolean> handle(String subscriptionId, String transactionId) {
++        log.atInfo()
++           .setMessage("Mensaje de replicaciÃ³n central recibido")
++           .addKeyValue("subscriptionId", subscriptionId)
++           .addKeyValue("transactionId", transactionId)
++           .log();
++
++        try {
++            replicateUseCase.replicate(transactionId);
++            return CompletableFuture.completedFuture(true);
++
++        } catch (com.elrosado.jlib_firestore.exceptions.FirestoreException e) {
++            log.atError()
++               .setMessage("Error de Firestore en replicaciÃ³n central â NACK para reintento")
++               .addKeyValue("transactionId", transactionId)
++               .setCause(e)
++               .log();
++            return CompletableFuture.completedFuture(false);
++
++        } catch (Exception e) {
++            log.atError()
++               .setMessage("Error en replicaciÃ³n a BD Central â NACK para reintento")
++               .addKeyValue("transactionId", transactionId)
++               .setCause(e)
++               .log();
++            intentarRegistrarError(transactionId, e.getMessage());
++            return CompletableFuture.completedFuture(false);
++        }
++    }
++
++    private void intentarRegistrarError(String transactionId, String mensaje) {
++        try {
++            firestorePort.updateReplicationError(transactionId, mensaje);
++        } catch (Exception ex) {
++            log.atError()
++               .setMessage("No se pudo registrar error de replicaciÃ³n en Firestore")
++               .addKeyValue("transactionId", transactionId)
++               .setCause(ex)
++               .log();
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/in/pubsub/TlogMessageHandler.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/in/pubsub/TlogMessageHandler.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/in/pubsub/TlogMessageHandler.java
+@@ -0,0 +1,105 @@
++package com.elrosado.distributor_cloud.infrastructure.adapter.in.pubsub;
++
++import com.elrosado.distributor_cloud.application.service.TransactionProcessingService;
++import com.elrosado.distributor_cloud.domain.model.xml.Transaction;
++import com.elrosado.distributor_cloud.domain.port.out.TlogDocumentPort;
++import com.elrosado.distributor_cloud.infrastructure.adapter.out.tlog.TlogXmlParser;
++import com.elrosado.jlib_pubsub.interfaces.IMessagePublisher;
++import lombok.RequiredArgsConstructor;
++import lombok.extern.slf4j.Slf4j;
++import org.springframework.stereotype.Component;
++
++import java.util.concurrent.CompletableFuture;
++
++/**
++ * Handler del flujo TLOG â BD Multi-Local.
++ * Procesa mensajes de retail.local.distributor.request.v1-sub y, tras guardar correctamente,
++ * publica el transactionId en retail.local.distributor.processed.v1 para disparar la
++ * replicaciÃ³n central.
++ */
++@Component
++@RequiredArgsConstructor
++@Slf4j
++public class TlogMessageHandler {
++
++    private static final String TOPIC_PROCESSED = "retail.local.distributor.processed.v1";
++
++    private final TlogDocumentPort           tlogDocumentPort;
++    private final TlogXmlParser              tlogXmlParser;
++    private final TransactionProcessingService transactionProcessingService;
++    private final IMessagePublisher          messagePublisher;
++
++    public CompletableFuture<Boolean> handle(String subscriptionId, String documentId) {
++        log.atInfo()
++           .setMessage("Mensaje TLOG recibido")
++           .addKeyValue("subscriptionId", subscriptionId)
++           .addKeyValue("documentId", documentId)
++           .log();
++
++        try {
++            if (tlogDocumentPort.isDuplicated(documentId)) {
++                tlogDocumentPort.markDuplicated(documentId);
++                return CompletableFuture.completedFuture(true);
++            }
++
++            String xml = tlogDocumentPort.readXml(documentId);
++            if (xml == null || xml.isBlank()) {
++                tlogDocumentPort.markError(documentId, "Campo xmlGenerated ausente o vacÃ­o en el documento");
++                return CompletableFuture.completedFuture(true);
++            }
++
++            Transaction transaction = tlogXmlParser.parse(xml);
++            transactionProcessingService.process(transaction);
++            tlogDocumentPort.markSaved(documentId, transaction.getRetailStoreCode());
++
++            log.atInfo()
++               .setMessage("TLOG procesado correctamente")
++               .addKeyValue("documentId", documentId)
++               .addKeyValue("tienda", transaction.getRetailStoreCode())
++               .addKeyValue("secuencia", transaction.getSequenceNumber())
++               .log();
++
++            // Dispara la replicaciÃ³n central de forma asÃ­ncrona; si falla se registra en log
++            // pero se ACK de todas formas ya que el TLOG ya fue guardado en Multi-Local
++            return messagePublisher.publishAsync(TOPIC_PROCESSED, documentId)
++                    .thenApply(msgId -> true)
++                    .exceptionally(ex -> {
++                        log.atWarn()
++                           .setMessage("No se pudo publicar en topic processed â replicaciÃ³n central podrÃ­a no ejecutarse")
++                           .addKeyValue("documentId", documentId)
++                           .setCause(ex)
++                           .log();
++                        return true;
++                    });
++
++        } catch (com.elrosado.jlib_firestore.exceptions.FirestoreException e) {
++            log.atError()
++               .setMessage("Error de Firestore â NACK para reintento")
++               .addKeyValue("documentId", documentId)
++               .setCause(e)
++               .log();
++            return CompletableFuture.completedFuture(false);
++
++        } catch (Exception e) {
++            log.atError()
++               .setMessage("Error procesando TLOG")
++               .addKeyValue("documentId", documentId)
++               .setCause(e)
++               .log();
++            intentarMarcarError(documentId, e.getMessage());
++            return CompletableFuture.completedFuture(true);
++        }
++    }
++
++    private void intentarMarcarError(String documentId, String mensaje) {
++        try {
++            tlogDocumentPort.markError(documentId, mensaje);
++        } catch (Exception ex) {
++            log.atError()
++               .setMessage("No se pudo actualizar estado error en Firestore")
++               .addKeyValue("documentId", documentId)
++               .setCause(ex)
++               .log();
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/in/pubsub/TlogPubSubSubscriber.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/in/pubsub/TlogPubSubSubscriber.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/in/pubsub/TlogPubSubSubscriber.java
+@@ -1,9 +1,5 @@
+ package com.elrosado.distributor_cloud.infrastructure.adapter.in.pubsub;
+ 
+-import com.elrosado.distributor_cloud.application.service.TransactionProcessingService;
+-import com.elrosado.distributor_cloud.domain.model.xml.Transaction;
+-import com.elrosado.distributor_cloud.domain.port.out.TlogDocumentPort;
+-import com.elrosado.distributor_cloud.infrastructure.adapter.out.tlog.TlogXmlParser;
+ import com.elrosado.jlib_pubsub.interfaces.IMessageSubscriber;
+ import lombok.RequiredArgsConstructor;
+ import lombok.extern.slf4j.Slf4j;
+@@ -14,8 +10,12 @@
+ import java.util.concurrent.CompletableFuture;
+ 
+ /**
+- * Adaptador de entrada. Escucha la suscripciÃ³n Pub/Sub; el cuerpo de cada mensaje es el ID
+- * del documento Firestore que contiene el XML del TLOG en el campo {@code xmlGenerated}.
++ * Dispatcher de entrada Pub/Sub. Registra un Ãºnico listener que enruta cada mensaje
++ * al handler correcto segÃºn el subscriptionId:
++ * <ul>
++ *   <li>{@code request.v1-sub} â {@link TlogMessageHandler} â TLOG hacia BD Multi-Local</li>
++ *   <li>{@code processed.v1-sub} â {@link CentralReplicationMessageHandler} â replicaciÃ³n en BD Central</li>
++ * </ul>
+  *
+  * <p>El MDC (documentId, subscriptionId) lo inyecta automÃ¡ticamente {@code jlib-pubsub-logging}
+  * antes de invocar este handler, sin necesidad de gestionarlo aquÃ­.
+@@ -25,86 +25,31 @@
+ @Slf4j
+ public class TlogPubSubSubscriber {
+ 
+-    private final IMessageSubscriber messageSubscriber;
+-    private final TlogDocumentPort tlogDocumentPort;
+-    private final TlogXmlParser tlogXmlParser;
+-    private final TransactionProcessingService transactionProcessingService;
++    private static final String TLOG_SUBSCRIPTION    = "retail.local.distributor.request.v1-sub";
++    private static final String CENTRAL_SUBSCRIPTION = "retail.local.distributor.processed.v1-sub";
++
++    private final IMessageSubscriber              messageSubscriber;
++    private final TlogMessageHandler              tlogHandler;
++    private final CentralReplicationMessageHandler centralHandler;
+ 
+     /**
+-     * Inicia la escucha de mensajes Pub/Sub cuando el contexto de Spring estÃ¡ completamente listo.
+-     * El ciclo de vida de parada lo gestiona el @PreDestroy de MdcMessageSubscriber en jlib-pubsub-logging.
++     * Registra el listener Ãºnico al arranque. El @PreDestroy de MdcMessageSubscriber
++     * en jlib-pubsub-logging detiene la escucha al apagar la aplicaciÃ³n.
+      */
+     @EventListener(ApplicationReadyEvent.class)
+     public void iniciar() {
+-        messageSubscriber.startListening(this::procesarMensaje);
+-        log.info("Suscriptor TLOG iniciado â esperando mensajes Pub/Sub");
++        messageSubscriber.startListening(this::routeMessage);
++        log.info("Suscriptores TLOG y replicaciÃ³n central iniciados â esperando mensajes Pub/Sub");
+     }
+ 
+-    /**
+-     * Procesa un mensaje Pub/Sub cuyo cuerpo es el ID del documento Firestore.
+-     * Retorna true (ACK) en todos los casos terminales; false (NACK) solo ante
+-     * FirestoreException transitoria donde el reintento tiene sentido.
+-     */
+-    private CompletableFuture<Boolean> procesarMensaje(String subscriptionId, String documentId) {
+-        log.atInfo()
+-                .setMessage("Mensaje TLOG recibido")
+-                .addKeyValue("subscriptionId", subscriptionId)
+-                .addKeyValue("documentId", documentId)
+-                .log();
+-
+-        try {
+-            if (tlogDocumentPort.isDuplicated(documentId)) {
+-                tlogDocumentPort.markDuplicated(documentId);
+-                return CompletableFuture.completedFuture(true);
++    private CompletableFuture<Boolean> routeMessage(String subscriptionId, String body) {
++        return switch (subscriptionId) {
++            case TLOG_SUBSCRIPTION    -> tlogHandler.handle(subscriptionId, body);
++            case CENTRAL_SUBSCRIPTION -> centralHandler.handle(subscriptionId, body);
++            default -> {
++                log.warn("SuscripciÃ³n no reconocida, mensaje ACKed para evitar acumulaciÃ³n: {}", subscriptionId);
++                yield CompletableFuture.completedFuture(true);
+             }
+-
+-            String xml = tlogDocumentPort.readXml(documentId);
+-            if (xml == null || xml.isBlank()) {
+-                tlogDocumentPort.markError(documentId, "Campo xmlGenerated ausente o vacÃ­o en el documento");
+-                return CompletableFuture.completedFuture(true);
+-            }
+-
+-            Transaction transaction = tlogXmlParser.parse(xml);
+-            transactionProcessingService.process(transaction);
+-            tlogDocumentPort.markSaved(documentId, transaction.getRetailStoreCode());
+-
+-            log.atInfo()
+-                    .setMessage("TLOG procesado correctamente")
+-                    .addKeyValue("documentId", documentId)
+-                    .addKeyValue("tienda", transaction.getRetailStoreCode())
+-                    .addKeyValue("secuencia", transaction.getSequenceNumber())
+-                    .log();
+-
+-            return CompletableFuture.completedFuture(true);
+-
+-        } catch (com.elrosado.jlib_firestore.exceptions.FirestoreException e) {
+-            log.atError()
+-                    .setMessage("Error de Firestore â NACK para reintento")
+-                    .addKeyValue("documentId", documentId)
+-                    .setCause(e)
+-                    .log();
+-            return CompletableFuture.completedFuture(false);
+-
+-        } catch (Exception e) {
+-            log.atError()
+-                    .setMessage("Error procesando TLOG")
+-                    .addKeyValue("documentId", documentId)
+-                    .setCause(e)
+-                    .log();
+-            intentarMarcarError(documentId, e.getMessage());
+-            return CompletableFuture.completedFuture(true);
+-        }
+-    }
+-
+-    private void intentarMarcarError(String documentId, String mensaje) {
+-        try {
+-            tlogDocumentPort.markError(documentId, mensaje);
+-        } catch (Exception ex) {
+-            log.atError()
+-                    .setMessage("No se pudo actualizar estado error en Firestore")
+-                    .addKeyValue("documentId", documentId)
+-                    .setCause(ex)
+-                    .log();
+-        }
++        };
+     }
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/central/SaleXmlGeneratorAdapter.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/central/SaleXmlGeneratorAdapter.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/central/SaleXmlGeneratorAdapter.java
+@@ -0,0 +1,22 @@
++package com.elrosado.distributor_cloud.infrastructure.adapter.out.db.central;
++
++import com.elrosado.distributor_cloud.domain.model.CentralXmlRecord;
++import com.elrosado.distributor_cloud.domain.port.out.SaleXmlGeneratorPort;
++import com.elrosado.distributor_cloud.infrastructure.adapter.out.db.central.entity.TblXmlGeneratorEntity;
++import com.elrosado.distributor_cloud.infrastructure.adapter.out.db.central.repository.TblXmlGeneratorRepository;
++import lombok.RequiredArgsConstructor;
++import org.springframework.stereotype.Component;
++import org.springframework.transaction.annotation.Transactional;
++
++@Component
++@RequiredArgsConstructor
++public class SaleXmlGeneratorAdapter implements SaleXmlGeneratorPort {
++
++    private final TblXmlGeneratorRepository repository;
++
++    @Override
++    @Transactional("artsEcCentralTransactionManager")
++    public void insert(CentralXmlRecord record) {
++        repository.save(TblXmlGeneratorEntity.from(record));
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/central/TmTransactionAdapter.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/central/TmTransactionAdapter.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/central/TmTransactionAdapter.java
+@@ -0,0 +1,27 @@
++package com.elrosado.distributor_cloud.infrastructure.adapter.out.db.central;
++
++import com.elrosado.distributor_cloud.domain.model.TmTransactionData;
++import com.elrosado.distributor_cloud.domain.port.out.TmTransactionPort;
++import com.elrosado.distributor_cloud.infrastructure.adapter.out.db.central.entity.TrTmTrnEntity;
++import com.elrosado.distributor_cloud.infrastructure.adapter.out.db.central.repository.TrTmTrnRepository;
++import lombok.RequiredArgsConstructor;
++import org.springframework.stereotype.Component;
++import org.springframework.transaction.annotation.Transactional;
++
++@Component
++@RequiredArgsConstructor
++public class TmTransactionAdapter implements TmTransactionPort {
++
++    private final TrTmTrnRepository repository;
++
++    @Override
++    public boolean existsByInvoiceNumber(String invoiceNumber) {
++        return repository.existsByNumeroFactura(invoiceNumber);
++    }
++
++    @Override
++    @Transactional("artsEcCentralTransactionManager")
++    public void insert(TmTransactionData data) {
++        repository.save(TrTmTrnEntity.from(data));
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/central/entity/TblXmlGeneratorEntity.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/central/entity/TblXmlGeneratorEntity.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/central/entity/TblXmlGeneratorEntity.java
+@@ -0,0 +1,62 @@
++package com.elrosado.distributor_cloud.infrastructure.adapter.out.db.central.entity;
++
++import com.elrosado.distributor_cloud.domain.model.CentralXmlRecord;
++import jakarta.persistence.*;
++import lombok.Getter;
++import lombok.NoArgsConstructor;
++import lombok.Setter;
++
++import java.time.LocalDateTime;
++
++@Entity
++@Table(name = "TBL_XML_GENERATOR")
++@Getter
++@Setter
++@NoArgsConstructor
++public class TblXmlGeneratorEntity {
++
++    private static final String ESTADO_PENDIENTE = "PE";
++
++    @Id
++    @GeneratedValue(strategy = GenerationType.IDENTITY)
++    @Column(name = "ID_COD")
++    private Integer idCod;
++
++    @Column(name = "COD_TIENDA", length = 3)
++    private String codTienda;
++
++    @Column(name = "FECHA_TRANS")
++    private LocalDateTime fechaTrans;
++
++    @Column(name = "COD_DISTRIBUTOR", length = 4)
++    private String codDistributor;
++
++    @Column(name = "XML_GEN", columnDefinition = "TEXT")
++    private String xmlGen;
++
++    @Column(name = "FILE_NAME", length = 300)
++    private String fileName;
++
++    @Column(name = "FECHA_REGISTRO")
++    private LocalDateTime fechaRegistro;
++
++    @Column(name = "ESTADO", length = 4)
++    private String estado;
++
++    /** DEFAULT ((0)) en BD â 0 = transacciÃ³n normal, sin contingencia. */
++    @Column(name = "CONTINGENCIA", nullable = false)
++    private Short contingencia;
++
++    public static TblXmlGeneratorEntity from(CentralXmlRecord record) {
++        var entity = new TblXmlGeneratorEntity();
++        entity.codTienda      = record.codTienda();
++        entity.fechaTrans     = record.fechaTrans();
++        entity.codDistributor = record.codDistributor();
++        entity.xmlGen         = record.xmlGen();
++        entity.fileName       = record.fileName();
++        entity.fechaRegistro  = LocalDateTime.now();
++        entity.estado         = ESTADO_PENDIENTE;
++        entity.contingencia   = 0;
++        return entity;
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/central/entity/TrTmTrnEntity.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/central/entity/TrTmTrnEntity.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/central/entity/TrTmTrnEntity.java
+@@ -0,0 +1,70 @@
++package com.elrosado.distributor_cloud.infrastructure.adapter.out.db.central.entity;
++
++import com.elrosado.distributor_cloud.domain.model.TmTransactionData;
++import jakarta.persistence.*;
++import lombok.Getter;
++import lombok.NoArgsConstructor;
++import lombok.Setter;
++
++import java.time.LocalDate;
++import java.time.LocalDateTime;
++import java.time.LocalTime;
++
++/**
++ * Entidad JPA de TR_TM_TRN. Todos los campos de inserciÃ³n migrados de SP_TRANSACCIONES_PROCESSED.
++ * Nota: confirmar con DBA el nombre exacto de la columna IDENTITY (aquÃ­ asumido "ID").
++ */
++@Entity
++@Table(name = "TR_TM_TRN")
++@Getter
++@Setter
++@NoArgsConstructor
++public class TrTmTrnEntity {
++
++    @Id
++    @GeneratedValue(strategy = GenerationType.IDENTITY)
++    @Column(name = "ID_TM")
++    private Integer idTm;
++
++    @Column(name = "CD_BSN", nullable = false)
++    private Integer cdBsn;
++
++    @Column(name = "NUMERO_FACTURA", nullable = false, length = 17)
++    private String numeroFactura;
++
++    @Column(name = "FECHA", nullable = false)
++    private LocalDate fecha;
++
++    @Column(name = "TIEMPO_INICIO", nullable = false)
++    private LocalTime tiempoInicio;
++
++    @Column(name = "TIEMPO_PAGO", nullable = false)
++    private LocalTime tiempoPago;
++
++    @Column(name = "TIEMPO_FINALIZACION", nullable = false)
++    private LocalTime tiempoFinalizacion;
++
++    @Column(name = "TIEMPO_ASEGURADO", nullable = false)
++    private Integer tiempoAsegurado;
++
++    @Column(name = "TIEMPO_INACTIVO", nullable = false)
++    private Integer tiempoInactivo;
++
++    /** Equivale a SYSDATETIME() del SP. */
++    @Column(name = "FECHA_DE_REGISTRO", nullable = false)
++    private LocalDateTime fechaDeRegistro;
++
++    public static TrTmTrnEntity from(TmTransactionData data) {
++        var entity = new TrTmTrnEntity();
++        entity.cdBsn               = data.storeCode();
++        entity.numeroFactura        = data.invoiceNumber();
++        entity.fecha                = data.transactionDate();
++        entity.tiempoInicio         = data.beginTime();
++        entity.tiempoPago           = data.payTime();
++        entity.tiempoFinalizacion   = data.endTime();
++        entity.tiempoAsegurado      = data.assuredTime();
++        entity.tiempoInactivo       = data.idleTime();
++        entity.fechaDeRegistro      = LocalDateTime.now();
++        return entity;
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/central/repository/TblXmlGeneratorRepository.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/central/repository/TblXmlGeneratorRepository.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/central/repository/TblXmlGeneratorRepository.java
+@@ -0,0 +1,6 @@
++package com.elrosado.distributor_cloud.infrastructure.adapter.out.db.central.repository;
++
++import com.elrosado.distributor_cloud.infrastructure.adapter.out.db.central.entity.TblXmlGeneratorEntity;
++import org.springframework.data.jpa.repository.JpaRepository;
++
++public interface TblXmlGeneratorRepository extends JpaRepository<TblXmlGeneratorEntity, Long> {}
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/central/repository/TrTmTrnRepository.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/central/repository/TrTmTrnRepository.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/central/repository/TrTmTrnRepository.java
+@@ -0,0 +1,10 @@
++package com.elrosado.distributor_cloud.infrastructure.adapter.out.db.central.repository;
++
++import com.elrosado.distributor_cloud.infrastructure.adapter.out.db.central.entity.TrTmTrnEntity;
++import org.springframework.data.jpa.repository.JpaRepository;
++
++public interface TrTmTrnRepository extends JpaRepository<TrTmTrnEntity, Long> {
++
++    /** Dedup idempotente â equivale al LEFT JOIN â¦ WHERE t.NUMERO_FACTURA IS NULL del SP. */
++    boolean existsByNumeroFactura(String numeroFactura);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/tlog/DistributorFirestoreAdapter.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/tlog/DistributorFirestoreAdapter.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/tlog/DistributorFirestoreAdapter.java
+@@ -0,0 +1,106 @@
++package com.elrosado.distributor_cloud.infrastructure.adapter.out.tlog;
++
++import com.elrosado.distributor_cloud.domain.model.CentralReplicationPayload;
++import com.elrosado.distributor_cloud.domain.port.out.DistributorFirestorePort;
++import com.elrosado.distributor_cloud.infrastructure.config.properties.TlogProperties;
++import com.elrosado.jlib_firestore.interfaces.IFirestoreService;
++import lombok.RequiredArgsConstructor;
++import lombok.extern.slf4j.Slf4j;
++import org.springframework.stereotype.Component;
++
++import java.time.LocalDateTime;
++import java.time.ZoneId;
++import java.util.Map;
++
++/**
++ * Adaptador Firestore para el flujo de replicaciÃ³n central.
++ * Lee campos propios del ciclo de replicaciÃ³n y escribe PROCESSED_CENTRAL / errorMessageDistributor
++ * sin interferir con los campos que gestiona TlogFirestoreAdapter.
++ */
++@Component
++@RequiredArgsConstructor
++@Slf4j
++public class DistributorFirestoreAdapter implements DistributorFirestorePort {
++
++    private static final String FIELD_XML        = "xmlGenerated";
++    private static final String FIELD_STORE_ID   = "storeId";
++    private static final String FIELD_TYPE_TRAMA = "typeTrama";
++    private static final String FIELD_CREATED_AT = "created_at";
++    private static final String FIELD_STATUS     = "status";
++    private static final String FIELD_ERROR      = "errorMessageDistributor";
++
++    private static final String STATUS_PROCESSED_CENTRAL = "PROCESSED_CENTRAL";
++    private static final String ZONE_ECUADOR             = "America/Guayaquil";
++
++    private final IFirestoreService firestoreService;
++    private final TlogProperties    tlogProperties;
++
++    @Override
++    public CentralReplicationPayload readReplicationPayload(String transactionId) {
++        Map<String, Object> doc = firestoreService.getDocument(
++                tlogProperties.firestoreCollection(), transactionId);
++
++        String xmlGenerated = extractRequired(doc, FIELD_XML, transactionId);
++        String storeId      = extractString(doc, FIELD_STORE_ID);
++        String typeTrama    = extractString(doc, FIELD_TYPE_TRAMA);
++        LocalDateTime createdAt = extractCreatedAt(doc);
++
++        return new CentralReplicationPayload(transactionId, xmlGenerated, storeId, typeTrama, createdAt);
++    }
++
++    @Override
++    public void updateStatusProcessedCentral(String transactionId) {
++        firestoreService.mergeDocument(
++                tlogProperties.firestoreCollection(),
++                transactionId,
++                Map.of(FIELD_STATUS, STATUS_PROCESSED_CENTRAL));
++
++        log.atInfo()
++           .setMessage("Estado Firestore actualizado a PROCESSED_CENTRAL")
++           .addKeyValue("transactionId", transactionId)
++           .log();
++    }
++
++    @Override
++    public void updateReplicationError(String transactionId, String errorMessage) {
++        String msg = errorMessage != null ? errorMessage : "Error desconocido en replicaciÃ³n central";
++        firestoreService.mergeDocument(
++                tlogProperties.firestoreCollection(),
++                transactionId,
++                Map.of(FIELD_ERROR, msg));
++
++        log.atWarn()
++           .setMessage("Error de replicaciÃ³n registrado en Firestore")
++           .addKeyValue("transactionId", transactionId)
++           .addKeyValue("error", msg)
++           .log();
++    }
++
++    private String extractRequired(Map<String, Object> doc, String field, String docId) {
++        Object value = doc.get(field);
++        if (value == null || value.toString().isBlank()) {
++            throw new IllegalStateException(
++                    "Campo '%s' ausente o vacÃ­o en documento Firestore: %s".formatted(field, docId));
++        }
++        return value.toString();
++    }
++
++    private String extractString(Map<String, Object> doc, String field) {
++        Object value = doc.get(field);
++        return value != null ? value.toString() : null;
++    }
++
++    private LocalDateTime extractCreatedAt(Map<String, Object> doc) {
++        Object raw = doc.get(FIELD_CREATED_AT);
++        ZoneId zone = ZoneId.of(ZONE_ECUADOR);
++
++        if (raw instanceof com.google.cloud.Timestamp ts) {
++            return ts.toDate().toInstant().atZone(zone).toLocalDateTime();
++        }
++        if (raw instanceof java.util.Date date) {
++            return date.toInstant().atZone(zone).toLocalDateTime();
++        }
++        log.warn("Campo '{}' no encontrado o tipo inesperado â se usa LocalDateTime.now() como fallback", FIELD_CREATED_AT);
++        return LocalDateTime.now();
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/config/datasource/ArtsCentralDataSourceConfig.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/config/datasource/ArtsCentralDataSourceConfig.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/config/datasource/ArtsCentralDataSourceConfig.java
+@@ -0,0 +1,15 @@
++package com.elrosado.distributor_cloud.infrastructure.config.datasource;
++
++import com.elrosado.distributor_cloud.infrastructure.adapter.out.db.artsec.repository.support.InsertOnlyJpaRepository;
++import org.springframework.context.annotation.Configuration;
++import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
++
++@Configuration
++@EnableJpaRepositories(
++        basePackages = "com.elrosado.distributor_cloud.infrastructure.adapter.out.db.central.repository",
++        entityManagerFactoryRef = "artsEcCentralEntityManagerFactory",
++        transactionManagerRef = "artsEcCentralTransactionManager",
++        repositoryBaseClass = InsertOnlyJpaRepository.class
++)
++public class ArtsCentralDataSourceConfig {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/config/properties/DistributorProperties.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/config/properties/DistributorProperties.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/config/properties/DistributorProperties.java
+@@ -0,0 +1,35 @@
++package com.elrosado.distributor_cloud.infrastructure.config.properties;
++
++import jakarta.validation.constraints.NotBlank;
++import org.springframework.boot.context.properties.ConfigurationProperties;
++import org.springframework.validation.annotation.Validated;
++
++import java.util.List;
++
++/**
++ * ConfiguraciÃ³n del mapeo tienda â cÃ³digo de distribuidor.
++ * Reemplaza la lectura de distributionStores.json del sistema legacy.
++ */
++@ConfigurationProperties(prefix = "app.distributor")
++@Validated
++public record DistributorProperties(
++        @NotBlank String defaultCode,
++        List<StoreMappingEntry> mappings
++) {
++    public record StoreMappingEntry(List<String> stores, String code) {}
++
++    /**
++     * Resuelve el cÃ³digo de distribuidor para la tienda dada.
++     * Si la tienda no estÃ¡ en ningÃºn grupo de mappings, devuelve defaultCode.
++     */
++    public String resolveCode(String storeId) {
++        if (storeId == null || mappings == null || mappings.isEmpty()) {
++            return defaultCode;
++        }
++        return mappings.stream()
++                .filter(m -> m.stores() != null && m.stores().contains(storeId))
++                .map(StoreMappingEntry::code)
++                .findFirst()
++                .orElse(defaultCode);
++    }
++}
+
+
+--- Diff for /src/main/resources/application-local.yaml ---
+--- a//src/main/resources/application-local.yaml
++++ b//src/main/resources/application-local.yaml
+@@ -33,6 +33,12 @@
+       password: ALLC_0180
+       entity-packages:
+         - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.saadmin.entity
++    arts-ec-central:
++      url: jdbc:sqlserver://SERVIDOR_CENTRAL:1433;databaseName=ARTS_EC;trustServerCertificate=true
++      username: alliances
++      password: ALLC_0180
++      entity-packages:
++        - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.central.entity
+ 
+ tlog:
+   firestore-collection: frames
+@@ -41,6 +47,15 @@
+   subscriptions:
+     - topic-id: retail.local.distributor.request.v1
+       subscription-id: retail.local.distributor.request.v1-sub
++    - topic-id: retail.local.distributor.processed.v1
++      subscription-id: retail.local.distributor.processed.v1-sub
++
++app:
++  distributor:
++    default-code: "1"
++    mappings:
++      - stores: ["0001", "0002", "0003"]
++        code: "1"
+ 
+ logging:
+   level:
+
+
+--- Diff for /src/main/resources/application-prod.yaml ---
+--- a//src/main/resources/application-prod.yaml
++++ b//src/main/resources/application-prod.yaml
+@@ -31,6 +31,12 @@
+       password: ${DB_SAADMIN_PASSWORD}
+       entity-packages:
+         - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.saadmin.entity
++    arts-ec-central:
++      url: ${DB_ARTS_CENTRAL_URL}
++      username: ${DB_ARTS_CENTRAL_USERNAME}
++      password: ${DB_ARTS_CENTRAL_PASSWORD}
++      entity-packages:
++        - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.central.entity
+ 
+ tlog:
+   firestore-collection: ${TLOG_FIRESTORE_COLLECTION:tlog-retail}
+@@ -39,6 +45,13 @@
+   subscriptions:
+     - topic-id: retail.local.distributor.request.v1
+       subscription-id: retail.local.distributor.request.v1-sub
++    - topic-id: retail.local.distributor.processed.v1
++      subscription-id: retail.local.distributor.processed.v1-sub
++
++app:
++  distributor:
++    default-code: ${DISTRIBUTOR_DEFAULT_CODE:1}
++    # mappings se configura via ConfigMap de K8s en producción
+ 
+ logging:
+   level:
+
+
+--- Diff for /src/test/java/com/elrosado/distributor_cloud/unit/CentralReplicationMessageHandlerTest.java ---
+--- a//src/test/java/com/elrosado/distributor_cloud/unit/CentralReplicationMessageHandlerTest.java
++++ b//src/test/java/com/elrosado/distributor_cloud/unit/CentralReplicationMessageHandlerTest.java
+@@ -0,0 +1,72 @@
++package com.elrosado.distributor_cloud.unit;
++
++import com.elrosado.distributor_cloud.domain.port.in.ReplicateToCentralUseCase;
++import com.elrosado.distributor_cloud.domain.port.out.DistributorFirestorePort;
++import com.elrosado.distributor_cloud.infrastructure.adapter.in.pubsub.CentralReplicationMessageHandler;
++import com.elrosado.jlib_firestore.exceptions.FirestoreException;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.InjectMocks;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.ArgumentMatchers.eq;
++import static org.mockito.Mockito.*;
++
++@ExtendWith(MockitoExtension.class)
++class CentralReplicationMessageHandlerTest {
++
++    @Mock ReplicateToCentralUseCase replicateUseCase;
++    @Mock DistributorFirestorePort  firestorePort;
++
++    @InjectMocks CentralReplicationMessageHandler handler;
++
++    private static final String SUBSCRIPTION  = "retail.local.distributor.processed.v1-sub";
++    private static final String TRANSACTION_ID = "txn-abc123";
++
++    @Test
++    void handle_exitoso_retornaAck() throws Exception {
++        Boolean result = handler.handle(SUBSCRIPTION, TRANSACTION_ID).get();
++
++        assertThat(result).isTrue();
++        verify(replicateUseCase).replicate(TRANSACTION_ID);
++        verifyNoInteractions(firestorePort);
++    }
++
++    @Test
++    void handle_firestoreException_retornaNackParaReintento() throws Exception {
++        doThrow(new FirestoreException("Firestore caÃ­do"))
++                .when(replicateUseCase).replicate(TRANSACTION_ID);
++
++        Boolean result = handler.handle(SUBSCRIPTION, TRANSACTION_ID).get();
++
++        assertThat(result).isFalse();
++        verifyNoInteractions(firestorePort);
++    }
++
++    @Test
++    void handle_excepcionDeBaseDeDatos_registraErrorYRetornaNack() throws Exception {
++        doThrow(new RuntimeException("BD Central no disponible"))
++                .when(replicateUseCase).replicate(TRANSACTION_ID);
++
++        Boolean result = handler.handle(SUBSCRIPTION, TRANSACTION_ID).get();
++
++        assertThat(result).isFalse();
++        verify(firestorePort).updateReplicationError(eq(TRANSACTION_ID), any());
++    }
++
++    @Test
++    void handle_excepcionGeneral_yFirestoreTambienFalla_retornaNackSinPropagar() throws Exception {
++        doThrow(new RuntimeException("Error BD"))
++                .when(replicateUseCase).replicate(TRANSACTION_ID);
++        doThrow(new RuntimeException("Error Firestore"))
++                .when(firestorePort).updateReplicationError(any(), any());
++
++        Boolean result = handler.handle(SUBSCRIPTION, TRANSACTION_ID).get();
++
++        // No debe propagar la segunda excepciÃ³n â el NACK es suficiente
++        assertThat(result).isFalse();
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/distributor_cloud/unit/CentralReplicationServiceTest.java ---
+--- a//src/test/java/com/elrosado/distributor_cloud/unit/CentralReplicationServiceTest.java
++++ b//src/test/java/com/elrosado/distributor_cloud/unit/CentralReplicationServiceTest.java
+@@ -0,0 +1,188 @@
++package com.elrosado.distributor_cloud.unit;
++
++import com.elrosado.distributor_cloud.application.service.CentralReplicationService;
++import com.elrosado.distributor_cloud.domain.model.CentralReplicationPayload;
++import com.elrosado.distributor_cloud.domain.model.CentralXmlRecord;
++import com.elrosado.distributor_cloud.domain.model.TmTransactionData;
++import com.elrosado.distributor_cloud.domain.port.out.DistributorFirestorePort;
++import com.elrosado.distributor_cloud.domain.port.out.SaleXmlGeneratorPort;
++import com.elrosado.distributor_cloud.domain.port.out.TmTransactionPort;
++import com.elrosado.distributor_cloud.infrastructure.config.properties.DistributorProperties;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.ArgumentCaptor;
++import org.mockito.InjectMocks;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.time.LocalDateTime;
++import java.util.List;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.assertj.core.api.Assertions.assertThatThrownBy;
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.ArgumentMatchers.eq;
++import static org.mockito.Mockito.*;
++
++@ExtendWith(MockitoExtension.class)
++class CentralReplicationServiceTest {
++
++    @Mock DistributorFirestorePort firestorePort;
++    @Mock SaleXmlGeneratorPort     salePort;
++    @Mock TmTransactionPort        tmPort;
++    @Mock DistributorProperties    distributorProps;
++
++    @InjectMocks CentralReplicationService service;
++
++    private static final String TRANSACTION_ID = "txn-abc123";
++    private static final String STORE_ID       = "0005";
++    private static final String XML_SALE       = "<Transaction><RetailStoreID>5</RetailStoreID></Transaction>";
++    private static final LocalDateTime FECHA   = LocalDateTime.of(2026, 6, 13, 10, 30, 0);
++
++    private static final String XML_TM =
++            "<Transaction>" +
++            "<StoreCode>5</StoreCode>" +
++            "<InvoiceNumber>00050000012345</InvoiceNumber>" +
++            "<TransactionDate>2026-06-13</TransactionDate>" +
++            "<BeginTime>10:30:00</BeginTime>" +
++            "<PayTime>10:31:45</PayTime>" +
++            "<EndTime>10:32:10</EndTime>" +
++            "<AssuredTime>60</AssuredTime>" +
++            "<IdleTime>25</IdleTime>" +
++            "</Transaction>";
++
++    @BeforeEach
++    void setUp() {
++        lenient().when(distributorProps.resolveCode(any())).thenReturn("1");
++    }
++
++    // --- SALE (tipo 10) ---
++
++    @Test
++    void replicate_sale_insertaEnGeneratorYActualizaFirestore() {
++        CentralReplicationPayload payload = new CentralReplicationPayload(
++                TRANSACTION_ID, XML_SALE, STORE_ID, "10", FECHA);
++        when(firestorePort.readReplicationPayload(TRANSACTION_ID)).thenReturn(payload);
++
++        service.replicate(TRANSACTION_ID);
++
++        ArgumentCaptor<CentralXmlRecord> captor = ArgumentCaptor.forClass(CentralXmlRecord.class);
++        verify(salePort).insert(captor.capture());
++        CentralXmlRecord record = captor.getValue();
++        assertThat(record.codTienda()).isEqualTo(STORE_ID);
++        assertThat(record.xmlGen()).isEqualTo(XML_SALE);
++        assertThat(record.codDistributor()).isEqualTo("1");
++        assertThat(record.fileName()).matches("0005_20260613_SALE_txn-abc123\\.xml");
++
++        verify(firestorePort).updateStatusProcessedCentral(TRANSACTION_ID);
++        verifyNoInteractions(tmPort);
++    }
++
++    @Test
++    void replicate_sale_nombreArchivoSiguieFormatoEsperado() {
++        CentralReplicationPayload payload = new CentralReplicationPayload(
++                TRANSACTION_ID, XML_SALE, STORE_ID, "10", FECHA);
++        when(firestorePort.readReplicationPayload(TRANSACTION_ID)).thenReturn(payload);
++
++        service.replicate(TRANSACTION_ID);
++
++        ArgumentCaptor<CentralXmlRecord> captor = ArgumentCaptor.forClass(CentralXmlRecord.class);
++        verify(salePort).insert(captor.capture());
++        // Formato: {storeId}_{yyyyMMdd}_SALE_{transactionId}.xml
++        assertThat(captor.getValue().fileName()).isEqualTo("0005_20260613_SALE_txn-abc123.xml");
++    }
++
++    // --- TM (tipo 67) ---
++
++    @Test
++    void replicate_tm_noExisteDuplicate_insertaEnTrTmTrnYActualizaFirestore() {
++        CentralReplicationPayload payload = new CentralReplicationPayload(
++                TRANSACTION_ID, XML_TM, STORE_ID, "67", FECHA);
++        when(firestorePort.readReplicationPayload(TRANSACTION_ID)).thenReturn(payload);
++        when(tmPort.existsByInvoiceNumber("00050000012345")).thenReturn(false);
++
++        service.replicate(TRANSACTION_ID);
++
++        ArgumentCaptor<TmTransactionData> captor = ArgumentCaptor.forClass(TmTransactionData.class);
++        verify(tmPort).insert(captor.capture());
++        TmTransactionData data = captor.getValue();
++        assertThat(data.storeCode()).isEqualTo(5);
++        assertThat(data.invoiceNumber()).isEqualTo("00050000012345");
++        assertThat(data.assuredTime()).isEqualTo(60);
++        assertThat(data.idleTime()).isEqualTo(25);
++
++        verify(firestorePort).updateStatusProcessedCentral(TRANSACTION_ID);
++        verifyNoInteractions(salePort);
++    }
++
++    @Test
++    void replicate_tm_existeDuplicate_omiteInsercionPeroActualizaFirestore() {
++        CentralReplicationPayload payload = new CentralReplicationPayload(
++                TRANSACTION_ID, XML_TM, STORE_ID, "67", FECHA);
++        when(firestorePort.readReplicationPayload(TRANSACTION_ID)).thenReturn(payload);
++        when(tmPort.existsByInvoiceNumber("00050000012345")).thenReturn(true);
++
++        service.replicate(TRANSACTION_ID);
++
++        verify(tmPort, never()).insert(any());
++        // Aun asÃ­ se actualiza el status a PROCESSED_CENTRAL (mensaje procesado = duplicado detectado)
++        verify(firestorePort).updateStatusProcessedCentral(TRANSACTION_ID);
++    }
++
++    // --- typeTrama no soportado ---
++
++    @Test
++    void replicate_typeTramaNoSoportado_registraErrorYNoActualizaStatus() {
++        CentralReplicationPayload payload = new CentralReplicationPayload(
++                TRANSACTION_ID, XML_SALE, STORE_ID, "99", FECHA);
++        when(firestorePort.readReplicationPayload(TRANSACTION_ID)).thenReturn(payload);
++
++        service.replicate(TRANSACTION_ID);
++
++        verify(firestorePort).updateReplicationError(eq(TRANSACTION_ID), contains("99"));
++        verify(firestorePort, never()).updateStatusProcessedCentral(any());
++        verifyNoInteractions(salePort, tmPort);
++    }
++
++    // --- Parsing XML TM ---
++
++    @Test
++    void replicate_tm_xmlMalformado_lanzaIllegalArgument() {
++        CentralReplicationPayload payload = new CentralReplicationPayload(
++                TRANSACTION_ID, "<xml-invalido>", STORE_ID, "67", FECHA);
++        when(firestorePort.readReplicationPayload(TRANSACTION_ID)).thenReturn(payload);
++
++        assertThatThrownBy(() -> service.replicate(TRANSACTION_ID))
++                .isInstanceOf(IllegalArgumentException.class)
++                .hasMessageContaining("XML TM malformado");
++    }
++
++    @Test
++    void replicate_tm_elementoFaltanteEnXml_lanzaIllegalArgument() {
++        String xmlIncompleto = "<Transaction><StoreCode>5</StoreCode></Transaction>";
++        CentralReplicationPayload payload = new CentralReplicationPayload(
++                TRANSACTION_ID, xmlIncompleto, STORE_ID, "67", FECHA);
++        when(firestorePort.readReplicationPayload(TRANSACTION_ID)).thenReturn(payload);
++
++        assertThatThrownBy(() -> service.replicate(TRANSACTION_ID))
++                .isInstanceOf(IllegalArgumentException.class);
++    }
++
++    @Test
++    void replicate_tm_parseoExtrae_tiemposCorrectamente() {
++        CentralReplicationPayload payload = new CentralReplicationPayload(
++                TRANSACTION_ID, XML_TM, STORE_ID, "67", FECHA);
++        when(firestorePort.readReplicationPayload(TRANSACTION_ID)).thenReturn(payload);
++        when(tmPort.existsByInvoiceNumber(any())).thenReturn(false);
++
++        service.replicate(TRANSACTION_ID);
++
++        ArgumentCaptor<TmTransactionData> captor = ArgumentCaptor.forClass(TmTransactionData.class);
++        verify(tmPort).insert(captor.capture());
++        TmTransactionData data = captor.getValue();
++        assertThat(data.beginTime().toString()).isEqualTo("10:30");
++        assertThat(data.payTime().toString()).isEqualTo("10:31:45");
++        assertThat(data.endTime().toString()).isEqualTo("10:32:10");
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/distributor_cloud/unit/DistributorFirestoreAdapterTest.java ---
+--- a//src/test/java/com/elrosado/distributor_cloud/unit/DistributorFirestoreAdapterTest.java
++++ b//src/test/java/com/elrosado/distributor_cloud/unit/DistributorFirestoreAdapterTest.java
+@@ -0,0 +1,146 @@
++package com.elrosado.distributor_cloud.unit;
++
++import com.elrosado.distributor_cloud.domain.model.CentralReplicationPayload;
++import com.elrosado.distributor_cloud.infrastructure.adapter.out.tlog.DistributorFirestoreAdapter;
++import com.elrosado.distributor_cloud.infrastructure.config.properties.TlogProperties;
++import com.elrosado.jlib_firestore.interfaces.IFirestoreService;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.ArgumentCaptor;
++import org.mockito.InjectMocks;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.util.Date;
++import java.util.HashMap;
++import java.util.Map;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.assertj.core.api.Assertions.assertThatThrownBy;
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.ArgumentMatchers.eq;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.when;
++
++@ExtendWith(MockitoExtension.class)
++class DistributorFirestoreAdapterTest {
++
++    @Mock IFirestoreService firestoreService;
++    @Mock TlogProperties    tlogProperties;
++
++    @InjectMocks DistributorFirestoreAdapter adapter;
++
++    private static final String COLLECTION    = "frames";
++    private static final String TRANSACTION_ID = "txn-xyz";
++
++    @BeforeEach
++    void setUp() {
++        when(tlogProperties.firestoreCollection()).thenReturn(COLLECTION);
++    }
++
++    // --- readReplicationPayload ---
++
++    @Test
++    void readReplicationPayload_todosLosCamposPresentes_retornaPayloadCompleto() {
++        Map<String, Object> doc = new HashMap<>();
++        doc.put("xmlGenerated", "<xml/>");
++        doc.put("storeId", "0005");
++        doc.put("typeTrama", "10");
++        doc.put("created_at", new Date(1718272200000L)); // fecha java.util.Date
++        when(firestoreService.getDocument(COLLECTION, TRANSACTION_ID)).thenReturn(doc);
++
++        CentralReplicationPayload payload = adapter.readReplicationPayload(TRANSACTION_ID);
++
++        assertThat(payload.transactionId()).isEqualTo(TRANSACTION_ID);
++        assertThat(payload.xmlGenerated()).isEqualTo("<xml/>");
++        assertThat(payload.storeId()).isEqualTo("0005");
++        assertThat(payload.typeTrama()).isEqualTo("10");
++        assertThat(payload.createdAt()).isNotNull();
++    }
++
++    @Test
++    void readReplicationPayload_xmlGeneradoAusente_lanzaIllegalState() {
++        Map<String, Object> doc = new HashMap<>();
++        doc.put("storeId", "0005");
++        doc.put("typeTrama", "10");
++        when(firestoreService.getDocument(COLLECTION, TRANSACTION_ID)).thenReturn(doc);
++
++        assertThatThrownBy(() -> adapter.readReplicationPayload(TRANSACTION_ID))
++                .isInstanceOf(IllegalStateException.class)
++                .hasMessageContaining("xmlGenerated");
++    }
++
++    @Test
++    void readReplicationPayload_xmlGeneradoVacio_lanzaIllegalState() {
++        Map<String, Object> doc = new HashMap<>();
++        doc.put("xmlGenerated", "   ");
++        doc.put("storeId", "0005");
++        doc.put("typeTrama", "10");
++        when(firestoreService.getDocument(COLLECTION, TRANSACTION_ID)).thenReturn(doc);
++
++        assertThatThrownBy(() -> adapter.readReplicationPayload(TRANSACTION_ID))
++                .isInstanceOf(IllegalStateException.class);
++    }
++
++    @Test
++    void readReplicationPayload_sinCreatedAt_usaFallbackLocalDateTimeNow() {
++        Map<String, Object> doc = new HashMap<>();
++        doc.put("xmlGenerated", "<xml/>");
++        doc.put("storeId", "0005");
++        doc.put("typeTrama", "10");
++        when(firestoreService.getDocument(COLLECTION, TRANSACTION_ID)).thenReturn(doc);
++
++        CentralReplicationPayload payload = adapter.readReplicationPayload(TRANSACTION_ID);
++
++        assertThat(payload.createdAt()).isNotNull();
++    }
++
++    @Test
++    void readReplicationPayload_camposOpcionalNulos_retornaPayloadConNulos() {
++        Map<String, Object> doc = new HashMap<>();
++        doc.put("xmlGenerated", "<xml/>");
++        when(firestoreService.getDocument(COLLECTION, TRANSACTION_ID)).thenReturn(doc);
++
++        CentralReplicationPayload payload = adapter.readReplicationPayload(TRANSACTION_ID);
++
++        assertThat(payload.storeId()).isNull();
++        assertThat(payload.typeTrama()).isNull();
++    }
++
++    // --- updateStatusProcessedCentral ---
++
++    @Test
++    @SuppressWarnings("unchecked")
++    void updateStatusProcessedCentral_llamaMergeConStatusCorrecto() {
++        adapter.updateStatusProcessedCentral(TRANSACTION_ID);
++
++        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
++        verify(firestoreService).mergeDocument(eq(COLLECTION), eq(TRANSACTION_ID), captor.capture());
++        assertThat(captor.getValue()).containsEntry("status", "PROCESSED_CENTRAL");
++    }
++
++    // --- updateReplicationError ---
++
++    @Test
++    @SuppressWarnings("unchecked")
++    void updateReplicationError_llamaMergeConErrorMessageDistributor() {
++        adapter.updateReplicationError(TRANSACTION_ID, "Error de prueba");
++
++        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
++        verify(firestoreService).mergeDocument(eq(COLLECTION), eq(TRANSACTION_ID), captor.capture());
++        Map<String, Object> merged = captor.getValue();
++        assertThat(merged).containsEntry("errorMessageDistributor", "Error de prueba");
++        assertThat(merged).doesNotContainKey("status");
++    }
++
++    @Test
++    @SuppressWarnings("unchecked")
++    void updateReplicationError_mensajeNulo_usaFallback() {
++        adapter.updateReplicationError(TRANSACTION_ID, null);
++
++        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
++        verify(firestoreService).mergeDocument(eq(COLLECTION), eq(TRANSACTION_ID), captor.capture());
++        assertThat(captor.getValue().get("errorMessageDistributor").toString()).isNotBlank();
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/distributor_cloud/unit/DistributorPropertiesTest.java ---
+--- a//src/test/java/com/elrosado/distributor_cloud/unit/DistributorPropertiesTest.java
++++ b//src/test/java/com/elrosado/distributor_cloud/unit/DistributorPropertiesTest.java
+@@ -0,0 +1,69 @@
++package com.elrosado.distributor_cloud.unit;
++
++import com.elrosado.distributor_cloud.infrastructure.config.properties.DistributorProperties;
++import com.elrosado.distributor_cloud.infrastructure.config.properties.DistributorProperties.StoreMappingEntry;
++import org.junit.jupiter.api.Test;
++
++import java.util.List;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++class DistributorPropertiesTest {
++
++    private DistributorProperties build(String defaultCode, List<StoreMappingEntry> mappings) {
++        return new DistributorProperties(defaultCode, mappings);
++    }
++
++    @Test
++    void resolveCode_storeIdEncontradoEnMappings_retornaCodigoCorrespondiente() {
++        var props = build("99", List.of(
++                new StoreMappingEntry(List.of("0001", "0002"), "1"),
++                new StoreMappingEntry(List.of("0005", "0006"), "2")
++        ));
++
++        assertThat(props.resolveCode("0005")).isEqualTo("2");
++        assertThat(props.resolveCode("0001")).isEqualTo("1");
++    }
++
++    @Test
++    void resolveCode_storeIdNoEncontradoEnMappings_retornaDefaultCode() {
++        var props = build("1", List.of(
++                new StoreMappingEntry(List.of("0001"), "3")
++        ));
++
++        assertThat(props.resolveCode("9999")).isEqualTo("1");
++    }
++
++    @Test
++    void resolveCode_storeIdNulo_retornaDefaultCode() {
++        var props = build("1", List.of(
++                new StoreMappingEntry(List.of("0001"), "3")
++        ));
++
++        assertThat(props.resolveCode(null)).isEqualTo("1");
++    }
++
++    @Test
++    void resolveCode_mappingsNulo_retornaDefaultCode() {
++        var props = build("1", null);
++
++        assertThat(props.resolveCode("0001")).isEqualTo("1");
++    }
++
++    @Test
++    void resolveCode_mappingsVacios_retornaDefaultCode() {
++        var props = build("1", List.of());
++
++        assertThat(props.resolveCode("0001")).isEqualTo("1");
++    }
++
++    @Test
++    void resolveCode_primeroMatchingGana_cuandoStoreIdApareceEnVariosGrupos() {
++        var props = build("99", List.of(
++                new StoreMappingEntry(List.of("0001"), "A"),
++                new StoreMappingEntry(List.of("0001"), "B")
++        ));
++        // El primer match debe ganar (findFirst)
++        assertThat(props.resolveCode("0001")).isEqualTo("A");
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/distributor_cloud/unit/SaleXmlGeneratorAdapterTest.java ---
+--- a//src/test/java/com/elrosado/distributor_cloud/unit/SaleXmlGeneratorAdapterTest.java
++++ b//src/test/java/com/elrosado/distributor_cloud/unit/SaleXmlGeneratorAdapterTest.java
+@@ -0,0 +1,47 @@
++package com.elrosado.distributor_cloud.unit;
++
++import com.elrosado.distributor_cloud.domain.model.CentralXmlRecord;
++import com.elrosado.distributor_cloud.infrastructure.adapter.out.db.central.SaleXmlGeneratorAdapter;
++import com.elrosado.distributor_cloud.infrastructure.adapter.out.db.central.entity.TblXmlGeneratorEntity;
++import com.elrosado.distributor_cloud.infrastructure.adapter.out.db.central.repository.TblXmlGeneratorRepository;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.ArgumentCaptor;
++import org.mockito.InjectMocks;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.time.LocalDateTime;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.mockito.Mockito.verify;
++
++@ExtendWith(MockitoExtension.class)
++class SaleXmlGeneratorAdapterTest {
++
++    @Mock TblXmlGeneratorRepository repository;
++
++    @InjectMocks SaleXmlGeneratorAdapter adapter;
++
++    @Test
++    void insert_guardaEntidadConCamposCorrectos() {
++        LocalDateTime fecha = LocalDateTime.of(2026, 6, 13, 10, 0, 0);
++        CentralXmlRecord record = new CentralXmlRecord("0005", fecha, "1",
++                "<xml/>", "0005_20260613_SALE_txn.xml");
++
++        adapter.insert(record);
++
++        ArgumentCaptor<TblXmlGeneratorEntity> captor = ArgumentCaptor.forClass(TblXmlGeneratorEntity.class);
++        verify(repository).save(captor.capture());
++        TblXmlGeneratorEntity entity = captor.getValue();
++
++        assertThat(entity.getCodTienda()).isEqualTo("0005");
++        assertThat(entity.getFechaTrans()).isEqualTo(fecha);
++        assertThat(entity.getCodDistributor()).isEqualTo("1");
++        assertThat(entity.getXmlGen()).isEqualTo("<xml/>");
++        assertThat(entity.getFileName()).isEqualTo("0005_20260613_SALE_txn.xml");
++        assertThat(entity.getEstado()).isEqualTo("PE");
++        assertThat(entity.getContingencia()).isEqualTo((short) 0);
++        assertThat(entity.getFechaRegistro()).isNotNull();
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/distributor_cloud/unit/TlogMessageHandlerTest.java ---
+--- a//src/test/java/com/elrosado/distributor_cloud/unit/TlogMessageHandlerTest.java
++++ b//src/test/java/com/elrosado/distributor_cloud/unit/TlogMessageHandlerTest.java
+@@ -0,0 +1,136 @@
++package com.elrosado.distributor_cloud.unit;
++
++import com.elrosado.distributor_cloud.application.service.TransactionProcessingService;
++import com.elrosado.distributor_cloud.domain.model.xml.Transaction;
++import com.elrosado.distributor_cloud.domain.port.out.TlogDocumentPort;
++import com.elrosado.distributor_cloud.infrastructure.adapter.in.pubsub.TlogMessageHandler;
++import com.elrosado.distributor_cloud.infrastructure.adapter.out.tlog.TlogXmlParser;
++import com.elrosado.jlib_firestore.exceptions.FirestoreException;
++import com.elrosado.jlib_pubsub.interfaces.IMessagePublisher;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.InjectMocks;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.util.concurrent.CompletableFuture;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.ArgumentMatchers.eq;
++import static org.mockito.Mockito.*;
++
++@ExtendWith(MockitoExtension.class)
++class TlogMessageHandlerTest {
++
++    @Mock TlogDocumentPort            tlogDocumentPort;
++    @Mock TlogXmlParser               tlogXmlParser;
++    @Mock TransactionProcessingService transactionProcessingService;
++    @Mock IMessagePublisher            messagePublisher;
++
++    @InjectMocks TlogMessageHandler handler;
++
++    private static final String SUBSCRIPTION = "retail.local.distributor.request.v1-sub";
++    private static final String DOC_ID       = "doc-12345";
++    private static final String XML_CONTENT  = "<Transaction/>";
++
++    @BeforeEach
++    void setUp() {
++        lenient().when(messagePublisher.publishAsync(any(), any()))
++                .thenReturn(CompletableFuture.completedFuture("msg-id-1"));
++    }
++
++    @Test
++    void handle_tlogNuevoExitoso_procesaPublicaYRetornaAck() throws Exception {
++        Transaction tx = mock(Transaction.class);
++        when(tx.getRetailStoreCode()).thenReturn("0005");
++        when(tx.getSequenceNumber()).thenReturn("12345");
++        when(tlogDocumentPort.isDuplicated(DOC_ID)).thenReturn(false);
++        when(tlogDocumentPort.readXml(DOC_ID)).thenReturn(XML_CONTENT);
++        when(tlogXmlParser.parse(XML_CONTENT)).thenReturn(tx);
++
++        Boolean result = handler.handle(SUBSCRIPTION, DOC_ID).get();
++
++        assertThat(result).isTrue();
++        verify(transactionProcessingService).process(tx);
++        verify(tlogDocumentPort).markSaved(DOC_ID, "0005");
++        verify(messagePublisher).publishAsync(eq("retail.local.distributor.processed.v1"), eq(DOC_ID));
++    }
++
++    @Test
++    void handle_tlogDuplicado_marcaDuplicadoYRetornaAckSinProcesar() throws Exception {
++        when(tlogDocumentPort.isDuplicated(DOC_ID)).thenReturn(true);
++
++        Boolean result = handler.handle(SUBSCRIPTION, DOC_ID).get();
++
++        assertThat(result).isTrue();
++        verify(tlogDocumentPort).markDuplicated(DOC_ID);
++        verifyNoInteractions(tlogXmlParser, transactionProcessingService, messagePublisher);
++    }
++
++    @Test
++    void handle_xmlVacioEnFirestore_marcaErrorYRetornaAck() throws Exception {
++        when(tlogDocumentPort.isDuplicated(DOC_ID)).thenReturn(false);
++        when(tlogDocumentPort.readXml(DOC_ID)).thenReturn("  ");
++
++        Boolean result = handler.handle(SUBSCRIPTION, DOC_ID).get();
++
++        assertThat(result).isTrue();
++        verify(tlogDocumentPort).markError(eq(DOC_ID), any());
++        verifyNoInteractions(tlogXmlParser, transactionProcessingService, messagePublisher);
++    }
++
++    @Test
++    void handle_xmlNuloEnFirestore_marcaErrorYRetornaAck() throws Exception {
++        when(tlogDocumentPort.isDuplicated(DOC_ID)).thenReturn(false);
++        when(tlogDocumentPort.readXml(DOC_ID)).thenReturn(null);
++
++        Boolean result = handler.handle(SUBSCRIPTION, DOC_ID).get();
++
++        assertThat(result).isTrue();
++        verify(tlogDocumentPort).markError(eq(DOC_ID), any());
++    }
++
++    @Test
++    void handle_firestoreException_retornaNackParaReintento() throws Exception {
++        when(tlogDocumentPort.isDuplicated(DOC_ID))
++                .thenThrow(new FirestoreException("Firestore no disponible"));
++
++        Boolean result = handler.handle(SUBSCRIPTION, DOC_ID).get();
++
++        assertThat(result).isFalse();
++        verify(tlogDocumentPort, never()).markSaved(any(), any());
++    }
++
++    @Test
++    void handle_excepcionGeneral_intentaMarcarErrorYRetornaAck() throws Exception {
++        when(tlogDocumentPort.isDuplicated(DOC_ID)).thenReturn(false);
++        when(tlogDocumentPort.readXml(DOC_ID)).thenReturn(XML_CONTENT);
++        when(tlogXmlParser.parse(any())).thenThrow(new RuntimeException("Error de parseo"));
++
++        Boolean result = handler.handle(SUBSCRIPTION, DOC_ID).get();
++
++        assertThat(result).isTrue();
++        verify(tlogDocumentPort).markError(eq(DOC_ID), any());
++        verify(messagePublisher, never()).publishAsync(any(), any());
++    }
++
++    @Test
++    void handle_publishAsyncFalla_retornaAckIgualmente() throws Exception {
++        Transaction tx = mock(Transaction.class);
++        when(tx.getRetailStoreCode()).thenReturn("0005");
++        when(tx.getSequenceNumber()).thenReturn("12345");
++        when(tlogDocumentPort.isDuplicated(DOC_ID)).thenReturn(false);
++        when(tlogDocumentPort.readXml(DOC_ID)).thenReturn(XML_CONTENT);
++        when(tlogXmlParser.parse(XML_CONTENT)).thenReturn(tx);
++        when(messagePublisher.publishAsync(any(), any()))
++                .thenReturn(CompletableFuture.failedFuture(new RuntimeException("Pub/Sub error")));
++
++        Boolean result = handler.handle(SUBSCRIPTION, DOC_ID).get();
++
++        // El TLOG ya fue guardado â se ACK aunque el publish falle
++        assertThat(result).isTrue();
++        verify(tlogDocumentPort).markSaved(DOC_ID, "0005");
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/distributor_cloud/unit/TlogPubSubSubscriberTest.java ---
+--- a//src/test/java/com/elrosado/distributor_cloud/unit/TlogPubSubSubscriberTest.java
++++ b//src/test/java/com/elrosado/distributor_cloud/unit/TlogPubSubSubscriberTest.java
+@@ -0,0 +1,91 @@
++package com.elrosado.distributor_cloud.unit;
++
++import com.elrosado.distributor_cloud.infrastructure.adapter.in.pubsub.CentralReplicationMessageHandler;
++import com.elrosado.distributor_cloud.infrastructure.adapter.in.pubsub.TlogMessageHandler;
++import com.elrosado.distributor_cloud.infrastructure.adapter.in.pubsub.TlogPubSubSubscriber;
++import com.elrosado.jlib_pubsub.interfaces.IMessageSubscriber;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.ArgumentCaptor;
++import org.mockito.InjectMocks;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.util.concurrent.CompletableFuture;
++import java.util.function.BiFunction;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.mockito.Mockito.*;
++
++@ExtendWith(MockitoExtension.class)
++class TlogPubSubSubscriberTest {
++
++    @Mock IMessageSubscriber               messageSubscriber;
++    @Mock TlogMessageHandler               tlogHandler;
++    @Mock CentralReplicationMessageHandler centralHandler;
++
++    @InjectMocks TlogPubSubSubscriber subscriber;
++
++    private static final String TLOG_SUB    = "retail.local.distributor.request.v1-sub";
++    private static final String CENTRAL_SUB = "retail.local.distributor.processed.v1-sub";
++    private static final String DOC_ID      = "doc-123";
++
++    @SuppressWarnings("unchecked")
++    private BiFunction<String, String, CompletableFuture<Boolean>> captureRouter() {
++        subscriber.iniciar();
++        ArgumentCaptor<BiFunction<String, String, CompletableFuture<Boolean>>> captor =
++                ArgumentCaptor.forClass(BiFunction.class);
++        verify(messageSubscriber).startListening(captor.capture());
++        return captor.getValue();
++    }
++
++    @Test
++    void iniciar_registraListenerEnMessageSubscriber() {
++        subscriber.iniciar();
++        verify(messageSubscriber).startListening(any());
++    }
++
++    @Test
++    void routeMessage_subscripcionTlog_delegaATlogHandler() {
++        when(tlogHandler.handle(TLOG_SUB, DOC_ID))
++                .thenReturn(CompletableFuture.completedFuture(true));
++
++        BiFunction<String, String, CompletableFuture<Boolean>> router = captureRouter();
++        router.apply(TLOG_SUB, DOC_ID);
++
++        verify(tlogHandler).handle(TLOG_SUB, DOC_ID);
++        verifyNoInteractions(centralHandler);
++    }
++
++    @Test
++    void routeMessage_subscripcionCentral_delegaACentralHandler() {
++        when(centralHandler.handle(CENTRAL_SUB, DOC_ID))
++                .thenReturn(CompletableFuture.completedFuture(true));
++
++        BiFunction<String, String, CompletableFuture<Boolean>> router = captureRouter();
++        router.apply(CENTRAL_SUB, DOC_ID);
++
++        verify(centralHandler).handle(CENTRAL_SUB, DOC_ID);
++        verifyNoInteractions(tlogHandler);
++    }
++
++    @Test
++    void routeMessage_subscripcionDesconocida_retornaAckSinDelegarANingunHandler() throws Exception {
++        BiFunction<String, String, CompletableFuture<Boolean>> router = captureRouter();
++        CompletableFuture<Boolean> result = router.apply("subscription-desconocida", DOC_ID);
++
++        assertThat(result.get()).isTrue();
++        verifyNoInteractions(tlogHandler, centralHandler);
++    }
++
++    @Test
++    void routeMessage_tlogHandler_propagaResultadoDelHandler() throws Exception {
++        when(tlogHandler.handle(TLOG_SUB, DOC_ID))
++                .thenReturn(CompletableFuture.completedFuture(false));
++
++        BiFunction<String, String, CompletableFuture<Boolean>> router = captureRouter();
++        Boolean result = router.apply(TLOG_SUB, DOC_ID).get();
++
++        assertThat(result).isFalse();
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/distributor_cloud/unit/TmTransactionAdapterTest.java ---
+--- a//src/test/java/com/elrosado/distributor_cloud/unit/TmTransactionAdapterTest.java
++++ b//src/test/java/com/elrosado/distributor_cloud/unit/TmTransactionAdapterTest.java
+@@ -0,0 +1,72 @@
++package com.elrosado.distributor_cloud.unit;
++
++import com.elrosado.distributor_cloud.domain.model.TmTransactionData;
++import com.elrosado.distributor_cloud.infrastructure.adapter.out.db.central.TmTransactionAdapter;
++import com.elrosado.distributor_cloud.infrastructure.adapter.out.db.central.entity.TrTmTrnEntity;
++import com.elrosado.distributor_cloud.infrastructure.adapter.out.db.central.repository.TrTmTrnRepository;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.ArgumentCaptor;
++import org.mockito.InjectMocks;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.time.LocalDate;
++import java.time.LocalTime;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.when;
++
++@ExtendWith(MockitoExtension.class)
++class TmTransactionAdapterTest {
++
++    @Mock TrTmTrnRepository repository;
++
++    @InjectMocks TmTransactionAdapter adapter;
++
++    private TmTransactionData buildData() {
++        return new TmTransactionData(
++                5, "00050000012345",
++                LocalDate.of(2026, 6, 13),
++                LocalTime.of(10, 30, 0),
++                LocalTime.of(10, 31, 45),
++                LocalTime.of(10, 32, 10),
++                60, 25);
++    }
++
++    @Test
++    void existsByInvoiceNumber_cuandoExiste_retornaTrue() {
++        when(repository.existsByNumeroFactura("00050000012345")).thenReturn(true);
++
++        assertThat(adapter.existsByInvoiceNumber("00050000012345")).isTrue();
++    }
++
++    @Test
++    void existsByInvoiceNumber_cuandoNoExiste_retornaFalse() {
++        when(repository.existsByNumeroFactura("99990000000000")).thenReturn(false);
++
++        assertThat(adapter.existsByInvoiceNumber("99990000000000")).isFalse();
++    }
++
++    @Test
++    void insert_guardaEntidadConCamposCorrectos() {
++        TmTransactionData data = buildData();
++
++        adapter.insert(data);
++
++        ArgumentCaptor<TrTmTrnEntity> captor = ArgumentCaptor.forClass(TrTmTrnEntity.class);
++        verify(repository).save(captor.capture());
++        TrTmTrnEntity entity = captor.getValue();
++
++        assertThat(entity.getCdBsn()).isEqualTo(5);
++        assertThat(entity.getNumeroFactura()).isEqualTo("00050000012345");
++        assertThat(entity.getFecha()).isEqualTo(LocalDate.of(2026, 6, 13));
++        assertThat(entity.getTiempoInicio()).isEqualTo(LocalTime.of(10, 30, 0));
++        assertThat(entity.getTiempoPago()).isEqualTo(LocalTime.of(10, 31, 45));
++        assertThat(entity.getTiempoFinalizacion()).isEqualTo(LocalTime.of(10, 32, 10));
++        assertThat(entity.getTiempoAsegurado()).isEqualTo(60);
++        assertThat(entity.getTiempoInactivo()).isEqualTo(25);
++        assertThat(entity.getFechaDeRegistro()).isNotNull();
++    }
++}
+
+

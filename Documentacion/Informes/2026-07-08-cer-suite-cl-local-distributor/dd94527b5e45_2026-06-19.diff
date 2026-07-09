@@ -1,0 +1,779 @@
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/application/service/CentralReplicationService.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/application/service/CentralReplicationService.java
++++ b//src/main/java/com/elrosado/distributor_cloud/application/service/CentralReplicationService.java
+@@ -48,7 +48,9 @@
+         switch (payload.typeTrama()) {
+             case TYPE_SALE -> replicateSale(transactionId, payload);
+             case TYPE_TM   -> replicateTm(transactionId, payload);
+-            default -> {
++            // null incluido: un typeTrama ausente es un dato permanente, no transitorio â
++            // se registra y se omite (evita NPE en el switch y un bucle infinito de NACK)
++            case null, default -> {
+                 log.atWarn()
+                    .setMessage("typeTrama no soportado para replicaciÃ³n central â se omite sin error")
+                    .addKeyValue("transactionId", transactionId)
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/application/service/TransactionProcessingService.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/application/service/TransactionProcessingService.java
++++ b//src/main/java/com/elrosado/distributor_cloud/application/service/TransactionProcessingService.java
+@@ -31,10 +31,17 @@
+     private final InvoiceNumberPort invoiceNumberPort;
+     private final StickerPort stickerPort;
+ 
+-    public void process(Transaction transaction) {
++    /**
++     * Procesa la transacciÃ³n y la persiste en Multi-Local.
++     * @return el idTrn a publicar para facturaciÃ³n electrÃ³nica â solo cuando la transacciÃ³n
++     *         persistiÃ³ una factura (TR_INVC) o una nota de crÃ©dito (TR_RTN). En cualquier otro
++     *         caso (retail sin factura/NC, tender control, control, duplicada o no reconocida)
++     *         retorna {@code null} y no debe publicarse en la cola de facturaciÃ³n.
++     */
++    public Integer process(Transaction transaction) {
+         if (transaction == null) {
+             log.warn("Transaccion nula recibida, se ignora");
+-            return;
++            return null;
+         }
+ 
+         log.atInfo()
+@@ -51,7 +58,7 @@
+                     .addKeyValue("tienda", transaction.getRetailStoreCode())
+                     .addKeyValue("secuencia", transaction.getSequenceNumber())
+                     .log();
+-            return;
++            return null;
+         }
+ 
+         if (transactionPersistencePort.existsInDatabase(transaction)) {
+@@ -61,16 +68,18 @@
+                     .addKeyValue("terminal", transaction.getWorkstationCode())
+                     .addKeyValue("secuencia", transaction.getSequenceNumber())
+                     .log();
+-            return;
++            return null;
+         }
+ 
+         if (transaction.getRetailTransaction() != null) {
+-            procesarRetailTransaction(transaction);
++            return procesarRetailTransaction(transaction);
+         } else if (transaction.getTenderControlTransaction() != null) {
+             procesarTenderControlTransaction(transaction);
+         } else if (transaction.getControlTransaction() != null) {
+             procesarControlTransaction(transaction);
+         }
++        // TenderControl y Control no generan factura ni NC â no se publica en facturaciÃ³n
++        return null;
+     }
+ 
+     private boolean tieneTipoTransaccionReconocido(Transaction transaction) {
+@@ -80,7 +89,7 @@
+     }
+ 
+     /** Orquesta la retail: enriquece consumidor final de NC, resuelve efectos colaterales, persiste y ejecuta post-efectos. */
+-    private void procesarRetailTransaction(Transaction transaction) {
++    private Integer procesarRetailTransaction(Transaction transaction) {
+         RetailTransaction rtl = transaction.getRetailTransaction();
+ 
+         enriquecerConsFinal(rtl);
+@@ -94,11 +103,16 @@
+         registrarCliente(rtl.getInvoiceData(), idTrn);
+         actualizarNumeroFactura(rtl, transaction.getRetailStoreCode(), transaction.getWorkstationCode());
+ 
++        // Solo se publica para facturaciÃ³n si se persistiÃ³ una factura (TR_INVC) o una NC (TR_RTN)
++        boolean facturable = rtl.getFacturaElec() != null || rtl.getNotaCredito() != null;
++
+         log.atInfo()
+                 .setMessage("RetailTransaction procesada")
+                 .addKeyValue("idTrn", idTrn)
+                 .addKeyValue("tienda", transaction.getRetailStoreCode())
+-                .log();
++                .addKeyValue("facturable", facturable)
++                .log();
++        return facturable ? idTrn : null;
+     }
+ 
+     /** Ejecuta los efectos post-commit (retiro efectivo y StringUsuario) de forma no-fatal: fallos no abortan la transacciÃ³n principal. */
+@@ -309,14 +323,13 @@
+         TenderControlTransaction tct = transaction.getTenderControlTransaction();
+ 
+         TenderControlReverseEffects reverseEffects = prepararReverseItemInfo(tct);
+-        if (reverseEffects != null) {
+-            transactionPersistencePort.saveTenderControlWithReverseEffects(transaction, reverseEffects);
+-        } else {
+-            transactionPersistencePort.save(transaction);
+-        }
++        Integer idTrn = reverseEffects != null
++                ? transactionPersistencePort.saveTenderControlWithReverseEffects(transaction, reverseEffects)
++                : transactionPersistencePort.save(transaction);
+ 
+         log.atInfo()
+                 .setMessage("TenderControlTransaction procesada")
++                .addKeyValue("idTrn", idTrn)
+                 .addKeyValue("tienda", transaction.getRetailStoreCode())
+                 .addKeyValue("secuencia", transaction.getSequenceNumber())
+                 .log();
+@@ -343,7 +356,7 @@
+     private void procesarControlTransaction(Transaction transaction) {
+         ControlTransaction ct = transaction.getControlTransaction();
+ 
+-        transactionPersistencePort.save(transaction);
++        Integer idTrn = transactionPersistencePort.save(transaction);
+ 
+         if (ct.getBusinessEod() != null) {
+             try {
+@@ -355,6 +368,7 @@
+ 
+         log.atInfo()
+                 .setMessage("ControlTransaction procesada")
++                .addKeyValue("idTrn", idTrn)
+                 .addKeyValue("tienda", transaction.getRetailStoreCode())
+                 .addKeyValue("tipo", ct.getTypeCode())
+                 .log();
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/in/pubsub/InvoiceFrameMessage.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/in/pubsub/InvoiceFrameMessage.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/in/pubsub/InvoiceFrameMessage.java
+@@ -0,0 +1,9 @@
++package com.elrosado.distributor_cloud.infrastructure.adapter.in.pubsub;
++
++/**
++ * Mensaje JSON que se publica en la cola retail.local.invoice.frame.v1 para facturaciÃ³n electrÃ³nica.
++ * Lleva el idTrn (ID_TRN) generado en TR_TRN al persistir el TLOG.
++ *
++ * <p>Ejemplo: {@code { "idTrn": 3647997 }}
++ */
++public record InvoiceFrameMessage(Integer idTrn) {}
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/in/pubsub/TlogMessageHandler.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/in/pubsub/TlogMessageHandler.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/in/pubsub/TlogMessageHandler.java
+@@ -27,6 +27,7 @@
+ public class TlogMessageHandler {
+ 
+     private static final String TOPIC_PROCESSED = "retail.local.distributor.processed.v1";
++    private static final String TOPIC_INVOICE   = "retail.local.invoice.frame.v1";
+     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+ 
+     private final TlogDocumentPort           tlogDocumentPort;
+@@ -81,28 +82,31 @@
+             }
+ 
+             Transaction transaction = tlogXmlParser.parse(xml);
+-            transactionProcessingService.process(transaction);
++            Integer idTrn = transactionProcessingService.process(transaction);
+             tlogDocumentPort.markSaved(documentId, transaction.getRetailStoreCode());
+ 
+             log.atInfo()
+                .setMessage("TLOG procesado correctamente")
+                .addKeyValue("documentId", documentId)
++               .addKeyValue("idTrn", idTrn)
+                .addKeyValue("tienda", transaction.getRetailStoreCode())
+                .addKeyValue("secuencia", transaction.getSequenceNumber())
+                .log();
+ 
+-            // Dispara la replicaciÃ³n central de forma asÃ­ncrona; si falla se registra en log
+-            // pero se ACK de todas formas ya que el TLOG ya fue guardado en Multi-Local
+-            return messagePublisher.publishAsync(TOPIC_PROCESSED, documentId)
+-                    .thenApply(msgId -> true)
+-                    .exceptionally(ex -> {
+-                        log.atWarn()
+-                           .setMessage("No se pudo publicar en topic processed â replicaciÃ³n central podrÃ­a no ejecutarse")
+-                           .addKeyValue("documentId", documentId)
+-                           .setCause(ex)
+-                           .log();
+-                        return true;
+-                    });
++            // Publica el idTrn para facturaciÃ³n electrÃ³nica y dispara la replicaciÃ³n central.
++            // Ambas publicaciones son no-fatales: el TLOG ya estÃ¡ guardado en Multi-Local, asÃ­ que
++            // un fallo al publicar se registra pero igual se ACK (reintentar reprocesarÃ­a/duplicarÃ­a).
++            return publicarFrameFactura(idTrn, documentId)
++                    .thenCompose(ignored -> messagePublisher.publishAsync(TOPIC_PROCESSED, documentId)
++                            .thenApply(msgId -> true)
++                            .exceptionally(ex -> {
++                                log.atWarn()
++                                   .setMessage("No se pudo publicar en topic processed â replicaciÃ³n central podrÃ­a no ejecutarse")
++                                   .addKeyValue("documentId", documentId)
++                                   .setCause(ex)
++                                   .log();
++                                return true;
++                            }));
+ 
+         } catch (com.elrosado.jlib_firestore.exceptions.FirestoreException e) {
+             log.atError()
+@@ -123,6 +127,40 @@
+         }
+     }
+ 
++    /**
++     * Publica {@code { "idTrn": <idTrn> }} en la cola de facturaciÃ³n electrÃ³nica.
++     * No-fatal: nunca completa con excepciÃ³n (un fallo se registra y se ignora) para no impedir
++     * la replicaciÃ³n central ni el ACK del TLOG ya guardado. Si idTrn es null no publica.
++     */
++    private CompletableFuture<Void> publicarFrameFactura(Integer idTrn, String documentId) {
++        if (idTrn == null) {
++            return CompletableFuture.completedFuture(null);
++        }
++        String payload;
++        try {
++            payload = OBJECT_MAPPER.writeValueAsString(new InvoiceFrameMessage(idTrn));
++        } catch (Exception e) {
++            log.atWarn()
++               .setMessage("No se pudo serializar el frame de facturaciÃ³n")
++               .addKeyValue("documentId", documentId)
++               .addKeyValue("idTrn", idTrn)
++               .setCause(e)
++               .log();
++            return CompletableFuture.completedFuture(null);
++        }
++        return messagePublisher.publishAsync(TOPIC_INVOICE, payload)
++                .<Void>thenApply(msgId -> null)
++                .exceptionally(ex -> {
++                    log.atWarn()
++                       .setMessage("No se pudo publicar el frame de facturaciÃ³n electrÃ³nica")
++                       .addKeyValue("documentId", documentId)
++                       .addKeyValue("idTrn", idTrn)
++                       .setCause(ex)
++                       .log();
++                    return null;
++                });
++    }
++
+     private void intentarMarcarError(String documentId, String mensaje) {
+         try {
+             tlogDocumentPort.markError(documentId, mensaje);
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/tlog/DistributorFirestoreAdapter.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/tlog/DistributorFirestoreAdapter.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/tlog/DistributorFirestoreAdapter.java
+@@ -24,8 +24,8 @@
+ 
+     private static final String FIELD_XML        = "xmlGenerated";
+     private static final String FIELD_STORE_ID   = "storeId";
+-    private static final String FIELD_TYPE_TRAMA = "typeTrama";
+-    private static final String FIELD_CREATED_AT = "created_at";
++    private static final String FIELD_TYPE_TRAMA = "frameType";
++    private static final String FIELD_CREATED_AT = "createdAt";
+     private static final String FIELD_STATUS     = "status";
+     private static final String FIELD_ERROR      = "errorMessageDistributor";
+ 
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/config/datasource/HibernateInsertOrderingPostProcessor.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/config/datasource/HibernateInsertOrderingPostProcessor.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/config/datasource/HibernateInsertOrderingPostProcessor.java
+@@ -0,0 +1,35 @@
++package com.elrosado.distributor_cloud.infrastructure.config.datasource;
++
++import org.springframework.beans.factory.config.BeanPostProcessor;
++import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;
++import org.springframework.stereotype.Component;
++
++/**
++ * Desactiva {@code hibernate.order_inserts}/{@code order_updates} en los EntityManagerFactory
++ * creados por jlib-multisql.
++ *
++ * <p>jlib-multisql los fuerza a {@code true} para maximizar el batching. Pero este servicio
++ * persiste grafos de transacciÃ³n con dependencias de clave forÃ¡nea (p.ej.
++ * {@code TR_LTM_SLS_RTN â TR_LTM_RTL_TRN}, y en general todo {@code TR_LTM_*}/{@code CO_*} hacia
++ * su cabecera) que <b>no estÃ¡n mapeadas como asociaciones JPA</b> (son entidades independientes
++ * con {@code @EmbeddedId}). Con {@code order_inserts=true}, Hibernate reordena los INSERT
++ * agrupÃ¡ndolos por tabla y, al desconocer la dependencia FK, inserta el hijo antes que el padre,
++ * provocando una violaciÃ³n de FK.
++ *
++ * <p>El cÃ³digo de persistencia ya inserta siempre en orden padreâhijo, por lo que ejecutar los
++ * INSERT en ese mismo orden de persistencia ({@code order_inserts=false}) es correcto. Los grupos
++ * de inserts consecutivos a la misma tabla (totales, StringUsuario, etc.) siguen aprovechando el
++ * batch.
++ */
++@Component
++public class HibernateInsertOrderingPostProcessor implements BeanPostProcessor {
++
++    @Override
++    public Object postProcessBeforeInitialization(Object bean, String beanName) {
++        if (bean instanceof LocalContainerEntityManagerFactoryBean emf) {
++            emf.getJpaPropertyMap().put("hibernate.order_inserts", "false");
++            emf.getJpaPropertyMap().put("hibernate.order_updates", "false");
++        }
++        return bean;
++    }
++}
+
+
+--- Diff for /src/main/resources/application-dev.yaml ---
+--- a//src/main/resources/application-dev.yaml
++++ b//src/main/resources/application-dev.yaml
+@@ -0,0 +1,72 @@
++# Perfil DEV: desplegado en un clúster Kubernetes sobre un servidor Linux (NO GKE).
++# Firestore, Pub/Sub y Secret Manager apuntan a un proyecto GCP real, pero al no haber
++# Workload Identity la identidad se obtiene de una llave JSON de Service Account montada
++# como Secret de K8s y referida por GOOGLE_APPLICATION_CREDENTIALS.
++spring:
++  cloud:
++    gcp:
++      project-id: ${GOOGLE_CLOUD_PROJECT}
++      credentials:
++        # Ruta a la llave JSON montada en el pod (ver volumen 'gcp-sa-key' en el Deployment de dev).
++        location: file:${GOOGLE_APPLICATION_CREDENTIALS}
++      firestore:
++        enabled: true
++        database-id: ${FIRESTORE_DATABASE_ID}
++
++distributor:
++  secret-manager:
++    enabled: true
++    db-username-secret: ${SM_DB_USERNAME_SECRET:suite-cloud-dev-db-user}
++    db-password-secret: ${SM_DB_PASSWORD_SECRET:suite-cloud-dev-db-pass}
++    arts-url-secret: ${SM_ARTS_URL_SECRET:suite-cloud-dev-db-arts-url}
++    saadmin-url-secret: ${SM_SAADMIN_URL_SECRET:suite-cloud-dev-db-saadmin-url}
++    eyes-url-secret: ${SM_EYES_URL_SECRET:suite-cloud-dev-db-eyes-url}
++    devs-url-secret: ${SM_DEVS_URL_SECRET:suite-cloud-dev-db-devs-url}
++    db-central-username-secret: ${SM_DB_CENTRAL_USERNAME_SECRET:suite-cloud-dev-db-central-user}
++    db-central-password-secret: ${SM_DB_CENTRAL_PASSWORD_SECRET:suite-cloud-dev-db-central-pass}
++    arts-central-url-secret: ${SM_ARTS_CENTRAL_URL_SECRET:suite-cloud-dev-db-arts-central-url}
++
++# Solo se declara la estructura de cada datasource (entity-packages / primary / batch-size).
++# url, username y password se inyectan desde Secret Manager antes del registro de beans.
++multi-sql:
++  datasources:
++    arts-ec:
++      entity-packages:
++        - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.artsec.entity
++      primary: true
++      batch-size: 300
++    devs-ec:
++      entity-packages:
++        - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.devsec.entity
++    eyes-ec:
++      entity-packages:
++        - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.eyesec.entity
++    saadmin:
++      entity-packages:
++        - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.saadmin.entity
++    arts-ec-central:
++      entity-packages:
++        - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.central.entity
++
++tlog:
++  firestore-collection: ${TLOG_FIRESTORE_COLLECTION:tlog-retail}
++
++pubsub:
++  subscriptions:
++    - topic-id: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR:retail.local.distributor.request.v1}
++      subscription-id: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR_SUB:retail.local.distributor.request.v1-sub}
++    - topic-id: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR_PROCESSED:retail.local.distributor.processed.v1}
++      subscription-id: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR_PROCESSED_SUB:retail.local.distributor.processed.v1-sub}
++
++app:
++  distributor:
++    default-code: ${DISTRIBUTOR_DEFAULT_CODE:1}
++    # mappings se configura via ConfigMap de K8s
++
++# En un clúster externo los logs se leen por kubectl: se deja patrón de texto legible (no JSON GCP).
++logging:
++  level:
++    root: INFO
++    com.elrosado.distributor_cloud: DEBUG
++  pattern:
++    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg %kvp%n"
+
+
+--- Diff for /src/main/resources/application-local.yaml ---
+--- a//src/main/resources/application-local.yaml
++++ b//src/main/resources/application-local.yaml
+@@ -1,9 +1,12 @@
+ spring:
+   cloud:
+     gcp:
+-      project-id: ${GOOGLE_CLOUD_PROJECT:modern-suite-cloud-per-b55b0}
++      project-id: ${GCP_PROJECT_ID:modern-suite-cloud-inf}
+       credentials:
+-        location: file:${GOOGLE_APPLICATION_CREDENTIALS:}
++        location: file:C:\keys\credentials.json
++      firestore:
++        enabled: true
++        database-id: ${FIRESTORE_DATABASE_ID:cer-suite-multilocal}
+ 
+ # Credenciales de BD desde GCP Secret Manager (jlib-secretmanager).
+ # url/username/password de multi-sql.datasources.* se resuelven en SecretManagerDatasourceEnvironmentPostProcessor
+@@ -66,7 +69,7 @@
+ 
+ logging:
+   level:
+-    root: INFO
+     com.elrosado.distributor_cloud: DEBUG
++#    org.hibernate.orm.connections.pooling: INFO
+   pattern:
+     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg %kvp%n"
+
+
+--- Diff for /src/main/resources/application-prod.yaml ---
+--- a//src/main/resources/application-prod.yaml
++++ b//src/main/resources/application-prod.yaml
+@@ -2,39 +2,46 @@
+   cloud:
+     gcp:
+       project-id: ${GOOGLE_CLOUD_PROJECT}
++      # En GKE la identidad es por Workload Identity (ADC): no se monta llave JSON en disco.
++      firestore:
++        enabled: true
++        database-id: ${FIRESTORE_DATABASE_ID}
+ 
++# Credenciales de BD desde GCP Secret Manager (jlib-secretmanager).
++# url/username/password de multi-sql.datasources.* los resuelve
++# SecretManagerDatasourceEnvironmentPostProcessor y sobrescriben lo que haya en este YAML.
++distributor:
++  secret-manager:
++    enabled: true
++    db-username-secret: ${SM_DB_USERNAME_SECRET:suite-cloud-prod-db-user}
++    db-password-secret: ${SM_DB_PASSWORD_SECRET:suite-cloud-prod-db-pass}
++    arts-url-secret: ${SM_ARTS_URL_SECRET:suite-cloud-prod-db-arts-url}
++    saadmin-url-secret: ${SM_SAADMIN_URL_SECRET:suite-cloud-prod-db-saadmin-url}
++    eyes-url-secret: ${SM_EYES_URL_SECRET:suite-cloud-prod-db-eyes-url}
++    devs-url-secret: ${SM_DEVS_URL_SECRET:suite-cloud-prod-db-devs-url}
++    db-central-username-secret: ${SM_DB_CENTRAL_USERNAME_SECRET:suite-cloud-prod-db-central-user}
++    db-central-password-secret: ${SM_DB_CENTRAL_PASSWORD_SECRET:suite-cloud-prod-db-central-pass}
++    arts-central-url-secret: ${SM_ARTS_CENTRAL_URL_SECRET:suite-cloud-prod-db-arts-central-url}
++
++# Solo se declara la estructura de cada datasource (entity-packages / primary / batch-size).
++# url, username y password se inyectan desde Secret Manager antes del registro de beans.
+ multi-sql:
+   datasources:
+     arts-ec:
+-      url: ${DB_ARTS_URL}
+-      username: ${DB_ARTS_USERNAME}
+-      password: ${DB_ARTS_PASSWORD}
+       entity-packages:
+         - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.artsec.entity
+       primary: true
+       batch-size: 300
+     devs-ec:
+-      url: ${DB_DEVS_URL}
+-      username: ${DB_DEVS_USERNAME}
+-      password: ${DB_DEVS_PASSWORD}
+       entity-packages:
+         - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.devsec.entity
+     eyes-ec:
+-      url: ${DB_EYES_URL}
+-      username: ${DB_EYES_USERNAME}
+-      password: ${DB_EYES_PASSWORD}
+       entity-packages:
+         - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.eyesec.entity
+     saadmin:
+-      url: ${DB_SAADMIN_URL}
+-      username: ${DB_SAADMIN_USERNAME}
+-      password: ${DB_SAADMIN_PASSWORD}
+       entity-packages:
+         - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.saadmin.entity
+     arts-ec-central:
+-      url: ${DB_ARTS_CENTRAL_URL}
+-      username: ${DB_ARTS_CENTRAL_USERNAME}
+-      password: ${DB_ARTS_CENTRAL_PASSWORD}
+       entity-packages:
+         - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.central.entity
+ 
+@@ -43,10 +50,10 @@
+ 
+ pubsub:
+   subscriptions:
+-    - topic-id: retail.local.distributor.request.v1
+-      subscription-id: retail.local.distributor.request.v1-sub
+-    - topic-id: retail.local.distributor.processed.v1
+-      subscription-id: retail.local.distributor.processed.v1-sub
++    - topic-id: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR:retail.local.distributor.request.v1}
++      subscription-id: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR_SUB:retail.local.distributor.request.v1-sub}
++    - topic-id: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR_PROCESSED:retail.local.distributor.processed.v1}
++      subscription-id: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR_PROCESSED_SUB:retail.local.distributor.processed.v1-sub}
+ 
+ app:
+   distributor:
+
+
+--- Diff for /src/main/resources/application-qa.yaml ---
+--- a//src/main/resources/application-qa.yaml
++++ b//src/main/resources/application-qa.yaml
+@@ -0,0 +1,68 @@
++# Perfil QA: idéntico en topología a producción (GKE en un proyecto GCP de pruebas).
++# Identidad por Workload Identity (ADC) y credenciales de BD desde Secret Manager.
++spring:
++  cloud:
++    gcp:
++      project-id: ${GOOGLE_CLOUD_PROJECT}
++      # En GKE la identidad es por Workload Identity (ADC): no se monta llave JSON en disco.
++      firestore:
++        enabled: true
++        database-id: ${FIRESTORE_DATABASE_ID}
++
++distributor:
++  secret-manager:
++    enabled: true
++    db-username-secret: ${SM_DB_USERNAME_SECRET:suite-cloud-qa-db-user}
++    db-password-secret: ${SM_DB_PASSWORD_SECRET:suite-cloud-qa-db-pass}
++    arts-url-secret: ${SM_ARTS_URL_SECRET:suite-cloud-qa-db-arts-url}
++    saadmin-url-secret: ${SM_SAADMIN_URL_SECRET:suite-cloud-qa-db-saadmin-url}
++    eyes-url-secret: ${SM_EYES_URL_SECRET:suite-cloud-qa-db-eyes-url}
++    devs-url-secret: ${SM_DEVS_URL_SECRET:suite-cloud-qa-db-devs-url}
++    db-central-username-secret: ${SM_DB_CENTRAL_USERNAME_SECRET:suite-cloud-qa-db-central-user}
++    db-central-password-secret: ${SM_DB_CENTRAL_PASSWORD_SECRET:suite-cloud-qa-db-central-pass}
++    arts-central-url-secret: ${SM_ARTS_CENTRAL_URL_SECRET:suite-cloud-qa-db-arts-central-url}
++
++# Solo se declara la estructura de cada datasource (entity-packages / primary / batch-size).
++# url, username y password se inyectan desde Secret Manager antes del registro de beans.
++multi-sql:
++  datasources:
++    arts-ec:
++      entity-packages:
++        - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.artsec.entity
++      primary: true
++      batch-size: 300
++    devs-ec:
++      entity-packages:
++        - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.devsec.entity
++    eyes-ec:
++      entity-packages:
++        - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.eyesec.entity
++    saadmin:
++      entity-packages:
++        - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.saadmin.entity
++    arts-ec-central:
++      entity-packages:
++        - com.elrosado.distributor_cloud.infrastructure.adapter.out.db.central.entity
++
++tlog:
++  firestore-collection: ${TLOG_FIRESTORE_COLLECTION:tlog-retail}
++
++pubsub:
++  subscriptions:
++    - topic-id: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR:retail.local.distributor.request.v1}
++      subscription-id: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR_SUB:retail.local.distributor.request.v1-sub}
++    - topic-id: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR_PROCESSED:retail.local.distributor.processed.v1}
++      subscription-id: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR_PROCESSED_SUB:retail.local.distributor.processed.v1-sub}
++
++app:
++  distributor:
++    default-code: ${DISTRIBUTOR_DEFAULT_CODE:1}
++    # mappings se configura via ConfigMap de K8s
++
++logging:
++  level:
++    root: INFO
++    com.elrosado.distributor_cloud: INFO
++  structured:
++    format:
++      console: gcp
+
+
+--- Diff for /src/main/resources/application.yaml ---
+--- a//src/main/resources/application.yaml
++++ b//src/main/resources/application.yaml
+@@ -20,6 +20,11 @@
+         enabled: true
+       show-details: never
+ 
++tlog:
++  # Default seguro: TlogProperties.firestoreCollection es @NotBlank, así que cualquier
++  # perfil que no lo redefina hereda este valor y la app arranca igualmente.
++  firestore-collection: ${TLOG_FIRESTORE_COLLECTION:frames}
++
+ pubsub-logging:
+   body-mdc-key: documentId
+ 
+@@ -39,6 +44,15 @@
+     saadmin-url-secret: suite-cloud-local-db-saadmin-url
+     eyes-url-secret: suite-cloud-local-db-eyes-url
+     devs-url-secret: suite-cloud-local-db-devs-url
+-    db-central-username-secret: suite-cloud-local-db-user
+-    db-central-password-secret: suite-cloud-local-db-pass
+-    arts-central-url-secret: suite-cloud-local-db-arts-url+    db-central-username-secret: suite-cloud-central-db-user
++    db-central-password-secret: suite-cloud-central-db-pass
++    arts-central-url-secret: suite-cloud-central-db-arts-url
++
++# Logging
++logging:
++  level:
++    root: INFO
++    com.elrosado.distributor_cloud: DEBUG
++    org.springframework.web.servlet.DispatcherServlet: WARN
++    org.apache.catalina.core.ContainerBase: WARN
++    org.hibernate.orm.connections.pooling: WARN
+
+--- Diff for /src/test/java/com/elrosado/distributor_cloud/unit/CentralReplicationServiceTest.java ---
+--- a//src/test/java/com/elrosado/distributor_cloud/unit/CentralReplicationServiceTest.java
++++ b//src/test/java/com/elrosado/distributor_cloud/unit/CentralReplicationServiceTest.java
+@@ -145,6 +145,19 @@
+         verifyNoInteractions(salePort, tmPort);
+     }
+ 
++    @Test
++    void replicate_typeTramaNulo_registraErrorSinNpeYNoActualizaStatus() {
++        CentralReplicationPayload payload = new CentralReplicationPayload(
++                TRANSACTION_ID, XML_SALE, STORE_ID, null, FECHA);
++        when(firestorePort.readReplicationPayload(TRANSACTION_ID)).thenReturn(payload);
++
++        service.replicate(TRANSACTION_ID);
++
++        verify(firestorePort).updateReplicationError(eq(TRANSACTION_ID), any());
++        verify(firestorePort, never()).updateStatusProcessedCentral(any());
++        verifyNoInteractions(salePort, tmPort);
++    }
++
+     // --- Parsing XML TM ---
+ 
+     @Test
+
+
+--- Diff for /src/test/java/com/elrosado/distributor_cloud/unit/DistributorFirestoreAdapterTest.java ---
+--- a//src/test/java/com/elrosado/distributor_cloud/unit/DistributorFirestoreAdapterTest.java
++++ b//src/test/java/com/elrosado/distributor_cloud/unit/DistributorFirestoreAdapterTest.java
+@@ -46,8 +46,8 @@
+         Map<String, Object> doc = new HashMap<>();
+         doc.put("xmlGenerated", "<xml/>");
+         doc.put("storeId", "0005");
+-        doc.put("typeTrama", "10");
+-        doc.put("created_at", new Date(1718272200000L)); // fecha java.util.Date
++        doc.put("frameType", "10");
++        doc.put("createdAt", new Date(1718272200000L)); // fecha java.util.Date
+         when(firestoreService.getDocument(COLLECTION, TRANSACTION_ID)).thenReturn(doc);
+ 
+         CentralReplicationPayload payload = adapter.readReplicationPayload(TRANSACTION_ID);
+@@ -63,7 +63,7 @@
+     void readReplicationPayload_xmlGeneradoAusente_lanzaIllegalState() {
+         Map<String, Object> doc = new HashMap<>();
+         doc.put("storeId", "0005");
+-        doc.put("typeTrama", "10");
++        doc.put("frameType", "10");
+         when(firestoreService.getDocument(COLLECTION, TRANSACTION_ID)).thenReturn(doc);
+ 
+         assertThatThrownBy(() -> adapter.readReplicationPayload(TRANSACTION_ID))
+@@ -76,7 +76,7 @@
+         Map<String, Object> doc = new HashMap<>();
+         doc.put("xmlGenerated", "   ");
+         doc.put("storeId", "0005");
+-        doc.put("typeTrama", "10");
++        doc.put("frameType", "10");
+         when(firestoreService.getDocument(COLLECTION, TRANSACTION_ID)).thenReturn(doc);
+ 
+         assertThatThrownBy(() -> adapter.readReplicationPayload(TRANSACTION_ID))
+@@ -88,7 +88,7 @@
+         Map<String, Object> doc = new HashMap<>();
+         doc.put("xmlGenerated", "<xml/>");
+         doc.put("storeId", "0005");
+-        doc.put("typeTrama", "10");
++        doc.put("frameType", "10");
+         when(firestoreService.getDocument(COLLECTION, TRANSACTION_ID)).thenReturn(doc);
+ 
+         CentralReplicationPayload payload = adapter.readReplicationPayload(TRANSACTION_ID);
+
+
+--- Diff for /src/test/java/com/elrosado/distributor_cloud/unit/TlogMessageHandlerTest.java ---
+--- a//src/test/java/com/elrosado/distributor_cloud/unit/TlogMessageHandlerTest.java
++++ b//src/test/java/com/elrosado/distributor_cloud/unit/TlogMessageHandlerTest.java
+@@ -139,6 +139,40 @@
+     }
+ 
+     @Test
++    void handle_publicaFrameFacturaConIdTrnYReplicacionCentral() throws Exception {
++        Transaction tx = mock(Transaction.class);
++        when(tx.getRetailStoreCode()).thenReturn("0005");
++        when(tlogDocumentPort.isDuplicated(DOC_ID)).thenReturn(false);
++        when(tlogDocumentPort.readXml(DOC_ID)).thenReturn(XML_CONTENT);
++        when(tlogXmlParser.parse(XML_CONTENT)).thenReturn(tx);
++        when(transactionProcessingService.process(tx)).thenReturn(3647997);
++
++        Boolean result = handler.handle(SUBSCRIPTION, MESSAGE).get();
++
++        assertThat(result).isTrue();
++        // Frame de facturaciÃ³n con el idTrn generado
++        verify(messagePublisher).publishAsync("retail.local.invoice.frame.v1", "{\"idTrn\":3647997}");
++        // Y la replicaciÃ³n central con el documentId
++        verify(messagePublisher).publishAsync("retail.local.distributor.processed.v1", DOC_ID);
++    }
++
++    @Test
++    void handle_sinIdTrn_noPublicaFrameFactura() throws Exception {
++        Transaction tx = mock(Transaction.class);
++        when(tx.getRetailStoreCode()).thenReturn("0005");
++        when(tlogDocumentPort.isDuplicated(DOC_ID)).thenReturn(false);
++        when(tlogDocumentPort.readXml(DOC_ID)).thenReturn(XML_CONTENT);
++        when(tlogXmlParser.parse(XML_CONTENT)).thenReturn(tx);
++        when(transactionProcessingService.process(tx)).thenReturn(null);
++
++        Boolean result = handler.handle(SUBSCRIPTION, MESSAGE).get();
++
++        assertThat(result).isTrue();
++        verify(messagePublisher, never()).publishAsync(eq("retail.local.invoice.frame.v1"), any());
++        verify(messagePublisher).publishAsync("retail.local.distributor.processed.v1", DOC_ID);
++    }
++
++    @Test
+     void handle_jsonInvalido_retornaAckSinProcesar() throws Exception {
+         Boolean result = handler.handle(SUBSCRIPTION, "esto no es json").get();
+ 
+
+
+--- Diff for /src/test/java/com/elrosado/distributor_cloud/unit/TransactionProcessingServiceTest.java ---
+--- a//src/test/java/com/elrosado/distributor_cloud/unit/TransactionProcessingServiceTest.java
++++ b//src/test/java/com/elrosado/distributor_cloud/unit/TransactionProcessingServiceTest.java
+@@ -145,6 +145,57 @@
+     }
+ 
+     // ---------------------------------------------------------------------------
++    // process() â idTrn para facturaciÃ³n: solo con factura (TR_INVC) o NC (TR_RTN)
++    // ---------------------------------------------------------------------------
++
++    @Test
++    void process_retornaIdTrnCuandoHayFacturaElec() {
++        RetailTransaction rtl = new RetailTransaction();
++        rtl.setFacturaElec(new FacturaElec());
++
++        Transaction trx = buildTransaction();
++        trx.setRetailTransaction(rtl);
++        when(transactionPersistencePort.save(trx)).thenReturn(555);
++
++        assertThat(service.process(trx)).isEqualTo(555);
++    }
++
++    @Test
++    void process_retornaIdTrnCuandoHayNotaCredito() {
++        ReturnTransaction2 nc = buildNotaCredito("NC-700", "001-001-000700", null);
++        RetailTransaction rtl = new RetailTransaction();
++        rtl.setNotaCredito(nc);
++
++        when(consFinalPort.findByNotaCredito(any())).thenReturn(null);
++        when(consFinalPort.findByNumFactura(any())).thenReturn(null);
++        when(transactionPersistencePort.findOriginalTransactionId("001-001-000700")).thenReturn(Optional.empty());
++
++        Transaction trx = buildTransaction();
++        trx.setRetailTransaction(rtl);
++        when(transactionPersistencePort.save(trx)).thenReturn(556);
++
++        assertThat(service.process(trx)).isEqualTo(556);
++    }
++
++    @Test
++    void process_retornaNullCuandoRetailSinFacturaNiNotaCredito() {
++        Transaction trx = buildTransaction();
++        trx.setRetailTransaction(new RetailTransaction());
++        when(transactionPersistencePort.save(trx)).thenReturn(557);
++
++        assertThat(service.process(trx)).isNull();
++    }
++
++    @Test
++    void process_retornaNullParaTenderControl() {
++        Transaction trx = buildTransaction();
++        trx.setTenderControlTransaction(new TenderControlTransaction());
++        when(transactionPersistencePort.save(trx)).thenReturn(558);
++
++        assertThat(service.process(trx)).isNull();
++    }
++
++    // ---------------------------------------------------------------------------
+     // RetailTransaction â enrichment de consumidor final
+     // ---------------------------------------------------------------------------
+ 
+
+

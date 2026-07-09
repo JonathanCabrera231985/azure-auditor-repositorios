@@ -1,0 +1,116 @@
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -8,7 +8,7 @@
+   SERVER_PORT: "8080"
+   GOOGLE_CLOUD_PROJECT: "modern-suite-cloud-inf"
+   GCS_BUCKET_DEVS: "gcs-cer-suite-core-files"
+-  GCS_PATH_DEV: "dev"
++  GCS_PATH_DEV: "ALLC_DAT/IN/{storeCode}/DEVS"
+   PUBSUB_TOPIC_SYNCHRO_CONTROLLER: "retail.local.synchro.controller.v1"
+   PUBSUB_SUBSCRIPTION_DEVOLUCION: "retail.local.devolution.request.v1-sub"
+   SYNCHRO_CONTROLLER_TARGET_DIR: "f:/ALLC_DAT/IN/devs"
+
+
+--- Diff for /src/main/java/com/elrosado/integration/application/service/ExecuteDevolutionService.java ---
+--- a//src/main/java/com/elrosado/integration/application/service/ExecuteDevolutionService.java
++++ b//src/main/java/com/elrosado/integration/application/service/ExecuteDevolutionService.java
+@@ -100,7 +100,7 @@
+         DvFile dvFile = DvFileBuilder.build(devolution, txData, storeData, taxRates, returnMode, numNc,
+                 command.operatorCode(), null, nota);
+ 
+-        String bucket = gcsBucketName + "/" + pathDev;
++        String bucket = buildBucketPath(storeData.storeCode());
+         dvFileStoragePort.upload(dvFile, bucket);
+ 
+         String messageId = devolutionEventPort.publish(
+@@ -184,6 +184,19 @@
+         return leftPadZeros(codSri, 3) + leftPadZeros(pos, 3) + String.format("%09d", numNc);
+     }
+ 
++    private String buildBucketPath(Integer storeCode) {
++        String resolvedPath = pathDev.replace("{storeCode}", leftPadZeros(String.valueOf(storeCode), 3));
++        return trimTrailingSlash(gcsBucketName) + "/" + trimSlashes(resolvedPath);
++    }
++
++    private String trimTrailingSlash(String value) {
++        return value != null ? value.replaceAll("/+$", "") : "";
++    }
++
++    private String trimSlashes(String value) {
++        return value != null ? value.replaceAll("^/+|/+$", "") : "";
++    }
++
+     private String leftPadZeros(String value, int length) {
+         String normalized = value == null ? "" : value.trim();
+         if (normalized.length() >= length) {
+
+
+--- Diff for /src/main/resources/application-dev.yaml ---
+--- a//src/main/resources/application-dev.yaml
++++ b//src/main/resources/application-dev.yaml
+@@ -61,7 +61,7 @@
+   gcp:
+     storage:
+       bucket-name: ${GCS_BUCKET_DEVS}
+-      path-dev: ${GCS_PATH_DEV:dev}
++      path-dev: ${GCS_PATH_DEV:ALLC_DAT/IN/{storeCode}/DEVS}
+     pubsub:
+       topic-synchro-controller: ${PUBSUB_TOPIC_SYNCHRO_CONTROLLER}
+       subscription-devolution-request: ${PUBSUB_SUBSCRIPTION_DEVOLUCION}
+
+
+--- Diff for /src/main/resources/application-local.yaml ---
+--- a//src/main/resources/application-local.yaml
++++ b//src/main/resources/application-local.yaml
+@@ -61,7 +61,7 @@
+   gcp:
+     storage:
+       bucket-name: ${GCS_BUCKET_DEVS:gcs-cer-suite-core-files}
+-      path-dev: dev
++      path-dev: ${GCS_PATH_DEV:ALLC_DAT/IN/{storeCode}/DEVS}
+     pubsub:
+       topic-synchro-controller: ${PUBSUB_TOPIC_SYNCHRO_CONTROLLER:retail.local.synchro.controller.v1}
+       subscription-devolution-request: ${PUBSUB_SUBSCRIPTION_DEVOLUCION:retail.local.devolution.request.v1-sub}
+
+
+--- Diff for /src/main/resources/application-prod.yaml ---
+--- a//src/main/resources/application-prod.yaml
++++ b//src/main/resources/application-prod.yaml
+@@ -57,7 +57,7 @@
+   gcp:
+     storage:
+       bucket-name: ${GCS_BUCKET_DEVS}
+-      path-dev: ${GCS_PATH_DEV:dev}
++      path-dev: ${GCS_PATH_DEV:ALLC_DAT/IN/{storeCode}/DEVS}
+     pubsub:
+       topic-synchro-controller: ${PUBSUB_TOPIC_SYNCHRO_CONTROLLER}
+       subscription-devolution-request: ${PUBSUB_SUBSCRIPTION_DEVOLUCION}
+
+
+--- Diff for /src/test/java/com/elrosado/integration/application/service/ExecuteDevolutionServiceTest.java ---
+--- a//src/test/java/com/elrosado/integration/application/service/ExecuteDevolutionServiceTest.java
++++ b//src/test/java/com/elrosado/integration/application/service/ExecuteDevolutionServiceTest.java
+@@ -70,9 +70,9 @@
+         assertThat(fakes.devolutionSequencePort.returnMode).isEqualTo(ReturnMode.CASH);
+         assertThat(fakes.devolutionSequencePort.codSri).isEqualTo("12");
+         assertThat(fakes.devolutionSequencePort.pos).isEqualTo("7");
+-        assertThat(fakes.dvFileStoragePort.bucketName).isEqualTo("gcs-cer-suite-core-files/dev");
++        assertThat(fakes.dvFileStoragePort.bucketName).isEqualTo("gcs-cer-suite-core-files/ALLC_DAT/IN/005/DEVS");
+         assertThat(fakes.devolutionEventPort.event.targetDir()).isEqualTo("f:/ALLC_DAT/IN/devs");
+-        assertThat(fakes.devolutionEventPort.event.gcsBucket()).isEqualTo("gcs-cer-suite-core-files/dev");
++        assertThat(fakes.devolutionEventPort.event.gcsBucket()).isEqualTo("gcs-cer-suite-core-files/ALLC_DAT/IN/005/DEVS");
+     }
+ 
+     @Test
+@@ -155,7 +155,7 @@
+                     creditNoteEligibilityPort
+             );
+             setField(service, "gcsBucketName", "gcs-cer-suite-core-files");
+-            setField(service, "pathDev", "dev");
++            setField(service, "pathDev", "ALLC_DAT/IN/{storeCode}/DEVS");
+             setField(service, "syncControllerTargetDir", "f:/ALLC_DAT/IN/devs");
+             return service;
+         }
+
+

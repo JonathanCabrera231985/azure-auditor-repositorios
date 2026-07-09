@@ -1,0 +1,2718 @@
+--- Diff for /.claude_rules/GCS_ROUTES_INVENTORY.md ---
+--- a//.claude_rules/GCS_ROUTES_INVENTORY.md
++++ b//.claude_rules/GCS_ROUTES_INVENTORY.md
+@@ -14,7 +14,11 @@
+ | `sendCartaMoto.in.folder.path` | `gs://gcs-cer-suite-core-files/eyes/xmlcvm/out` | `gcs-cer-suite-core-files` | `eyes/xmlcvm/out` | Defined | User confirmation, 2026-06-23 |
+ | `sendCartaMoto.out.folder.path` | `gs://gcs-cer-suite-core-files/eyes/xmlcvm/bkp` | `gcs-cer-suite-core-files` | `eyes/xmlcvm/bkp` | Defined | User confirmation, 2026-06-23 |
+ | `updateSecSubSec.in.folder.path` | `gs://gcs-cer-suite-core-files/EYES/ARSAP/IN` | `gcs-cer-suite-core-files` | `EYES/ARSAP/IN` | Defined | User confirmation, 2026-06-24 |
++| `saveTransaction.in.folder.path` | `gs://gcs-cer-suite-core-files/EYES/ARSAP/IN` | `gcs-cer-suite-core-files` | `EYES/ARSAP/IN` | Defined | User confirmation, 2026-06-30 |
+ | `updateSecSubSec.bkp.folder.path` | `gs://gcs-cer-suite-core-files/EYES/ARSAP/BKP` | `gcs-cer-suite-core-files` | `EYES/ARSAP/BKP` | Defined | User confirmation, 2026-06-24 |
++| `saveTransaction.bkp.folder.path` | `gs://gcs-cer-suite-core-files/EYES/ARSAP/BKP` | `gcs-cer-suite-core-files` | `EYES/ARSAP/BKP` | Defined | User confirmation, 2026-06-30 |
++| `saveTransaction.xml.folder.path` | `gs://gcs-cer-suite-core-files/ARTS/TSLRECORDS` | `gcs-cer-suite-core-files` | `ARTS/TSLRECORDS` | Defined | User confirmation, 2026-06-30 |
++| `saveTransaction.sync.folder.path` | `gs://gcs-cer-suite-core-files/ARTS/TSLRECORDS/OUT` | `gcs-cer-suite-core-files` | `ARTS/TSLRECORDS/OUT` | Defined | User confirmation, 2026-06-30 |
+ | `updateMoto.in.folder.path` | `gs://gcs-cer-suite-core-files/EYES/ARSAP/PRC` | `gcs-cer-suite-core-files` | `EYES/ARSAP/PRC` | Defined | User confirmation, 2026-06-24. Shared with UpdateReservaProcess (RSVLOTE* filter) |
+ | `updateMoto.out.folder.path` | `gs://gcs-cer-suite-core-files/EYES/ARSAP/BKP` | `gcs-cer-suite-core-files` | `EYES/ARSAP/BKP` | Defined | User confirmation, 2026-06-24. Shared with UpdateReservaProcess backup |
+ | `update.error.folder.path` (moto + reserva) | `gs://gcs-cer-suite-core-files/EYES/ARSAP/ERROR` | `gcs-cer-suite-core-files` | `EYES/ARSAP/ERROR` | Defined | User confirmation, 2026-06-24. Storesubfolder `/{storeCode}` appended by adapter |
+
+
+--- Diff for /k8s/properties.yaml ---
+--- a//k8s/properties.yaml
++++ b//k8s/properties.yaml
+@@ -14,6 +14,11 @@
+     updateMoto.in.folder.path=gs://gcs-cer-suite-core-files/eyes/arsap/prc
+     updateMoto.out.folder.path=gs://gcs-cer-suite-core-files/eyes/arsap/bkp
+     updateMoto.sleeptime=30000
++    saveTransaction.in.folder.path=gs://gcs-cer-suite-core-files/EYES/ARSAP/IN
++    saveTransaction.bkp.folder.path=gs://gcs-cer-suite-core-files/EYES/ARSAP/BKP
++    saveTransaction.xml.folder.path=gs://gcs-cer-suite-core-files/ARTS/TSLRECORDS
++    saveTransaction.sync.folder.path=gs://gcs-cer-suite-core-files/ARTS/TSLRECORDS/OUT
++    saveTransaction.sleeptime=30000
+     sendCartaMoto.in.folder.path=gs://gcs-cer-suite-core-files/eyes/xmlcvm/out
+     sendCartaMoto.out.folder.path=gs://gcs-cer-suite-core-files/eyes/xmlcvm/bkp
+     sendCartaMoto.sleeptime=30000
+@@ -44,3 +49,9 @@
+     activateGiftcard.server.retries=3
+     activateGiftcard.server.timeOut=120000
+     activateGiftcard.server.timeSleep=600
++    operatorPasswordUpdate.timesleep=30000
++    operatorPasswordUpdate.posPort=2040
++    operatorPasswordUpdate.posRetries=2
++    operatorPasswordUpdate.posTimeoutConnectionMs=5000
++    operatorPasswordUpdate.posTimeoutSleepMs=300
++    operatorPasswordUpdate.posQtyBytesLength=6
+
+
+--- Diff for /k8s/secret.yaml ---
+--- a//k8s/secret.yaml
++++ b//k8s/secret.yaml
+@@ -29,3 +29,7 @@
+   SFTP_CARTA_MOTO_USERNAME: "cG9zY2Vy"
+   # sE!8Nu-yG!4tE-X- → base64
+   SFTP_CARTA_MOTO_PASSWORD: "c0UhOE51LXlHITR0RS1YLQ=="
++
++  # datasource OPERAC_EC — OperatorPassWordUpdateProcess
++  # Mismas credenciales que ARTS_EC; URL apunta a OPERAC_EC
++  OPERA_DB_URL: ""
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/PendingSupervisorUpdate.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/PendingSupervisorUpdate.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/PendingSupervisorUpdate.java
+@@ -0,0 +1,18 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++import java.time.LocalDateTime;
++
++/**
++ * Supervisor pendiente de distribuciÃ³n de clave al controlador POS.
++ * Fuente: OP_CODSUPER JOIN OP_OPERADOR WHERE estado = 1 (PROCESAR).
++ */
++public record PendingSupervisorUpdate(
++        int supervisorId,
++        int identityDocument,
++        String clave,
++        String clave128,
++        LocalDateTime fechaInicio,
++        Integer idRegistro,
++        String ipTienda,
++        Integer codTienda
++) {}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionConsumptionRecord.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionConsumptionRecord.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionConsumptionRecord.java
+@@ -0,0 +1,12 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++public record SaveTransactionConsumptionRecord(
++        String invoiceNumber,
++        String accountNumber,
++        String transactionSequence,
++        String authorizationNumber,
++        int amount1,
++        int amount2,
++        String responseCode
++) {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionDocument.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionDocument.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionDocument.java
+@@ -0,0 +1,53 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++import java.time.LocalDateTime;
++import java.util.List;
++
++public record SaveTransactionDocument(
++        SaveTransactionHeader header,
++        List<SaveTransactionItem> items,
++        List<SaveTransactionTender> tenders,
++        List<SaveTransactionTax> taxes,
++        List<SaveTransactionPromotion> promotions,
++        List<SaveTransactionConsumptionRecord> consumptions,
++        List<SaveTransactionPointsRecord> points,
++        String invoiceNumber,
++        String customerId,
++        String customerName,
++        String customerType,
++        String webCoupon,
++        int webCouponQuantity,
++        long sequenceNumberMayoreo,
++        int outputIndex
++) {
++
++    public SaveTransactionDocument {
++        items = List.copyOf(items);
++        tenders = List.copyOf(tenders);
++        taxes = List.copyOf(taxes);
++        promotions = List.copyOf(promotions);
++        consumptions = List.copyOf(consumptions);
++        points = List.copyOf(points);
++    }
++
++    public int storeCode() {
++        return header.storeCode();
++    }
++
++    public String outputFileName() {
++        LocalDateTime businessDay = header.businessDay();
++        String timestamp = "%04d%02d%02d%02d%02d%02d".formatted(
++                businessDay.getYear(),
++                businessDay.getMonthValue(),
++                businessDay.getDayOfMonth(),
++                businessDay.getHour(),
++                businessDay.getMinute(),
++                businessDay.getSecond());
++        return "%d-%s-%d-%s-%d.xml".formatted(
++                header.storeCode(),
++                header.workstationCode(),
++                header.sequenceNumber(),
++                timestamp,
++                outputIndex);
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionFile.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionFile.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionFile.java
+@@ -0,0 +1,7 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++public record SaveTransactionFile(
++        GcsObjectReference location,
++        String fileName
++) {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionHeader.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionHeader.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionHeader.java
+@@ -0,0 +1,17 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++import java.time.LocalDateTime;
++
++public record SaveTransactionHeader(
++        String workstationCode,
++        int sequenceNumber,
++        int storeCode,
++        String operatorCode,
++        LocalDateTime beginDateTime,
++        LocalDateTime endDateTime,
++        LocalDateTime businessDay,
++        long grossPositiveAmount,
++        long grossNegativeAmount,
++        int retailTransactionTypeCode
++) {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionItem.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionItem.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionItem.java
+@@ -0,0 +1,18 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++public record SaveTransactionItem(
++        long itemCode,
++        long regularSalesUnitPrice,
++        long extendedAmount,
++        String entryMethodCode,
++        long quantity,
++        String units,
++        String taxType,
++        long appliedTax,
++        int ordinalNumber,
++        boolean wholesale,
++        int itemType,
++        String motoSerial,
++        String managerCode
++) {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionPointsRecord.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionPointsRecord.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionPointsRecord.java
+@@ -0,0 +1,15 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++import java.time.LocalDateTime;
++
++public record SaveTransactionPointsRecord(
++        int storeCode,
++        String workstationCode,
++        LocalDateTime businessDay,
++        int transactionNumber,
++        long itemCode,
++        int ordinalNumber,
++        int points,
++        String promotionCode
++) {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionPromotion.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionPromotion.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionPromotion.java
+@@ -0,0 +1,9 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++public record SaveTransactionPromotion(
++        String promotionCode,
++        long amount,
++        int ordinalNumber,
++        int promotionSequenceNumber
++) {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionTax.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionTax.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionTax.java
+@@ -0,0 +1,9 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++public record SaveTransactionTax(
++        String itemTypeCode,
++        String taxType,
++        long taxAmount,
++        long taxableAmount
++) {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionTender.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionTender.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionTender.java
+@@ -0,0 +1,9 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++public record SaveTransactionTender(
++        String tenderTypeCode,
++        long amount,
++        String accountNumber,
++        boolean change
++) {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionsProcessingResult.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionsProcessingResult.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SaveTransactionsProcessingResult.java
+@@ -0,0 +1,23 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++public record SaveTransactionsProcessingResult(
++        long linesRead,
++        long transactionsGenerated,
++        long xmlUploaded,
++        long syncXmlUploaded,
++        long pointsInserted,
++        long consumptionsInserted,
++        long lineErrors
++) {
++
++    public SaveTransactionsProcessingResult plus(SaveTransactionsProcessingResult other) {
++        return new SaveTransactionsProcessingResult(
++                linesRead + other.linesRead,
++                transactionsGenerated + other.transactionsGenerated,
++                xmlUploaded + other.xmlUploaded,
++                syncXmlUploaded + other.syncXmlUploaded,
++                pointsInserted + other.pointsInserted,
++                consumptionsInserted + other.consumptionsInserted,
++                lineErrors + other.lineErrors);
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SupervisorUpdateResult.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SupervisorUpdateResult.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SupervisorUpdateResult.java
+@@ -0,0 +1,19 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++/**
++ * Resultado de la distribuciÃ³n de clave de un supervisor al controlador POS.
++ */
++public record SupervisorUpdateResult(
++        int supervisorId,
++        boolean success,
++        String errorMessage
++) {
++
++    public static SupervisorUpdateResult ok(int supervisorId) {
++        return new SupervisorUpdateResult(supervisorId, true, null);
++    }
++
++    public static SupervisorUpdateResult failed(int supervisorId, String errorMessage) {
++        return new SupervisorUpdateResult(supervisorId, false, errorMessage);
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/OperatorPasswordUpdateUseCase.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/OperatorPasswordUpdateUseCase.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/OperatorPasswordUpdateUseCase.java
+@@ -0,0 +1,13 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.in;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.SupervisorUpdateResult;
++
++import java.util.List;
++
++/**
++ * Caso de uso: distribuir actualizaciones de clave de supervisores a los controladores POS.
++ */
++public interface OperatorPasswordUpdateUseCase {
++
++    List<SupervisorUpdateResult> processAllPendingUpdates();
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/SaveTransactionsUseCase.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/SaveTransactionsUseCase.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/SaveTransactionsUseCase.java
+@@ -0,0 +1,6 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.in;
++
++public interface SaveTransactionsUseCase {
++
++    void processPendingFiles();
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/SaveTransactionsPersistencePort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/SaveTransactionsPersistencePort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/SaveTransactionsPersistencePort.java
+@@ -0,0 +1,13 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.SaveTransactionConsumptionRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SaveTransactionPointsRecord;
++
++import java.util.List;
++
++public interface SaveTransactionsPersistencePort {
++
++    void savePoints(List<SaveTransactionPointsRecord> records);
++
++    void saveConsumptions(List<SaveTransactionConsumptionRecord> records);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/SaveTransactionsStoragePort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/SaveTransactionsStoragePort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/SaveTransactionsStoragePort.java
+@@ -0,0 +1,20 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SaveTransactionFile;
++
++import java.io.BufferedReader;
++import java.util.List;
++
++public interface SaveTransactionsStoragePort {
++
++    List<SaveTransactionFile> listPendingFiles();
++
++    BufferedReader openReader(SaveTransactionFile file);
++
++    GcsObjectReference uploadXml(String fileName, byte[] content);
++
++    GcsObjectReference uploadSyncXml(String fileName, byte[] content);
++
++    GcsObjectReference moveToBackup(SaveTransactionFile file);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/SupervisorPendingPort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/SupervisorPendingPort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/SupervisorPendingPort.java
+@@ -0,0 +1,13 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.PendingSupervisorUpdate;
++
++import java.util.List;
++
++/**
++ * Puerto de salida: lectura de supervisores pendientes de distribuciÃ³n de clave (estado = 1).
++ */
++public interface SupervisorPendingPort {
++
++    List<PendingSupervisorUpdate> findAllPending();
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/SupervisorStatusPort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/SupervisorStatusPort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/SupervisorStatusPort.java
+@@ -0,0 +1,11 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++/**
++ * Puerto de salida: actualizaciÃ³n de estado de supervisores en OP_CODSUPER.
++ */
++public interface SupervisorStatusPort {
++
++    void markAsActive(int supervisorId);
++
++    void markAsFailed(int supervisorId);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/OperatorPasswordUpdateSchedulerAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/OperatorPasswordUpdateSchedulerAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/OperatorPasswordUpdateSchedulerAdapter.java
+@@ -0,0 +1,30 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.scheduler;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.OperatorPasswordUpdateUseCase;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.scheduling.annotation.Scheduled;
++import org.springframework.stereotype.Component;
++
++/**
++ * Disparador planificado del proceso OperatorPassWordUpdateProcess.
++ * Intervalo configurable via operatorPasswordUpdate.timesleep (properties.yaml).
++ */
++@Component
++public class OperatorPasswordUpdateSchedulerAdapter {
++
++    private static final Logger log = LoggerFactory.getLogger(OperatorPasswordUpdateSchedulerAdapter.class);
++
++    private final OperatorPasswordUpdateUseCase useCase;
++
++    public OperatorPasswordUpdateSchedulerAdapter(OperatorPasswordUpdateUseCase useCase) {
++        this.useCase = useCase;
++    }
++
++    @Scheduled(fixedDelayString = "${operator-password-update.timesleep:30000}")
++    public void execute() {
++        log.atInfo().setMessage("Iniciando ciclo de distribuciÃ³n de claves de supervisores").log();
++        useCase.processAllPendingUpdates();
++        log.atInfo().setMessage("Ciclo de distribuciÃ³n de claves de supervisores finalizado").log();
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SaveTransactionsSchedulerAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SaveTransactionsSchedulerAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SaveTransactionsSchedulerAdapter.java
+@@ -0,0 +1,31 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.scheduler;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.SaveTransactionsUseCase;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.scheduling.annotation.Scheduled;
++import org.springframework.stereotype.Component;
++
++@Component
++public class SaveTransactionsSchedulerAdapter {
++
++    private static final Logger log = LoggerFactory.getLogger(SaveTransactionsSchedulerAdapter.class);
++
++    private final SaveTransactionsUseCase saveTransactionsUseCase;
++
++    public SaveTransactionsSchedulerAdapter(SaveTransactionsUseCase saveTransactionsUseCase) {
++        this.saveTransactionsUseCase = saveTransactionsUseCase;
++    }
++
++    @Scheduled(fixedDelayString = "${saveTransaction.sleeptime:30000}")
++    public void execute() {
++        try {
++            saveTransactionsUseCase.processPendingFiles();
++        } catch (Exception e) {
++            log.atError()
++                    .setMessage("Error no controlado en scheduler SaveTransactions")
++                    .setCause(e)
++                    .log();
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbSaveTransactionsAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbSaveTransactionsAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbSaveTransactionsAdapter.java
+@@ -0,0 +1,88 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.SaveTransactionConsumptionRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SaveTransactionPointsRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.SaveTransactionsPersistencePort;
++import org.springframework.beans.factory.annotation.Qualifier;
++import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
++import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
++import org.springframework.stereotype.Component;
++import org.springframework.transaction.annotation.Transactional;
++
++import javax.sql.DataSource;
++import java.util.List;
++
++@Component
++public class DbSaveTransactionsAdapter implements SaveTransactionsPersistencePort {
++
++    private static final String INSERT_POINTS = """
++            INSERT INTO CO_PTS_DT (
++                CD_STR_RT, CD_WS, DC_DY_BSN, AI_TRN, CD_ITM, ORDL_NBR, PTS, CD_PRM
++            ) VALUES (
++                :storeCode, :workstationCode, :businessDay, :transactionNumber,
++                :itemCode, :ordinalNumber, :points, :promotionCode
++            )
++            """;
++
++    private static final String INSERT_CONSUMPTION = """
++            INSERT INTO CO_CSM_SYS_DT (
++                INVC_NMB, ACNT_NMB, SEQ_TRX, AUT_NMB, AMNT_1, AMNT_2, RSP_CD
++            ) VALUES (
++                :invoiceNumber, :accountNumber, :transactionSequence,
++                :authorizationNumber, :amount1, :amount2, :responseCode
++            )
++            """;
++
++    private final NamedParameterJdbcTemplate jdbcTemplate;
++
++    public DbSaveTransactionsAdapter(@Qualifier("artsEcDataSource") DataSource artsEcDataSource) {
++        this.jdbcTemplate = new NamedParameterJdbcTemplate(artsEcDataSource);
++    }
++
++    @Override
++    @Transactional(transactionManager = "artsEcTransactionManager")
++    public void savePoints(List<SaveTransactionPointsRecord> records) {
++        if (records.isEmpty()) {
++            return;
++        }
++        jdbcTemplate.batchUpdate(INSERT_POINTS, records.stream()
++                .map(this::toPointsParams)
++                .toArray(MapSqlParameterSource[]::new));
++    }
++
++    @Override
++    @Transactional(transactionManager = "artsEcTransactionManager")
++    public void saveConsumptions(List<SaveTransactionConsumptionRecord> records) {
++        if (records.isEmpty()) {
++            return;
++        }
++        jdbcTemplate.batchUpdate(INSERT_CONSUMPTION, records.stream()
++                .map(this::toConsumptionParams)
++                .toArray(MapSqlParameterSource[]::new));
++    }
++
++    private MapSqlParameterSource toPointsParams(SaveTransactionPointsRecord record) {
++        return new MapSqlParameterSource()
++                .addValue("storeCode", record.storeCode())
++                .addValue("workstationCode", record.workstationCode())
++                .addValue("businessDay", record.businessDay())
++                .addValue("transactionNumber", record.transactionNumber())
++                .addValue("itemCode", record.itemCode())
++                .addValue("ordinalNumber", record.ordinalNumber())
++                .addValue("points", record.points())
++                .addValue("promotionCode", record.promotionCode());
++    }
++
++    private MapSqlParameterSource toConsumptionParams(SaveTransactionConsumptionRecord record) {
++        return new MapSqlParameterSource()
++                .addValue("invoiceNumber", record.invoiceNumber())
++                .addValue("accountNumber", record.accountNumber())
++                .addValue("transactionSequence", record.transactionSequence())
++                .addValue("authorizationNumber", record.authorizationNumber())
++                .addValue("amount1", record.amount1())
++                .addValue("amount2", record.amount2())
++                .addValue("responseCode", record.responseCode());
++    }
++}
++
++
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/opera/DbSupervisorPendingAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/opera/DbSupervisorPendingAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/opera/DbSupervisorPendingAdapter.java
+@@ -0,0 +1,57 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.opera;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.PendingSupervisorUpdate;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.SupervisorPendingPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.SupervisorStatusPort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.opera.entity.SupervisorEntity;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.opera.repository.JpaSupervisorRepository;
++import org.springframework.stereotype.Component;
++
++import java.util.List;
++
++/**
++ * Adaptador de BD OPERAC_EC para supervisores: lectura de pendientes y actualizaciÃ³n de estado.
++ */
++@Component
++public class DbSupervisorPendingAdapter implements SupervisorPendingPort, SupervisorStatusPort {
++
++    private static final int ESTADO_ACTIVO = 4;
++    private static final int ESTADO_FALLO = 2;
++
++    private final JpaSupervisorRepository repository;
++
++    public DbSupervisorPendingAdapter(JpaSupervisorRepository repository) {
++        this.repository = repository;
++    }
++
++    @Override
++    public List<PendingSupervisorUpdate> findAllPending() {
++        return repository.findAllPending().stream()
++                .map(this::toDomain)
++                .toList();
++    }
++
++    @Override
++    public void markAsActive(int supervisorId) {
++        repository.updateEstado(supervisorId, ESTADO_ACTIVO);
++    }
++
++    @Override
++    public void markAsFailed(int supervisorId) {
++        repository.updateEstado(supervisorId, ESTADO_FALLO);
++    }
++
++    private PendingSupervisorUpdate toDomain(SupervisorEntity entity) {
++        var op = entity.getOperator();
++        return new PendingSupervisorUpdate(
++                entity.getIdCodsuper(),
++                op.getCcOperador() != null ? op.getCcOperador() : 0,
++                entity.getClave(),
++                entity.getCode128(),
++                entity.getFechaIni(),
++                entity.getIdreg(),
++                op.getIpTienda(),
++                op.getCodTienda()
++        );
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/opera/entity/OperatorEntity.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/opera/entity/OperatorEntity.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/opera/entity/OperatorEntity.java
+@@ -0,0 +1,39 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.opera.entity;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.GeneratedValue;
++import jakarta.persistence.GenerationType;
++import jakarta.persistence.Id;
++import jakarta.persistence.Table;
++
++/**
++ * Entidad JPA para OP_OPERADOR (OPERAC_EC).
++ * Solo se mapean los campos requeridos por OperatorPassWordUpdateProcess.
++ */
++@Entity
++@Table(name = "OP_OPERADOR", schema = "dbo")
++public class OperatorEntity {
++
++    @Id
++    @GeneratedValue(strategy = GenerationType.IDENTITY)
++    @Column(name = "ID_OPERADOR")
++    private Integer idOperador;
++
++    @Column(name = "CC_OPERADOR")
++    private Integer ccOperador;
++
++    @Column(name = "COD_TIENDA")
++    private Integer codTienda;
++
++    @Column(name = "IP_TIENDA", length = 15)
++    private String ipTienda;
++
++    protected OperatorEntity() {
++    }
++
++    public Integer getIdOperador() { return idOperador; }
++    public Integer getCcOperador() { return ccOperador; }
++    public Integer getCodTienda() { return codTienda; }
++    public String getIpTienda() { return ipTienda; }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/opera/entity/SupervisorEntity.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/opera/entity/SupervisorEntity.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/opera/entity/SupervisorEntity.java
+@@ -0,0 +1,62 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.opera.entity;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.FetchType;
++import jakarta.persistence.GeneratedValue;
++import jakarta.persistence.GenerationType;
++import jakarta.persistence.Id;
++import jakarta.persistence.JoinColumn;
++import jakarta.persistence.ManyToOne;
++import jakarta.persistence.Table;
++
++import java.time.LocalDateTime;
++
++/**
++ * Entidad JPA para OP_CODSUPER (OPERAC_EC).
++ * Representa una actualizaciÃ³n de clave de supervisor pendiente de distribuciÃ³n.
++ */
++@Entity
++@Table(name = "OP_CODSUPER", schema = "dbo")
++public class SupervisorEntity {
++
++    @Id
++    @GeneratedValue(strategy = GenerationType.IDENTITY)
++    @Column(name = "ID_CODSUPER")
++    private Integer idCodsuper;
++
++    @ManyToOne(fetch = FetchType.EAGER)
++    @JoinColumn(name = "ID_OPERADOR", nullable = false)
++    private OperatorEntity operator;
++
++    @Column(name = "CODE128", length = 20)
++    private String code128;
++
++    @Column(name = "CLAVE", length = 8)
++    private String clave;
++
++    /** 1=PROCESAR, 2=FALLO, 4=ACTIVO, 5=EXPIRADO */
++    @Column(name = "ESTADO")
++    private Integer estado;
++
++    @Column(name = "IDREG")
++    private Integer idreg;
++
++    @Column(name = "FECHA_INI")
++    private LocalDateTime fechaIni;
++
++    @Column(name = "FECHA_FIN")
++    private LocalDateTime fechaFin;
++
++    protected SupervisorEntity() {
++    }
++
++    public Integer getIdCodsuper() { return idCodsuper; }
++    public OperatorEntity getOperator() { return operator; }
++    public String getCode128() { return code128; }
++    public String getClave() { return clave; }
++    public Integer getEstado() { return estado; }
++    public Integer getIdreg() { return idreg; }
++    public LocalDateTime getFechaIni() { return fechaIni; }
++    public LocalDateTime getFechaFin() { return fechaFin; }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/opera/repository/JpaSupervisorRepository.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/opera/repository/JpaSupervisorRepository.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/opera/repository/JpaSupervisorRepository.java
+@@ -0,0 +1,21 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.opera.repository;
++
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.opera.entity.SupervisorEntity;
++import jakarta.transaction.Transactional;
++import org.springframework.data.jpa.repository.JpaRepository;
++import org.springframework.data.jpa.repository.Modifying;
++import org.springframework.data.jpa.repository.Query;
++import org.springframework.data.repository.query.Param;
++
++import java.util.List;
++
++public interface JpaSupervisorRepository extends JpaRepository<SupervisorEntity, Integer> {
++
++    @Query("SELECT s FROM SupervisorEntity s JOIN FETCH s.operator WHERE s.estado = 1")
++    List<SupervisorEntity> findAllPending();
++
++    @Modifying
++    @Transactional
++    @Query("UPDATE SupervisorEntity s SET s.estado = :estado WHERE s.idCodsuper = :id")
++    void updateEstado(@Param("id") int id, @Param("estado") int estado);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/socket/OperatorPasswordSocketClient.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/socket/OperatorPasswordSocketClient.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/socket/OperatorPasswordSocketClient.java
+@@ -0,0 +1,193 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.socket;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.PendingSupervisorUpdate;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.LegacyOperatorPasswordUpdateProperties;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Component;
++
++import java.io.IOException;
++import java.io.InputStream;
++import java.io.OutputStream;
++import java.net.InetSocketAddress;
++import java.net.Socket;
++import java.net.SocketTimeoutException;
++import java.nio.charset.StandardCharsets;
++import java.time.format.DateTimeFormatter;
++
++/**
++ * Cliente TCP para distribuciÃ³n de claves de supervisores al controlador POS.
++ * Protocolo: prefijo decimal de 6 dÃ­gitos con la longitud del payload + frame '|' separado.
++ * Frame tipo 26 (OPER_SUP_UPDATE): S'|'26'|'000'|'{store}'|'0'|'{ts}'|'{cc}'|'{clave}'|'{code128}'|'{fechaIni}'|'{idreg}'
++ */
++@Component
++public class OperatorPasswordSocketClient {
++
++    private static final Logger log = LoggerFactory.getLogger(OperatorPasswordSocketClient.class);
++
++    private static final String FRAME_SEPARATOR = "'|'";
++    private static final String OP_CODE = "26";
++    private static final String RESPONSE_CHANNEL = "000";
++    private static final String PERM_CONN = "0";
++    private static final DateTimeFormatter TS_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
++    private static final int KEEPALIVE_CYCLE_THRESHOLD = 5;
++
++    private final LegacyOperatorPasswordUpdateProperties props;
++
++    public OperatorPasswordSocketClient(LegacyOperatorPasswordUpdateProperties props) {
++        this.props = props;
++    }
++
++    /**
++     * EnvÃ­a el frame tipo 26 al controlador POS de la tienda.
++     * Retorna true si el controlador confirma Ã©xito (statusTrama == 0).
++     */
++    public boolean sendSupervisorUpdate(PendingSupervisorUpdate supervisor, String storeCode) {
++        String frame = buildFrame(supervisor, storeCode);
++        String prefixedFrame = addLengthPrefix(frame, props.posQtyBytesLength());
++        byte[] payload = prefixedFrame.getBytes(StandardCharsets.ISO_8859_1);
++
++        for (int attempt = 1; attempt <= props.posRetries(); attempt++) {
++            try {
++                boolean success = trySend(supervisor.ipTienda(), payload, attempt);
++                if (success) return true;
++            } catch (IOException e) {
++                log.atWarn()
++                        .setMessage("Error de socket al enviar clave de supervisor")
++                        .addKeyValue("supervisorId", supervisor.supervisorId())
++                        .addKeyValue("ipTienda", supervisor.ipTienda())
++                        .addKeyValue("intento", attempt)
++                        .setCause(e)
++                        .log();
++            }
++            if (attempt < props.posRetries()) sleepBetweenRetries();
++        }
++        return false;
++    }
++
++    private boolean trySend(String ipTienda, byte[] payload, int attempt) throws IOException {
++        try (Socket socket = new Socket()) {
++            socket.setSoTimeout(props.posTimeoutConnectionMs());
++            socket.connect(new InetSocketAddress(ipTienda, props.posPort()), props.posTimeoutConnectionMs());
++
++            OutputStream out = socket.getOutputStream();
++            out.write(payload);
++            out.flush();
++
++            return readAndValidateResponse(socket.getInputStream(), out, attempt);
++        }
++    }
++
++    private boolean readAndValidateResponse(InputStream in, OutputStream out, int attempt) throws IOException {
++        int keepaliveCycles = 0;
++        byte[] lenBuffer = new byte[props.posQtyBytesLength()];
++
++        while (true) {
++            try {
++                int read = in.read(lenBuffer, 0, props.posQtyBytesLength());
++                if (read <= 0) {
++                    keepaliveCycles++;
++                    if (keepaliveCycles % KEEPALIVE_CYCLE_THRESHOLD == 0) {
++                        sendKeepalive(out);
++                    }
++                    if (keepaliveCycles >= props.posRetries() * KEEPALIVE_CYCLE_THRESHOLD) {
++                        log.atWarn()
++                                .setMessage("Sin respuesta del controlador POS tras keepalives")
++                                .addKeyValue("intento", attempt)
++                                .log();
++                        return false;
++                    }
++                    continue;
++                }
++
++                int payloadLength = Integer.parseInt(new String(lenBuffer, 0, read, StandardCharsets.ISO_8859_1).trim());
++                if (payloadLength <= 0) return false;
++
++                byte[] responseBytes = readExact(in, payloadLength);
++                if (responseBytes == null) return false;
++
++                String responseFrame = new String(responseBytes, StandardCharsets.ISO_8859_1);
++                return parseStatus(responseFrame);
++
++            } catch (SocketTimeoutException e) {
++                keepaliveCycles++;
++                if (keepaliveCycles % KEEPALIVE_CYCLE_THRESHOLD == 0) {
++                    sendKeepalive(out);
++                }
++                if (keepaliveCycles >= props.posRetries() * KEEPALIVE_CYCLE_THRESHOLD) {
++                    log.atWarn()
++                            .setMessage("Timeout de lectura en controlador POS")
++                            .addKeyValue("intento", attempt)
++                            .log();
++                    return false;
++                }
++            }
++        }
++    }
++
++    private void sendKeepalive(OutputStream out) {
++        try {
++            String keepalive = "0".repeat(props.posQtyBytesLength());
++            out.write(keepalive.getBytes(StandardCharsets.ISO_8859_1));
++            out.flush();
++            log.atDebug().setMessage("Keepalive enviado al controlador POS").log();
++        } catch (IOException e) {
++            log.atDebug().setMessage("Error al enviar keepalive").setCause(e).log();
++        }
++    }
++
++    private static boolean parseStatus(String responseFrame) {
++        String[] fields = responseFrame.split(FRAME_SEPARATOR.replace("|", "\\|"), -1);
++        if (fields.length < 2) return false;
++        return "0".equals(fields[1].trim());
++    }
++
++    String buildFrame(PendingSupervisorUpdate supervisor, String storeCode) {
++        String timestamp = supervisor.fechaInicio() != null
++                ? supervisor.fechaInicio().format(TS_FORMATTER)
++                : "";
++        String fechaIniStr = supervisor.fechaInicio() != null
++                ? supervisor.fechaInicio().toString()
++                : "";
++        String idRegStr = supervisor.idRegistro() != null ? String.valueOf(supervisor.idRegistro()) : "";
++
++        return "S" + FRAME_SEPARATOR
++                + OP_CODE + FRAME_SEPARATOR
++                + RESPONSE_CHANNEL + FRAME_SEPARATOR
++                + storeCode + FRAME_SEPARATOR
++                + PERM_CONN + FRAME_SEPARATOR
++                + timestamp + FRAME_SEPARATOR
++                + supervisor.identityDocument() + FRAME_SEPARATOR
++                + nullSafe(supervisor.clave()) + FRAME_SEPARATOR
++                + nullSafe(supervisor.clave128()) + FRAME_SEPARATOR
++                + fechaIniStr + FRAME_SEPARATOR
++                + idRegStr;
++    }
++
++    private static String addLengthPrefix(String frame, int prefixLength) {
++        return String.format("%0" + prefixLength + "d", frame.length()) + frame;
++    }
++
++    private static String nullSafe(String value) {
++        return value != null ? value : "";
++    }
++
++    private static byte[] readExact(InputStream in, int count) throws IOException {
++        byte[] buffer = new byte[count];
++        int offset = 0;
++        while (offset < count) {
++            int read = in.read(buffer, offset, count - offset);
++            if (read < 0) return null;
++            offset += read;
++        }
++        return buffer;
++    }
++
++    private void sleepBetweenRetries() {
++        try {
++            Thread.sleep(props.posTimeoutSleepMs());
++        } catch (InterruptedException e) {
++            Thread.currentThread().interrupt();
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsSaveTransactionsStorageAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsSaveTransactionsStorageAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsSaveTransactionsStorageAdapter.java
+@@ -0,0 +1,82 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.storage;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SaveTransactionFile;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.SaveTransactionsStoragePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.LegacySaveTransactionsProperties;
++import com.google.cloud.storage.Blob;
++import org.springframework.stereotype.Component;
++
++import java.io.BufferedReader;
++import java.util.Comparator;
++import java.util.List;
++import java.util.Optional;
++
++@Component
++public class GcsSaveTransactionsStorageAdapter implements SaveTransactionsStoragePort {
++
++    private static final String XML_CONTENT_TYPE = "application/xml";
++
++    private final GcsStorageHelper gcsHelper;
++    private final LegacySaveTransactionsProperties legacyProperties;
++
++    public GcsSaveTransactionsStorageAdapter(
++            GcsStorageHelper gcsHelper,
++            LegacySaveTransactionsProperties legacyProperties) {
++        this.gcsHelper = gcsHelper;
++        this.legacyProperties = legacyProperties;
++    }
++
++    @Override
++    public List<SaveTransactionFile> listPendingFiles() {
++        GcsObjectReference input = GcsObjectReference.fromUri(legacyProperties.inputUri());
++        String prefix = input.prefixWithSlash();
++        return gcsHelper.streamBlobs(input)
++                .flatMap(blob -> toSaveTransactionFile(input, prefix, blob).stream())
++                .sorted(Comparator.comparing(SaveTransactionFile::fileName))
++                .toList();
++    }
++
++    @Override
++    public BufferedReader openReader(SaveTransactionFile file) {
++        return gcsHelper.openReader(file.location());
++    }
++
++    @Override
++    public GcsObjectReference uploadXml(String fileName, byte[] content) {
++        GcsObjectReference targetFolder = GcsObjectReference.fromUri(legacyProperties.xmlUri());
++        return gcsHelper.upload(targetFolder.resolve(fileName), content, XML_CONTENT_TYPE);
++    }
++
++    @Override
++    public GcsObjectReference uploadSyncXml(String fileName, byte[] content) {
++        GcsObjectReference targetFolder = GcsObjectReference.fromUri(legacyProperties.syncUri());
++        return gcsHelper.upload(targetFolder.resolve(fileName), content, XML_CONTENT_TYPE);
++    }
++
++    @Override
++    public GcsObjectReference moveToBackup(SaveTransactionFile file) {
++        GcsObjectReference targetFolder = GcsObjectReference.fromUri(legacyProperties.backupUri());
++        return gcsHelper.moveBlob(file.location(), targetFolder);
++    }
++
++    private Optional<SaveTransactionFile> toSaveTransactionFile(
++            GcsObjectReference input,
++            String prefix,
++            Blob blob) {
++        String objectName = blob.getName();
++        if (!objectName.startsWith(prefix)) {
++            return Optional.empty();
++        }
++
++        String relativeName = objectName.substring(prefix.length());
++        if (relativeName.isBlank() || relativeName.contains("/") || !relativeName.startsWith("TRX")) {
++            return Optional.empty();
++        }
++
++        return Optional.of(new SaveTransactionFile(
++                new GcsObjectReference(input.bucket(), objectName),
++                relativeName
++        ));
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LegacyOperatorPasswordUpdateProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LegacyOperatorPasswordUpdateProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LegacyOperatorPasswordUpdateProperties.java
+@@ -0,0 +1,25 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.boot.context.properties.ConfigurationProperties;
++
++/**
++ * Propiedades legacy de OperatorPassWordUpdateProcess provenientes de ArmsServerConf.properties
++ * (k8s/properties.yaml). Solo incluye propiedades TCP al controlador POS (rama port 8000 eliminada).
++ */
++@ConfigurationProperties(prefix = "operator-password-update")
++public record LegacyOperatorPasswordUpdateProperties(
++        int posPort,
++        int posRetries,
++        int posTimeoutConnectionMs,
++        int posTimeoutSleepMs,
++        int posQtyBytesLength
++) {
++
++    public LegacyOperatorPasswordUpdateProperties {
++        if (posPort <= 0) posPort = 2040;
++        if (posRetries <= 0) posRetries = 2;
++        if (posTimeoutConnectionMs <= 0) posTimeoutConnectionMs = 5000;
++        if (posTimeoutSleepMs <= 0) posTimeoutSleepMs = 300;
++        if (posQtyBytesLength <= 0) posQtyBytesLength = 6;
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LegacySaveTransactionsProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LegacySaveTransactionsProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LegacySaveTransactionsProperties.java
+@@ -0,0 +1,63 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.boot.context.properties.ConfigurationProperties;
++
++@ConfigurationProperties(prefix = "save-transaction")
++public record LegacySaveTransactionsProperties(
++        LegacyRoute in,
++        LegacyRoute bkp,
++        LegacyRoute xml,
++        LegacyRoute sync,
++        long sleeptime
++) {
++
++    public LegacySaveTransactionsProperties {
++        if (in == null) {
++            in = new LegacyRoute(new LegacyFolder(""));
++        }
++        if (bkp == null) {
++            bkp = new LegacyRoute(new LegacyFolder(""));
++        }
++        if (xml == null) {
++            xml = new LegacyRoute(new LegacyFolder(""));
++        }
++        if (sync == null) {
++            sync = new LegacyRoute(new LegacyFolder(""));
++        }
++        if (sleeptime <= 0) {
++            sleeptime = 30_000L;
++        }
++    }
++
++    public String inputUri() {
++        return in.folder().path();
++    }
++
++    public String backupUri() {
++        return bkp.folder().path();
++    }
++
++    public String xmlUri() {
++        return xml.folder().path();
++    }
++
++    public String syncUri() {
++        return sync.folder().path();
++    }
++
++    public record LegacyRoute(LegacyFolder folder) {
++        public LegacyRoute {
++            if (folder == null) {
++                folder = new LegacyFolder("");
++            }
++        }
++    }
++
++    public record LegacyFolder(String path) {
++        public LegacyFolder {
++            if (path == null) {
++                path = "";
++            }
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/OperatorPasswordUpdateProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/OperatorPasswordUpdateProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/OperatorPasswordUpdateProperties.java
+@@ -0,0 +1,11 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.boot.context.properties.ConfigurationProperties;
++
++/**
++ * Propiedades cloud del proceso OperatorPassWordUpdateProcess (application-dev/prod.yml).
++ */
++@ConfigurationProperties(prefix = "app.operator-password-update")
++public record OperatorPasswordUpdateProperties(
++        boolean enabled
++) {}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SaveTransactionsProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SaveTransactionsProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SaveTransactionsProperties.java
+@@ -0,0 +1,9 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.boot.context.properties.ConfigurationProperties;
++
++@ConfigurationProperties(prefix = "app.save-transactions")
++public record SaveTransactionsProperties(
++        boolean enabled
++) {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java
+@@ -15,6 +15,8 @@
+         LegacyUpdateCedPadRucProperties.class,
+         UpdateMotoProperties.class,
+         LegacyUpdateMotoProperties.class,
++        SaveTransactionsProperties.class,
++        LegacySaveTransactionsProperties.class,
+         SendCartaMotoProperties.class,
+         LegacySendCartaMotoProperties.class,
+         UpdateSecSubSecProperties.class,
+@@ -22,7 +24,11 @@
+         PaymentServerProperties.class,
+         ReversarConsumoProperties.class,
+         ReversarRedencionProperties.class,
+-        ReversarPagoProperties.class
++        ReversarPagoProperties.class,
++        OperatorPasswordUpdateProperties.class,
++        LegacyOperatorPasswordUpdateProperties.class
+ })
+ public class SchedulingConfig {
+ }
++
++
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/StoreRegistry.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/StoreRegistry.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/StoreRegistry.java
+@@ -69,4 +69,11 @@
+                 .filter(s -> s.getDesClave() == desClave)
+                 .findFirst();
+     }
++
++    public Optional<StoreEntity> findByCodTienda(Integer codTienda) {
++        if (codTienda == null) return Optional.empty();
++        return activeMultiLocalStores.stream()
++                .filter(s -> codTienda.equals(s.getCodTienda()))
++                .findFirst();
++    }
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/OperatorPasswordUpdateService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/OperatorPasswordUpdateService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/OperatorPasswordUpdateService.java
+@@ -0,0 +1,180 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.PendingSupervisorUpdate;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SupervisorUpdateResult;
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.OperatorPasswordUpdateUseCase;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.SupervisorPendingPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.SupervisorStatusPort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.socket.OperatorPasswordSocketClient;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.OperatorPasswordUpdateProperties;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.StoreRegistry;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.beans.factory.annotation.Qualifier;
++import org.springframework.core.task.AsyncTaskExecutor;
++import org.springframework.stereotype.Service;
++
++import java.util.List;
++import java.util.Map;
++import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.CopyOnWriteArrayList;
++import java.util.stream.Collectors;
++
++/**
++ * Distribuye actualizaciones de clave de supervisores a los controladores POS de cada tienda.
++ * MULTI_LOCAL: agrupa por codTienda, un virtual thread por tienda, secuencial dentro de cada grupo.
++ */
++@Service
++public class OperatorPasswordUpdateService implements OperatorPasswordUpdateUseCase {
++
++    private static final Logger log = LoggerFactory.getLogger(OperatorPasswordUpdateService.class);
++
++    private final SupervisorPendingPort pendingPort;
++    private final SupervisorStatusPort statusPort;
++    private final StoreRegistry storeRegistry;
++    private final OperatorPasswordSocketClient socketClient;
++    private final OperatorPasswordUpdateProperties properties;
++    private final AsyncTaskExecutor virtualThreadTaskExecutor;
++
++    public OperatorPasswordUpdateService(
++            SupervisorPendingPort pendingPort,
++            SupervisorStatusPort statusPort,
++            StoreRegistry storeRegistry,
++            OperatorPasswordSocketClient socketClient,
++            OperatorPasswordUpdateProperties properties,
++            @Qualifier("virtualThreadTaskExecutor") AsyncTaskExecutor virtualThreadTaskExecutor) {
++        this.pendingPort = pendingPort;
++        this.statusPort = statusPort;
++        this.storeRegistry = storeRegistry;
++        this.socketClient = socketClient;
++        this.properties = properties;
++        this.virtualThreadTaskExecutor = virtualThreadTaskExecutor;
++    }
++
++    @Override
++    public List<SupervisorUpdateResult> processAllPendingUpdates() {
++        if (!properties.enabled()) {
++            log.atDebug().setMessage("OperatorPasswordUpdate deshabilitado").log();
++            return List.of();
++        }
++
++        if (!storeRegistry.isMultiLocalEnabled()) {
++            log.atWarn().setMessage("OperatorPasswordUpdate omitido â no hay tiendas MULTI_LOCAL activas").log();
++            return List.of();
++        }
++
++        List<PendingSupervisorUpdate> pending = pendingPort.findAllPending();
++        if (pending.isEmpty()) {
++            log.atDebug().setMessage("No hay supervisores pendientes de actualizaciÃ³n de clave").log();
++            return List.of();
++        }
++
++        // Filtrar solo supervisores de tiendas MULTI_LOCAL registradas
++        List<PendingSupervisorUpdate> filtered = pending.stream()
++                .filter(s -> s.codTienda() != null && storeRegistry.findByCodTienda(s.codTienda()).isPresent())
++                .toList();
++
++        int skipped = pending.size() - filtered.size();
++        if (skipped > 0) {
++            log.atWarn()
++                    .setMessage("Supervisores ignorados â tienda no en StoreRegistry MULTI_LOCAL")
++                    .addKeyValue("ignorados", skipped)
++                    .log();
++        }
++
++        if (filtered.isEmpty()) return List.of();
++
++        Map<Integer, List<PendingSupervisorUpdate>> byStore = filtered.stream()
++                .collect(Collectors.groupingBy(PendingSupervisorUpdate::codTienda));
++
++        log.atInfo()
++                .setMessage("Iniciando distribuciÃ³n de claves de supervisores")
++                .addKeyValue("totalSupervisores", filtered.size())
++                .addKeyValue("tiendas", byStore.size())
++                .log();
++
++        List<SupervisorUpdateResult> results = new CopyOnWriteArrayList<>();
++
++        List<CompletableFuture<Void>> futures = byStore.entrySet().stream()
++                .map(entry -> CompletableFuture
++                        .runAsync(() -> processStoreGroup(entry.getKey(), entry.getValue(), results),
++                                virtualThreadTaskExecutor)
++                        .exceptionally(ex -> {
++                            log.atError()
++                                    .setMessage("Error no controlado en hilo de tienda para OperatorPasswordUpdate")
++                                    .addKeyValue("codTienda", entry.getKey())
++                                    .setCause(ex)
++                                    .log();
++                            return null;
++                        }))
++                .toList();
++
++        CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).join();
++
++        log.atInfo()
++                .setMessage("Ciclo de distribuciÃ³n de claves finalizado")
++                .addKeyValue("procesados", results.size())
++                .addKeyValue("exitosos", results.stream().filter(SupervisorUpdateResult::success).count())
++                .addKeyValue("fallidos", results.stream().filter(r -> !r.success()).count())
++                .log();
++
++        return List.copyOf(results);
++    }
++
++    private void processStoreGroup(int codTienda, List<PendingSupervisorUpdate> supervisors,
++                                   List<SupervisorUpdateResult> results) {
++        var storeOpt = storeRegistry.findByCodTienda(codTienda);
++        if (storeOpt.isEmpty()) return;
++
++        String storeCode = String.valueOf(storeOpt.get().getDesClave());
++
++        log.atInfo()
++                .setMessage("Procesando supervisores de tienda")
++                .addKeyValue("codTienda", codTienda)
++                .addKeyValue("storeCode", storeCode)
++                .addKeyValue("cantidad", supervisors.size())
++                .log();
++
++        supervisors.forEach(supervisor -> results.add(processSupervisor(supervisor, storeCode)));
++    }
++
++    private SupervisorUpdateResult processSupervisor(PendingSupervisorUpdate supervisor, String storeCode) {
++        log.atDebug()
++                .setMessage("STR â enviando clave de supervisor")
++                .addKeyValue("supervisorId", supervisor.supervisorId())
++                .addKeyValue("ipTienda", supervisor.ipTienda())
++                .addKeyValue("storeCode", storeCode)
++                .log();
++
++        try {
++            boolean sent = socketClient.sendSupervisorUpdate(supervisor, storeCode);
++
++            if (sent) {
++                statusPort.markAsActive(supervisor.supervisorId());
++                log.atInfo()
++                        .setMessage("END â clave de supervisor distribuida exitosamente")
++                        .addKeyValue("supervisorId", supervisor.supervisorId())
++                        .addKeyValue("ipTienda", supervisor.ipTienda())
++                        .log();
++                return SupervisorUpdateResult.ok(supervisor.supervisorId());
++            } else {
++                statusPort.markAsFailed(supervisor.supervisorId());
++                log.atWarn()
++                        .setMessage("WAR â controlador POS rechazÃ³ la actualizaciÃ³n de clave")
++                        .addKeyValue("supervisorId", supervisor.supervisorId())
++                        .addKeyValue("ipTienda", supervisor.ipTienda())
++                        .log();
++                return SupervisorUpdateResult.failed(supervisor.supervisorId(), "Controlador POS rechazÃ³ la actualizaciÃ³n");
++            }
++        } catch (Exception e) {
++            statusPort.markAsFailed(supervisor.supervisorId());
++            log.atError()
++                    .setMessage("ERR â error al distribuir clave de supervisor")
++                    .addKeyValue("supervisorId", supervisor.supervisorId())
++                    .addKeyValue("ipTienda", supervisor.ipTienda())
++                    .setCause(e)
++                    .log();
++            return SupervisorUpdateResult.failed(supervisor.supervisorId(), e.getMessage());
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/SaveTransactionParser.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/SaveTransactionParser.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/SaveTransactionParser.java
+@@ -0,0 +1,297 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.SaveTransactionConsumptionRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SaveTransactionDocument;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SaveTransactionHeader;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SaveTransactionItem;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SaveTransactionPointsRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SaveTransactionPromotion;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SaveTransactionTax;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SaveTransactionTender;
++import org.springframework.stereotype.Component;
++
++import java.time.LocalDate;
++import java.time.LocalDateTime;
++import java.time.format.DateTimeFormatter;
++import java.util.ArrayList;
++import java.util.List;
++
++@Component
++public class SaveTransactionParser {
++
++    private static final DateTimeFormatter BUSINESS_DAY_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd");
++    private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMddHHmm");
++    private static final long WHOLESALE_SERVICE_ITEM = 811099999997L;
++
++    public SaveTransactionDocument parseLine(String line, int outputIndex) {
++        String[] segments = line.split(",", -1);
++        if (segments.length == 0 || !segments[0].startsWith("00")) {
++            throw new IllegalArgumentException("SaveTransactions line must start with transaction header 00");
++        }
++
++        Builder builder = new Builder(parseHeader(segments[0]), outputIndex);
++        int promotionSequence = 0;
++
++        for (int i = 1; i < segments.length; i++) {
++            String segment = segments[i];
++            if (segment == null || segment.isBlank()) {
++                continue;
++            }
++            String[] info = segment.split("\\|", -1);
++            String type = value(info, 0);
++            switch (type) {
++                case "01" -> builder.items.add(parseItem(info));
++                case "05" -> builder.tenders.add(new SaveTransactionTender(
++                        value(info, 1), parseLong(info, 2), value(info, 3), false));
++                case "07" -> builder.taxes.add(new SaveTransactionTax(
++                        value(info, 1), value(info, 2), parseLong(info, 3), parseLong(info, 4)));
++                case "09" -> builder.tenders.add(new SaveTransactionTender(
++                        value(info, 1), parseLong(info, 2), "", true));
++                case "10" -> {
++                    builder.invoiceNumber = value(info, 3);
++                    builder.retailTransactionTypeCode = 1;
++                }
++                case "11" -> builder.promotions.add(new SaveTransactionPromotion(
++                        value(info, 1), parseLong(info, 2), parseInt(info, 3), ++promotionSequence));
++                case "12" -> {
++                    builder.customerId = value(info, 1);
++                    builder.customerName = value(info, 2);
++                    builder.customerType = resolveCustomerType(builder.customerId, value(info, 3));
++                }
++                case "13" -> {
++                    builder.webCoupon = value(info, 1);
++                    builder.webCouponQuantity = parseInt(info, 2);
++                }
++                case "14" -> builder.points.add(parsePoints(info, builder.header, builder.items));
++                case "15" -> applyMoto(info, builder.items);
++                case "16" -> {
++                    builder.deducibleFood = parseLong(info, 1);
++                    builder.deducibleClothing = parseLong(info, 2);
++                    builder.deducibleSchool = parseLong(info, 3);
++                }
++                case "17" -> builder.consumptions.add(parseConsumption(info, builder.invoiceNumber));
++                case "18" -> applyWholesale(info, builder);
++                default -> {
++                    // Los segmentos no reconocidos se omiten para conservar tolerancia legacy.
++                }
++            }
++        }
++
++        return builder.build();
++    }
++
++    private SaveTransactionHeader parseHeader(String headerSegment) {
++        String[] trxInfo = headerSegment.split("\\|", -1);
++        return new SaveTransactionHeader(
++                value(trxInfo, 1),
++                parseInt(trxInfo, 2),
++                parseInt(trxInfo, 4),
++                value(trxInfo, 5),
++                parseDateTime(trxInfo, 6),
++                parseDateTime(trxInfo, 7),
++                parseBusinessDay(trxInfo, 3),
++                parseLong(trxInfo, 8),
++                parseLong(trxInfo, 9),
++                0
++        );
++    }
++
++    private SaveTransactionItem parseItem(String[] info) {
++        return new SaveTransactionItem(
++                parseLong(info, 1),
++                parseLong(info, 2),
++                parseLong(info, 3),
++                value(info, 4),
++                parseLong(info, 5),
++                value(info, 6),
++                value(info, 7),
++                parseLong(info, 8),
++                parseInt(info, 9),
++                parseInt(info, 10) == 1,
++                0,
++                "",
++                ""
++        );
++    }
++
++    private SaveTransactionPointsRecord parsePoints(
++            String[] info,
++            SaveTransactionHeader header,
++            List<SaveTransactionItem> items) {
++        int ordinalNumber = parseInt(info, 3);
++        long itemCode = items.stream()
++                .filter(item -> item.ordinalNumber() == ordinalNumber)
++                .findFirst()
++                .map(SaveTransactionItem::itemCode)
++                .orElse(0L);
++
++        return new SaveTransactionPointsRecord(
++                header.storeCode(),
++                "%04d".formatted(parseInt(header.workstationCode())),
++                header.businessDay(),
++                header.sequenceNumber(),
++                itemCode,
++                ordinalNumber,
++                parseInt(info, 2),
++                value(info, 1)
++        );
++    }
++
++    private SaveTransactionConsumptionRecord parseConsumption(String[] info, String invoiceNumber) {
++        return new SaveTransactionConsumptionRecord(
++                invoiceNumber,
++                value(info, 1),
++                value(info, 2),
++                value(info, 3),
++                parseInt(info, 4),
++                parseInt(info, 5),
++                value(info, 6)
++        );
++    }
++
++    private void applyMoto(String[] info, List<SaveTransactionItem> items) {
++        long itemCode = parseLong(info, 1);
++        for (int i = items.size() - 1; i >= 0; i--) {
++            SaveTransactionItem item = items.get(i);
++            if (item.itemCode() == itemCode) {
++                items.set(i, new SaveTransactionItem(
++                        item.itemCode(),
++                        item.regularSalesUnitPrice(),
++                        item.extendedAmount(),
++                        item.entryMethodCode(),
++                        item.quantity(),
++                        item.units(),
++                        item.taxType(),
++                        item.appliedTax(),
++                        item.ordinalNumber(),
++                        item.wholesale(),
++                        item.itemType(),
++                        value(info, 2),
++                        value(info, 3)
++                ));
++                return;
++            }
++        }
++    }
++
++    private void applyWholesale(String[] info, Builder builder) {
++        int sequence = builder.items.stream()
++                .mapToInt(SaveTransactionItem::ordinalNumber)
++                .max()
++                .orElse(0) + 1;
++        long amount = parseLong(info, 1);
++        builder.sequenceNumberMayoreo = sequence;
++        builder.items.add(new SaveTransactionItem(
++                WHOLESALE_SERVICE_ITEM,
++                amount,
++                amount,
++                "SERVICE",
++                1,
++                "",
++                "",
++                0,
++                sequence,
++                true,
++                7,
++                "",
++                ""
++        ));
++    }
++
++    private String resolveCustomerType(String customerId, String flag) {
++        if ("1".equals(flag)) {
++            return "1";
++        }
++        if ("0".equals(flag) && customerId != null && customerId.length() > 10) {
++            return "2";
++        }
++        return "3";
++    }
++
++    private LocalDateTime parseBusinessDay(String[] values, int index) {
++        String raw = value(values, index);
++        return LocalDate.parse(raw, BUSINESS_DAY_FORMATTER).atStartOfDay();
++    }
++
++    private LocalDateTime parseDateTime(String[] values, int index) {
++        return LocalDateTime.parse(value(values, index), DATE_TIME_FORMATTER);
++    }
++
++    private int parseInt(String[] values, int index) {
++        String raw = value(values, index);
++        return parseInt(raw);
++    }
++
++    private int parseInt(String value) {
++        String raw = value == null ? "" : value.trim();
++        return raw.isBlank() ? 0 : Integer.parseInt(raw);
++    }
++
++    private long parseLong(String[] values, int index) {
++        String raw = value(values, index);
++        return raw.isBlank() ? 0L : Long.parseLong(raw.trim());
++    }
++
++    private String value(String[] values, int index) {
++        return index < values.length && values[index] != null ? values[index].trim() : "";
++    }
++
++    private static final class Builder {
++        private final SaveTransactionHeader header;
++        private final int outputIndex;
++        private final List<SaveTransactionItem> items = new ArrayList<>();
++        private final List<SaveTransactionTender> tenders = new ArrayList<>();
++        private final List<SaveTransactionTax> taxes = new ArrayList<>();
++        private final List<SaveTransactionPromotion> promotions = new ArrayList<>();
++        private final List<SaveTransactionConsumptionRecord> consumptions = new ArrayList<>();
++        private final List<SaveTransactionPointsRecord> points = new ArrayList<>();
++        private String invoiceNumber = "";
++        private String customerId = "";
++        private String customerName = "";
++        private String customerType = "";
++        private String webCoupon = "";
++        private int webCouponQuantity;
++        private long sequenceNumberMayoreo;
++        private long deducibleFood;
++        private long deducibleClothing;
++        private long deducibleSchool;
++        private int retailTransactionTypeCode;
++
++        private Builder(SaveTransactionHeader header, int outputIndex) {
++            this.header = header;
++            this.outputIndex = outputIndex;
++        }
++
++        private SaveTransactionDocument build() {
++            SaveTransactionHeader finalHeader = new SaveTransactionHeader(
++                    header.workstationCode(),
++                    header.sequenceNumber(),
++                    header.storeCode(),
++                    header.operatorCode(),
++                    header.beginDateTime(),
++                    header.endDateTime(),
++                    header.businessDay(),
++                    header.grossPositiveAmount(),
++                    header.grossNegativeAmount(),
++                    retailTransactionTypeCode
++            );
++            return new SaveTransactionDocument(
++                    finalHeader,
++                    items,
++                    tenders,
++                    taxes,
++                    promotions,
++                    consumptions,
++                    points,
++                    invoiceNumber,
++                    customerId,
++                    customerName,
++                    customerType,
++                    webCoupon,
++                    webCouponQuantity,
++                    sequenceNumberMayoreo,
++                    outputIndex
++            );
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/SaveTransactionXmlGenerator.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/SaveTransactionXmlGenerator.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/SaveTransactionXmlGenerator.java
+@@ -0,0 +1,146 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.SaveTransactionDocument;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SaveTransactionItem;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SaveTransactionPromotion;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SaveTransactionTax;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SaveTransactionTender;
++import org.springframework.stereotype.Component;
++
++import java.nio.charset.StandardCharsets;
++import java.time.format.DateTimeFormatter;
++
++@Component
++public class SaveTransactionXmlGenerator {
++
++    private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss");
++
++    public byte[] generate(SaveTransactionDocument document) {
++        StringBuilder xml = new StringBuilder(2048);
++        xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
++        xml.append("<Transaction>");
++        appendHeader(xml, document);
++        appendCustomer(xml, document);
++        appendItems(xml, document);
++        appendTenders(xml, document);
++        appendTaxes(xml, document);
++        appendPromotions(xml, document);
++        appendExtraData(xml, document);
++        xml.append("</Transaction>");
++        return xml.toString().getBytes(StandardCharsets.UTF_8);
++    }
++
++    private void appendHeader(StringBuilder xml, SaveTransactionDocument document) {
++        var header = document.header();
++        xml.append("<Header>");
++        append(xml, "RetailStoreCode", header.storeCode());
++        append(xml, "WorkstationCode", header.workstationCode());
++        append(xml, "SequenceNumber", header.sequenceNumber());
++        append(xml, "OperatorCode", header.operatorCode());
++        append(xml, "BeginDateTime", DATE_TIME_FORMATTER.format(header.beginDateTime()));
++        append(xml, "EndDateTime", DATE_TIME_FORMATTER.format(header.endDateTime()));
++        append(xml, "BusinessDayDate", DATE_TIME_FORMATTER.format(header.businessDay()));
++        append(xml, "GrossPositiveAmount", header.grossPositiveAmount());
++        append(xml, "GrossNegativeAmount", header.grossNegativeAmount());
++        append(xml, "RetailTransactionTypeCode", header.retailTransactionTypeCode());
++        append(xml, "InvoiceNumber", document.invoiceNumber());
++        xml.append("</Header>");
++    }
++
++    private void appendCustomer(StringBuilder xml, SaveTransactionDocument document) {
++        if (document.customerId().isBlank()
++                && document.customerName().isBlank()
++                && document.customerType().isBlank()) {
++            return;
++        }
++        xml.append("<Customer>");
++        append(xml, "CustomerId", document.customerId());
++        append(xml, "CustomerName", document.customerName());
++        append(xml, "CustomerType", document.customerType());
++        xml.append("</Customer>");
++    }
++
++    private void appendItems(StringBuilder xml, SaveTransactionDocument document) {
++        xml.append("<LineItems>");
++        for (SaveTransactionItem item : document.items()) {
++            xml.append("<LineItem>");
++            append(xml, "ItemCode", item.itemCode());
++            append(xml, "RegularSalesUnitPrice", item.regularSalesUnitPrice());
++            append(xml, "ExtendedAmount", item.extendedAmount());
++            append(xml, "EntryMethodCode", item.entryMethodCode());
++            append(xml, "Quantity", item.quantity());
++            append(xml, "Units", item.units());
++            append(xml, "TaxType", item.taxType());
++            append(xml, "AppliedTax", item.appliedTax());
++            append(xml, "OrdinalNumber", item.ordinalNumber());
++            append(xml, "Wholesale", item.wholesale());
++            append(xml, "ItemType", item.itemType());
++            append(xml, "MotoSerial", item.motoSerial());
++            append(xml, "ManagerCode", item.managerCode());
++            xml.append("</LineItem>");
++        }
++        xml.append("</LineItems>");
++    }
++
++    private void appendTenders(StringBuilder xml, SaveTransactionDocument document) {
++        xml.append("<Tenders>");
++        for (SaveTransactionTender tender : document.tenders()) {
++            xml.append("<Tender>");
++            append(xml, "TenderTypeCode", tender.tenderTypeCode());
++            append(xml, "Amount", tender.amount());
++            append(xml, "AccountNumber", tender.accountNumber());
++            append(xml, "Change", tender.change());
++            xml.append("</Tender>");
++        }
++        xml.append("</Tenders>");
++    }
++
++    private void appendTaxes(StringBuilder xml, SaveTransactionDocument document) {
++        xml.append("<Taxes>");
++        for (SaveTransactionTax tax : document.taxes()) {
++            xml.append("<Tax>");
++            append(xml, "ItemTypeCode", tax.itemTypeCode());
++            append(xml, "TaxType", tax.taxType());
++            append(xml, "TaxAmount", tax.taxAmount());
++            append(xml, "TaxableAmount", tax.taxableAmount());
++            xml.append("</Tax>");
++        }
++        xml.append("</Taxes>");
++    }
++
++    private void appendPromotions(StringBuilder xml, SaveTransactionDocument document) {
++        xml.append("<Promotions>");
++        for (SaveTransactionPromotion promotion : document.promotions()) {
++            xml.append("<Promotion>");
++            append(xml, "PromotionCode", promotion.promotionCode());
++            append(xml, "Amount", promotion.amount());
++            append(xml, "OrdinalNumber", promotion.ordinalNumber());
++            append(xml, "PromotionSequenceNumber", promotion.promotionSequenceNumber());
++            xml.append("</Promotion>");
++        }
++        xml.append("</Promotions>");
++    }
++
++    private void appendExtraData(StringBuilder xml, SaveTransactionDocument document) {
++        xml.append("<ExtraData>");
++        append(xml, "WebCoupon", document.webCoupon());
++        append(xml, "WebCouponQuantity", document.webCouponQuantity());
++        append(xml, "SequenceNumberMayoreo", document.sequenceNumberMayoreo());
++        xml.append("</ExtraData>");
++    }
++
++    private void append(StringBuilder xml, String name, Object value) {
++        xml.append('<').append(name).append('>');
++        xml.append(escape(value == null ? "" : String.valueOf(value)));
++        xml.append("</").append(name).append('>');
++    }
++
++    private String escape(String value) {
++        return value
++                .replace("&", "&amp;")
++                .replace("<", "&lt;")
++                .replace(">", "&gt;")
++                .replace("\"", "&quot;")
++                .replace("'", "&apos;");
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/SaveTransactionsService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/SaveTransactionsService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/SaveTransactionsService.java
+@@ -0,0 +1,213 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SaveTransactionDocument;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SaveTransactionFile;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SaveTransactionsProcessingResult;
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.SaveTransactionsUseCase;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.SaveTransactionsPersistencePort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.SaveTransactionsStoragePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.SaveTransactionsProperties;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.StoreRegistry;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.beans.factory.annotation.Qualifier;
++import org.springframework.core.task.AsyncTaskExecutor;
++import org.springframework.stereotype.Service;
++
++import java.io.BufferedReader;
++import java.io.IOException;
++import java.util.ArrayList;
++import java.util.List;
++import java.util.Map;
++import java.util.concurrent.CompletableFuture;
++import java.util.stream.Collectors;
++
++@Service
++public class SaveTransactionsService implements SaveTransactionsUseCase {
++
++    private static final Logger log = LoggerFactory.getLogger(SaveTransactionsService.class);
++
++    private final SaveTransactionsStoragePort storagePort;
++    private final SaveTransactionsPersistencePort persistencePort;
++    private final SaveTransactionParser parser;
++    private final SaveTransactionXmlGenerator xmlGenerator;
++    private final SaveTransactionsProperties properties;
++    private final StoreRegistry storeRegistry;
++    private final AsyncTaskExecutor virtualThreadTaskExecutor;
++
++    public SaveTransactionsService(
++            SaveTransactionsStoragePort storagePort,
++            SaveTransactionsPersistencePort persistencePort,
++            SaveTransactionParser parser,
++            SaveTransactionXmlGenerator xmlGenerator,
++            SaveTransactionsProperties properties,
++            StoreRegistry storeRegistry,
++            @Qualifier("virtualThreadTaskExecutor") AsyncTaskExecutor virtualThreadTaskExecutor) {
++        this.storagePort = storagePort;
++        this.persistencePort = persistencePort;
++        this.parser = parser;
++        this.xmlGenerator = xmlGenerator;
++        this.properties = properties;
++        this.storeRegistry = storeRegistry;
++        this.virtualThreadTaskExecutor = virtualThreadTaskExecutor;
++    }
++
++    @Override
++    public void processPendingFiles() {
++        if (!properties.enabled()) {
++            log.atDebug().setMessage("SaveTransactions deshabilitado").log();
++            return;
++        }
++
++        if (!storeRegistry.isMultiLocalEnabled()) {
++            log.atWarn()
++                    .setMessage("SaveTransactions omitido: no hay tiendas activas cargadas en StoreRegistry")
++                    .log();
++            return;
++        }
++
++        List<SaveTransactionFile> pendingFiles = storagePort.listPendingFiles();
++        if (pendingFiles.isEmpty()) {
++            log.atDebug().setMessage("No hay archivos SaveTransactions pendientes").log();
++            return;
++        }
++
++        for (SaveTransactionFile file : pendingFiles) {
++            processFile(file);
++        }
++    }
++
++    private void processFile(SaveTransactionFile file) {
++        ParsedFile parsedFile = parseFile(file);
++        if (parsedFile.documents().isEmpty()) {
++            GcsObjectReference backupObject = storagePort.moveToBackup(file);
++            log.atWarn()
++                    .setMessage("Archivo SaveTransactions sin transacciones validas movido a backup")
++                    .addKeyValue("fileName", file.fileName())
++                    .addKeyValue("lineErrors", parsedFile.lineErrors())
++                    .addKeyValue("backupObject", backupObject.toUri())
++                    .log();
++            return;
++        }
++
++        Map<Integer, List<SaveTransactionDocument>> documentsByStore = parsedFile.documents().stream()
++                .collect(Collectors.groupingBy(SaveTransactionDocument::storeCode));
++
++        List<CompletableFuture<SaveTransactionsProcessingResult>> futures = documentsByStore.entrySet().stream()
++                .map(entry -> CompletableFuture.supplyAsync(
++                        () -> processStoreDocuments(file, entry.getKey(), entry.getValue()),
++                        virtualThreadTaskExecutor))
++                .toList();
++
++        SaveTransactionsProcessingResult total = futures.stream()
++                .map(CompletableFuture::join)
++                .reduce(new SaveTransactionsProcessingResult(
++                        parsedFile.linesRead(),
++                        0,
++                        0,
++                        0,
++                        0,
++                        0,
++                        parsedFile.lineErrors()), SaveTransactionsProcessingResult::plus);
++
++        GcsObjectReference backupObject = storagePort.moveToBackup(file);
++        log.atInfo()
++                .setMessage("Archivo SaveTransactions procesado")
++                .addKeyValue("fileName", file.fileName())
++                .addKeyValue("transactionsGenerated", total.transactionsGenerated())
++                .addKeyValue("xmlUploaded", total.xmlUploaded())
++                .addKeyValue("syncXmlUploaded", total.syncXmlUploaded())
++                .addKeyValue("pointsInserted", total.pointsInserted())
++                .addKeyValue("consumptionsInserted", total.consumptionsInserted())
++                .addKeyValue("lineErrors", total.lineErrors())
++                .addKeyValue("backupObject", backupObject.toUri())
++                .log();
++    }
++
++    private ParsedFile parseFile(SaveTransactionFile file) {
++        List<SaveTransactionDocument> documents = new ArrayList<>();
++        long linesRead = 0;
++        long lineErrors = 0;
++        int outputIndex = 0;
++
++        try (BufferedReader reader = storagePort.openReader(file)) {
++            String line;
++            while ((line = reader.readLine()) != null) {
++                linesRead++;
++                if (line.isBlank()) {
++                    continue;
++                }
++                try {
++                    documents.add(parser.parseLine(line, ++outputIndex));
++                } catch (RuntimeException e) {
++                    lineErrors++;
++                    log.atWarn()
++                            .setMessage("Linea SaveTransactions omitida")
++                            .addKeyValue("fileName", file.fileName())
++                            .addKeyValue("lineNumber", linesRead)
++                            .setCause(e)
++                            .log();
++                }
++            }
++        } catch (IOException e) {
++            throw new IllegalStateException("Error leyendo archivo SaveTransactions " + file.fileName(), e);
++        }
++
++        return new ParsedFile(linesRead, lineErrors, List.copyOf(documents));
++    }
++
++    private SaveTransactionsProcessingResult processStoreDocuments(
++            SaveTransactionFile file,
++            int storeCode,
++            List<SaveTransactionDocument> documents) {
++        if (storeRegistry.findByDesClave(storeCode).isEmpty()) {
++            log.atWarn()
++                    .setMessage("Transacciones SaveTransactions omitidas: tienda no activa en StoreRegistry")
++                    .addKeyValue("fileName", file.fileName())
++                    .addKeyValue("storeCode", "%03d".formatted(storeCode))
++                    .addKeyValue("transactionCount", documents.size())
++                    .log();
++            return new SaveTransactionsProcessingResult(0, 0, 0, 0, 0, 0, documents.size());
++        }
++
++        long xmlUploaded = 0;
++        long syncXmlUploaded = 0;
++        long pointsInserted = 0;
++        long consumptionsInserted = 0;
++
++        for (SaveTransactionDocument document : documents) {
++            byte[] xmlContent = xmlGenerator.generate(document);
++            String fileName = document.outputFileName();
++            storagePort.uploadXml(fileName, xmlContent);
++            xmlUploaded++;
++
++            if (document.storeCode() > 0) {
++                storagePort.uploadSyncXml(fileName, xmlContent);
++                syncXmlUploaded++;
++            }
++
++            persistencePort.savePoints(document.points());
++            pointsInserted += document.points().size();
++            persistencePort.saveConsumptions(document.consumptions());
++            consumptionsInserted += document.consumptions().size();
++        }
++
++        return new SaveTransactionsProcessingResult(
++                0,
++                documents.size(),
++                xmlUploaded,
++                syncXmlUploaded,
++                pointsInserted,
++                consumptionsInserted,
++                0
++        );
++    }
++
++    private record ParsedFile(
++            long linesRead,
++            long lineErrors,
++            List<SaveTransactionDocument> documents
++    ) {
++    }
++}
+
+
+--- Diff for /src/main/resources/application-dev.yml ---
+--- a//src/main/resources/application-dev.yml
++++ b//src/main/resources/application-dev.yml
+@@ -60,6 +60,12 @@
+       password: ${SPRING_DATASOURCE_PASSWORD}
+       entity-packages:
+         - com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.devs.entity
++    opera-ec:
++      url: ${OPERA_DB_URL}
++      username: ${SPRING_DATASOURCE_USERNAME}
++      password: ${SPRING_DATASOURCE_PASSWORD}
++      entity-packages:
++        - com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.opera.entity
+ 
+ sendCartaMoto:
+   username: ${SFTP_CARTA_MOTO_USERNAME}
+@@ -73,6 +79,8 @@
+     batch-size: ${UPDATE_MOTO_BATCH_SIZE:100}
+     gcs:
+       error-uri: ${UPDATE_MOTO_ERROR_URI}
++  save-transactions:
++    enabled: ${SAVE_TRANSACTIONS_ENABLED:true}
+   update-ced-pad-ruc:
+     enabled: ${UPDATE_CED_PAD_RUC_ENABLED:true}
+     batch-size: ${UPDATE_CED_PAD_RUC_BATCH_SIZE:500}
+@@ -116,3 +124,7 @@
+     gcs-bkp-prefix: ${REVERSAR_PAGO_GCS_BKP:EYES/PAGCE/BKP}
+     gcs-error-prefix: ${REVERSAR_PAGO_GCS_ERROR:EYES/PAGCE/ERROR}
+     socket-retry-threshold: ${REVERSAR_PAGO_SOCKET_RETRIES:3}
++  operator-password-update:
++    enabled: ${OPERATOR_PASSWORD_UPDATE_ENABLED:true}
++
++
+
+
+--- Diff for /src/main/resources/application-prod.yml ---
+--- a//src/main/resources/application-prod.yml
++++ b//src/main/resources/application-prod.yml
+@@ -54,6 +54,12 @@
+       password: ${SAADMIN_DB_PASSWORD}
+       entity-packages:
+         - com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.saadmin.entity
++    opera-ec:
++      url: ${OPERA_DB_URL}
++      username: ${SPRING_DATASOURCE_USERNAME}
++      password: ${SPRING_DATASOURCE_PASSWORD}
++      entity-packages:
++        - com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.opera.entity
+ 
+ app:
+   update-moto:
+@@ -61,6 +67,8 @@
+     batch-size: ${UPDATE_MOTO_BATCH_SIZE:100}
+     gcs:
+       error-uri: ${UPDATE_MOTO_ERROR_URI}
++  save-transactions:
++    enabled: ${SAVE_TRANSACTIONS_ENABLED:true}
+   update-ced-pad-ruc:
+     enabled: ${UPDATE_CED_PAD_RUC_ENABLED:true}
+     batch-size: ${UPDATE_CED_PAD_RUC_BATCH_SIZE:500}
+@@ -77,3 +85,7 @@
+     enabled: ${REPRO_ENABLED:true}
+     polling-interval-ms: ${REPRO_POLLING_MS:30000}
+     batch-size: ${REPRO_BATCH_SIZE:10}
++  operator-password-update:
++    enabled: ${OPERATOR_PASSWORD_UPDATE_ENABLED:true}
++
++
+
+
+--- Diff for /src/main/resources/application.yml ---
+--- a//src/main/resources/application.yml
++++ b//src/main/resources/application.yml
+@@ -19,8 +19,8 @@
+     hibernate:
+       # "validate" falla al arrancar porque DevTicketEntity apunta a DEVS_EC.dbo.DV_TICKET
+       # (catalog cross-database) y Hibernate consulta INFORMATION_SCHEMA del db conectado
+-      # (ARTS_EC), que no contiene esa tabla. Con "none" el DDL no se toca en ningún perfil;
+-      # la integridad del esquema se garantiza por migración manual o Flyway fuera de JPA.
++      # (ARTS_EC), que no contiene esa tabla. Con "none" el DDL no se toca en ningÃºn perfil;
++      # la integridad del esquema se garantiza por migraciÃ³n manual o Flyway fuera de JPA.
+       ddl-auto: none
+     properties:
+       hibernate:
+@@ -49,3 +49,7 @@
+     batch-size: 500
+     gcs:
+       error-uri: ""
++  save-transactions:
++    enabled: false
++
++
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SaveTransactionsSchedulerAdapterTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SaveTransactionsSchedulerAdapterTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SaveTransactionsSchedulerAdapterTest.java
+@@ -0,0 +1,20 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.scheduler;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.SaveTransactionsUseCase;
++import org.junit.jupiter.api.Test;
++
++import static org.mockito.Mockito.mock;
++import static org.mockito.Mockito.verify;
++
++class SaveTransactionsSchedulerAdapterTest {
++
++    @Test
++    void execute_delegatesToUseCase() {
++        SaveTransactionsUseCase useCase = mock(SaveTransactionsUseCase.class);
++        SaveTransactionsSchedulerAdapter adapter = new SaveTransactionsSchedulerAdapter(useCase);
++
++        adapter.execute();
++
++        verify(useCase).processPendingFiles();
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/socket/OperatorPasswordSocketClientTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/socket/OperatorPasswordSocketClientTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/socket/OperatorPasswordSocketClientTest.java
+@@ -0,0 +1,87 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.socket;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.PendingSupervisorUpdate;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.LegacyOperatorPasswordUpdateProperties;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.time.LocalDateTime;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++@ExtendWith(MockitoExtension.class)
++class OperatorPasswordSocketClientTest {
++
++    private static final LegacyOperatorPasswordUpdateProperties PROPS =
++            new LegacyOperatorPasswordUpdateProperties(2040, 2, 5000, 300, 6);
++
++    private static final PendingSupervisorUpdate SUPERVISOR = new PendingSupervisorUpdate(
++            1, 123456789, "CLAVE1", "CODE128ABC",
++            LocalDateTime.of(2026, 1, 15, 10, 30, 0),
++            42, "192.168.1.100", 10
++    );
++
++    OperatorPasswordSocketClient client;
++
++    @BeforeEach
++    void setUp() {
++        client = new OperatorPasswordSocketClient(PROPS);
++    }
++
++    @Test
++    void buildFrame_estructuraCorrecta() {
++        String frame = client.buildFrame(SUPERVISOR, "191");
++
++        assertThat(frame).startsWith("S'|'26'|'000'|'191'|'0'|'");
++        assertThat(frame).contains("'|'123456789'|'CLAVE1'|'CODE128ABC'|'");
++        assertThat(frame).contains("'|'42");
++    }
++
++    @Test
++    void buildFrame_contieneTimestamp() {
++        String frame = client.buildFrame(SUPERVISOR, "191");
++
++        // Fecha: 20260115103000
++        assertThat(frame).contains("20260115103000");
++    }
++
++    @Test
++    void buildFrame_camposNulos_notienePunteros() {
++        PendingSupervisorUpdate sinFecha = new PendingSupervisorUpdate(
++                2, 999, null, null, null, null, "192.168.1.1", 10
++        );
++
++        String frame = client.buildFrame(sinFecha, "100");
++
++        // No debe lanzar excepciÃ³n; campos nulos deben quedar vacÃ­os
++        assertThat(frame).startsWith("S'|'26'|'000'|'100'|'0'|'");
++        assertThat(frame).doesNotContain("null");
++    }
++
++    @Test
++    void buildFrame_separadorCorrecto() {
++        String frame = client.buildFrame(SUPERVISOR, "191");
++
++        // El separador debe ser '|' (tres caracteres: comilla-pipe-comilla)
++        String[] parts = frame.split("'\\|'", -1);
++        // S | 26 | 000 | 191 | 0 | timestamp | cc | clave | code128 | fechaIni | idreg = 11 partes
++        assertThat(parts).hasSize(11);
++        assertThat(parts[0]).isEqualTo("S");
++        assertThat(parts[1]).isEqualTo("26");
++        assertThat(parts[2]).isEqualTo("000");
++        assertThat(parts[3]).isEqualTo("191");
++        assertThat(parts[4]).isEqualTo("0");
++    }
++
++    @Test
++    void buildFrame_storeCodeDistinto_refleja() {
++        String frame1 = client.buildFrame(SUPERVISOR, "191");
++        String frame2 = client.buildFrame(SUPERVISOR, "205");
++
++        assertThat(frame1).contains("'|'191'|'");
++        assertThat(frame2).contains("'|'205'|'");
++        assertThat(frame1).isNotEqualTo(frame2);
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/OperatorPasswordUpdateServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/OperatorPasswordUpdateServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/OperatorPasswordUpdateServiceTest.java
+@@ -0,0 +1,180 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.PendingSupervisorUpdate;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SupervisorUpdateResult;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.SupervisorPendingPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.SupervisorStatusPort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.saadmin.entity.StoreEntity;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.socket.OperatorPasswordSocketClient;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.OperatorPasswordUpdateProperties;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.StoreRegistry;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++import org.springframework.core.task.SimpleAsyncTaskExecutor;
++
++import java.time.LocalDateTime;
++import java.util.List;
++import java.util.Optional;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.ArgumentMatchers.anyString;
++import static org.mockito.Mockito.lenient;
++import static org.mockito.Mockito.never;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.verifyNoInteractions;
++import static org.mockito.Mockito.when;
++
++@ExtendWith(MockitoExtension.class)
++class OperatorPasswordUpdateServiceTest {
++
++    @Mock SupervisorPendingPort pendingPort;
++    @Mock SupervisorStatusPort statusPort;
++    @Mock StoreRegistry storeRegistry;
++    @Mock OperatorPasswordSocketClient socketClient;
++    @Mock StoreEntity storeEntity;
++
++    private static final OperatorPasswordUpdateProperties PROPS_ENABLED =
++            new OperatorPasswordUpdateProperties(true);
++    private static final OperatorPasswordUpdateProperties PROPS_DISABLED =
++            new OperatorPasswordUpdateProperties(false);
++
++    private static final PendingSupervisorUpdate SUPERVISOR = new PendingSupervisorUpdate(
++            1, 123456789, "CLAVE1", "CODE128ABC",
++            LocalDateTime.of(2026, 1, 15, 10, 30, 0),
++            42, "192.168.1.100", 10
++    );
++
++    OperatorPasswordUpdateService service;
++
++    @BeforeEach
++    void setUp() {
++        service = new OperatorPasswordUpdateService(
++                pendingPort, statusPort, storeRegistry,
++                socketClient, PROPS_ENABLED,
++                new SimpleAsyncTaskExecutor());
++
++        lenient().when(storeEntity.getDesClave()).thenReturn(191);
++        lenient().when(storeEntity.getCodTienda()).thenReturn(10);
++    }
++
++    @Test
++    void processAll_disabled_sinInteraccion() {
++        OperatorPasswordUpdateService disabled = new OperatorPasswordUpdateService(
++                pendingPort, statusPort, storeRegistry,
++                socketClient, PROPS_DISABLED,
++                new SimpleAsyncTaskExecutor());
++
++        List<SupervisorUpdateResult> results = disabled.processAllPendingUpdates();
++
++        assertThat(results).isEmpty();
++        verifyNoInteractions(pendingPort, socketClient, statusPort);
++    }
++
++    @Test
++    void processAll_sinTiendasMultiLocal_sinInteraccion() {
++        when(storeRegistry.isMultiLocalEnabled()).thenReturn(false);
++
++        List<SupervisorUpdateResult> results = service.processAllPendingUpdates();
++
++        assertThat(results).isEmpty();
++        verifyNoInteractions(pendingPort, socketClient, statusPort);
++    }
++
++    @Test
++    void processAll_sinPendientes_retornaVacio() {
++        when(storeRegistry.isMultiLocalEnabled()).thenReturn(true);
++        when(pendingPort.findAllPending()).thenReturn(List.of());
++
++        List<SupervisorUpdateResult> results = service.processAllPendingUpdates();
++
++        assertThat(results).isEmpty();
++        verifyNoInteractions(socketClient, statusPort);
++    }
++
++    @Test
++    void processAll_tiendaNoEnRegistry_supervisorIgnorado() {
++        when(storeRegistry.isMultiLocalEnabled()).thenReturn(true);
++        when(pendingPort.findAllPending()).thenReturn(List.of(SUPERVISOR));
++        when(storeRegistry.findByCodTienda(10)).thenReturn(Optional.empty());
++
++        List<SupervisorUpdateResult> results = service.processAllPendingUpdates();
++
++        assertThat(results).isEmpty();
++        verifyNoInteractions(socketClient, statusPort);
++    }
++
++    @Test
++    void processAll_envioExitoso_marcaActivo() {
++        when(storeRegistry.isMultiLocalEnabled()).thenReturn(true);
++        when(pendingPort.findAllPending()).thenReturn(List.of(SUPERVISOR));
++        when(storeRegistry.findByCodTienda(10)).thenReturn(Optional.of(storeEntity));
++        when(socketClient.sendSupervisorUpdate(any(), anyString())).thenReturn(true);
++
++        List<SupervisorUpdateResult> results = service.processAllPendingUpdates();
++
++        assertThat(results).hasSize(1);
++        assertThat(results.get(0).success()).isTrue();
++        assertThat(results.get(0).supervisorId()).isEqualTo(1);
++        verify(statusPort).markAsActive(1);
++        verify(statusPort, never()).markAsFailed(1);
++    }
++
++    @Test
++    void processAll_envioPOS_rechazado_marcaFallo() {
++        when(storeRegistry.isMultiLocalEnabled()).thenReturn(true);
++        when(pendingPort.findAllPending()).thenReturn(List.of(SUPERVISOR));
++        when(storeRegistry.findByCodTienda(10)).thenReturn(Optional.of(storeEntity));
++        when(socketClient.sendSupervisorUpdate(any(), anyString())).thenReturn(false);
++
++        List<SupervisorUpdateResult> results = service.processAllPendingUpdates();
++
++        assertThat(results).hasSize(1);
++        assertThat(results.get(0).success()).isFalse();
++        verify(statusPort).markAsFailed(1);
++        verify(statusPort, never()).markAsActive(1);
++    }
++
++    @Test
++    void processAll_excepcionSocket_marcaFallo() {
++        when(storeRegistry.isMultiLocalEnabled()).thenReturn(true);
++        when(pendingPort.findAllPending()).thenReturn(List.of(SUPERVISOR));
++        when(storeRegistry.findByCodTienda(10)).thenReturn(Optional.of(storeEntity));
++        when(socketClient.sendSupervisorUpdate(any(), anyString()))
++                .thenThrow(new RuntimeException("connection refused"));
++
++        List<SupervisorUpdateResult> results = service.processAllPendingUpdates();
++
++        assertThat(results).hasSize(1);
++        assertThat(results.get(0).success()).isFalse();
++        assertThat(results.get(0).errorMessage()).contains("connection refused");
++        verify(statusPort).markAsFailed(1);
++    }
++
++    @Test
++    void processAll_dosTiendas_procesanIndependiente() {
++        PendingSupervisorUpdate sup2 = new PendingSupervisorUpdate(
++                2, 987654321, "CLAVE2", "CODE128XYZ",
++                LocalDateTime.of(2026, 1, 15, 11, 0, 0),
++                99, "192.168.1.200", 20
++        );
++        StoreEntity store2 = org.mockito.Mockito.mock(StoreEntity.class);
++        when(store2.getDesClave()).thenReturn(192);
++
++        when(storeRegistry.isMultiLocalEnabled()).thenReturn(true);
++        when(pendingPort.findAllPending()).thenReturn(List.of(SUPERVISOR, sup2));
++        when(storeRegistry.findByCodTienda(10)).thenReturn(Optional.of(storeEntity));
++        when(storeRegistry.findByCodTienda(20)).thenReturn(Optional.of(store2));
++        when(socketClient.sendSupervisorUpdate(any(), anyString())).thenReturn(true);
++
++        List<SupervisorUpdateResult> results = service.processAllPendingUpdates();
++
++        assertThat(results).hasSize(2);
++        assertThat(results).allMatch(SupervisorUpdateResult::success);
++        verify(statusPort).markAsActive(1);
++        verify(statusPort).markAsActive(2);
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/SaveTransactionParserTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/SaveTransactionParserTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/SaveTransactionParserTest.java
+@@ -0,0 +1,45 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.SaveTransactionDocument;
++import org.junit.jupiter.api.Test;
++
++import java.nio.charset.StandardCharsets;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertTrue;
++
++class SaveTransactionParserTest {
++
++    private final SaveTransactionParser parser = new SaveTransactionParser();
++    private final SaveTransactionXmlGenerator xmlGenerator = new SaveTransactionXmlGenerator();
++
++    @Test
++    void parseLine_syntheticTrx_mapsLegacySegmentsAndSideTables() {
++        String line = "00|1|123|20260630|101|OP01|202606301000|202606301005|1500|0"
++                + ",01|789|1000|1000|SCAN|1|EA|IVA|120|1|0"
++                + ",05|CASH|1000|"
++                + ",07|ITEM|IVA|120|1000"
++                + ",10|20260630|100500|F001|1000|1120"
++                + ",11|PROMO1|100|1"
++                + ",12|0912345678|CLIENTE UNO|0"
++                + ",13|CUPON1|2"
++                + ",14|PROMOPTS|50|1"
++                + ",15|789|SERIE1|GER1"
++                + ",17|ACC1|SEQ1|AUT1|10|20|00"
++                + ",18|250";
++
++        SaveTransactionDocument document = parser.parseLine(line, 1);
++        String xml = new String(xmlGenerator.generate(document), StandardCharsets.UTF_8);
++
++        assertEquals(101, document.storeCode());
++        assertEquals("101-1-123-20260630000000-1.xml", document.outputFileName());
++        assertEquals(2, document.items().size());
++        assertEquals(1, document.points().size());
++        assertEquals(789L, document.points().getFirst().itemCode());
++        assertEquals(1, document.consumptions().size());
++        assertEquals("F001", document.consumptions().getFirst().invoiceNumber());
++        assertTrue(xml.contains("<RetailStoreCode>101</RetailStoreCode>"));
++        assertTrue(xml.contains("<MotoSerial>SERIE1</MotoSerial>"));
++        assertTrue(xml.contains("<ItemCode>811099999997</ItemCode>"));
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/SaveTransactionsServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/SaveTransactionsServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/SaveTransactionsServiceTest.java
+@@ -0,0 +1,119 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SaveTransactionFile;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.SaveTransactionsPersistencePort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.SaveTransactionsStoragePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.SaveTransactionsProperties;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.StoreRegistry;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++import org.springframework.core.task.SimpleAsyncTaskExecutor;
++
++import java.io.BufferedReader;
++import java.io.StringReader;
++import java.util.List;
++import java.util.Optional;
++
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.ArgumentMatchers.argThat;
++import static org.mockito.ArgumentMatchers.eq;
++import static org.mockito.Mockito.mock;
++import static org.mockito.Mockito.never;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.verifyNoInteractions;
++import static org.mockito.Mockito.when;
++
++@ExtendWith(MockitoExtension.class)
++class SaveTransactionsServiceTest {
++
++    @Mock
++    SaveTransactionsStoragePort storagePort;
++    @Mock
++    SaveTransactionsPersistencePort persistencePort;
++    @Mock
++    StoreRegistry storeRegistry;
++
++    SaveTransactionsService service;
++
++    @BeforeEach
++    void setUp() {
++        service = new SaveTransactionsService(
++                storagePort,
++                persistencePort,
++                new SaveTransactionParser(),
++                new SaveTransactionXmlGenerator(),
++                new SaveTransactionsProperties(true),
++                storeRegistry,
++                new SimpleAsyncTaskExecutor());
++    }
++
++    @Test
++    void processPendingFiles_validSyntheticTrx_uploadsXmlPersistsSideTablesAndMovesBackup() {
++        SaveTransactionFile file = file();
++        when(storeRegistry.isMultiLocalEnabled()).thenReturn(true);
++        when(storeRegistry.findByDesClave(101)).thenReturn(Optional.of(mock()));
++        when(storagePort.listPendingFiles()).thenReturn(List.of(file));
++        when(storagePort.openReader(file)).thenReturn(reader(validLine()));
++        when(storagePort.moveToBackup(file)).thenReturn(new GcsObjectReference("bucket", "BKP/TRX001"));
++
++        service.processPendingFiles();
++
++        verify(storagePort).uploadXml(eq("101-1-123-20260630000000-1.xml"), any());
++        verify(storagePort).uploadSyncXml(eq("101-1-123-20260630000000-1.xml"), any());
++        verify(persistencePort).savePoints(argThat(records -> records.size() == 1));
++        verify(persistencePort).saveConsumptions(argThat(records -> records.size() == 1));
++        verify(storagePort).moveToBackup(file);
++    }
++
++    @Test
++    void processPendingFiles_disabled_doesNotQueryStorage() {
++        service = new SaveTransactionsService(
++                storagePort,
++                persistencePort,
++                new SaveTransactionParser(),
++                new SaveTransactionXmlGenerator(),
++                new SaveTransactionsProperties(false),
++                storeRegistry,
++                new SimpleAsyncTaskExecutor());
++
++        service.processPendingFiles();
++
++        verifyNoInteractions(storagePort, persistencePort, storeRegistry);
++    }
++
++    @Test
++    void processPendingFiles_invalidLine_movesFileWithoutUploadingXml() {
++        SaveTransactionFile file = file();
++        when(storeRegistry.isMultiLocalEnabled()).thenReturn(true);
++        when(storagePort.listPendingFiles()).thenReturn(List.of(file));
++        when(storagePort.openReader(file)).thenReturn(reader("BAD|LINE\n"));
++        when(storagePort.moveToBackup(file)).thenReturn(new GcsObjectReference("bucket", "BKP/TRX001"));
++
++        service.processPendingFiles();
++
++        verify(storagePort, never()).uploadXml(any(), any());
++        verify(storagePort).moveToBackup(file);
++    }
++
++    private SaveTransactionFile file() {
++        return new SaveTransactionFile(new GcsObjectReference("bucket", "EYES/ARSAP/IN/TRX001"), "TRX001");
++    }
++
++    private BufferedReader reader(String content) {
++        return new BufferedReader(new StringReader(content));
++    }
++
++    private String validLine() {
++        return "00|1|123|20260630|101|OP01|202606301000|202606301005|1500|0"
++                + ",01|789|1000|1000|SCAN|1|EA|IVA|120|1|0"
++                + ",10|20260630|100500|F001|1000|1120"
++                + ",14|PROMOPTS|50|1"
++                + ",17|ACC1|SEQ1|AUT1|10|20|00";
++    }
++}
++
++
+
+

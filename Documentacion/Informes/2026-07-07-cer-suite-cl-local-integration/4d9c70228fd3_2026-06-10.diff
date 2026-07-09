@@ -1,0 +1,1267 @@
+--- Diff for /CLAUDE.md ---
+--- a//CLAUDE.md
++++ b//CLAUDE.md
+@@ -14,9 +14,12 @@
+ 
+ Spring Boot 4.0.6 microservice on Java 25, deployed on GKE/GCP. Part of the CER-Suite-Cloud ecosystem that modernizes legacy Java 8 retail/POS systems into cloud-native microservices.
+ 
++**Responsabilidad única:** generar el archivo DV del proceso de devoluciones del POS retail CER/El Rosado, escribirlo en GCS y publicar un evento en Pub/Sub para que el `SincronizadorService` lo entregue al POS.
++
+ - **GroupId**: `com.elrosado` | **ArtifactId**: `cer-suite-cl-local-integration`
+ - **Build tool**: Maven 3.9.16 (wrapper included)
+-- **Template reference**: `D:\SIPECOM\repository-git\cer-gcp\templates\templates` — follow the same structure for all new development and APIs.
++- **Análisis completo de implementación**: `.claude_analytics/init-project.md`
++- **Template base**: `D:\SIPECOM\repository-git\cer-gcp\template-microservice` — seguir esta estructura para todo desarrollo nuevo. Swagger (`springdoc-openapi-starter-webmvc-ui:2.8.5`), Dockerfile multi-stage (Maven → JRE 25, usuario no-root uid 10001), skaffold + build.sh (Podman), k8s con 6 manifiestos.
+ 
+ ## Commands
+ 
+@@ -43,42 +46,119 @@
+ 
+ ```
+ com.elrosado.integration/
+-├── domain/               # Pure business logic — ZERO framework dependencies
+-│   ├── model/            # Immutable Java Records (entities/value objects)
+-│   └── port/             # Interfaces: in/ (use case inputs), out/ (repository/service ports)
+-├── application/          # Use cases and application services — coordinates domain + ports
+-└── infrastructure/       # All adapters and framework code
+-    └── adapter/
+-        ├── in/
+-        │   ├── web/
+-        │   │   ├── controller/   # @RestController classes
+-        │   │   └── dto/          # Java Records for request/response
+-        │   └── scheduler/        # @Scheduled tasks
+-        └── out/
+-            ├── db/
+-            │   ├── entity/       # JPA @Entity classes
+-            │   └── repository/   # Spring Data JPA interfaces (JpaRepository)
+-            ├── storage/          # GCS adapter
+-            ├── pubsub/           # Pub/Sub publisher/subscriber
+-            └── firestore/        # Firestore adapter
++├── domain/
++│   ├── exception/          DevolutionAlreadyProcessedException, DevolutionValidationException,
++│   │                       CreditNoteNotEligibleException
++│   ├── model/              Devolution, DevolutionItem, DevolutionTotals, DevolutionStatus,
++│   │                       ReturnMode (enum 14 modos), DvFile, StoreData, TransactionData,
++│   │                       TaxRates, ConsumerFinalData, GiftCardData, DocumentType
++│   └── port/
++│       ├── in/             ExecuteDevolutionUseCase, GetDevolutionStatusUseCase
++│       └── out/            DevolutionReadPort, DevolutionWritePort, TransactionQueryPort,
++│                           TaxRateQueryPort, StoreQueryPort, DevolutionSequencePort,
++│                           DevolutionAuditPort, DvFileStoragePort, DevolutionEventPort,
++│                           CreditNoteEligibilityPort, DevolutionStatusPort
++│
++├── application/
++│   ├── command/            ExecuteDevolutionCommand (devolutionId, operatorCode)
++│   ├── result/             DevolutionResult
++│   └── service/            ExecuteDevolutionService, GetDevolutionStatusService
++│
++└── infrastructure/
++    ├── adapter/
++    │   ├── in/
++    │   │   ├── pubsub/     DevolutionPubSubSubscriber ← ENTRADA PRINCIPAL
++    │   │   │               DevolutionTriggerMessage (topic: retail.local.devolucion.request.v1)
++    │   │   └── web/
++    │   │       ├── controller/  DevolutionController (POST + GET /api/v1/devolution)
++    │   │       └── dto/         ExecuteDevolutionRequest, DevolutionResultResponse
++    │   └── out/
++    │       ├── db/
++    │       │   ├── entity/
++    │       │   │   ├── devsec/  DvTicketEntity, DvArtsEntity, DvTmpItmEntity,
++    │       │   │   │            DvTmpTrnEntity, DvGfcdEntity, DvErrorSecuencialEntity
++    │       │   │   ├── artsec/  TrTrnEntity, TrRtlEntity, AsWsEntity, PaOprEntity,
++    │       │   │   │            PaStrRtlEntity, AsItmEntity, CoMrhrcGpEntity,
++    │       │   │   │            TrTyTaxEntity, TrInvcEntity, TrRtnEntity
++    │       │   │   └── saadmin/ MnTiendaEntity, PmParamEntity, PmParvalEntity
++    │       │   ├── repository/  (un repo por entidad, separados por datasource)
++    │       │   └── adapter/     DevolutionReadAdapter, DevolutionWriteAdapter,
++    │       │                    TransactionQueryAdapter, TaxRateQueryAdapter,
++    │       │                    StoreQueryAdapter, DevolutionSequenceAdapter,
++    │       │                    DevolutionAuditAdapter, DevolutionStatusAdapter,
++    │       │                    CreditNoteEligibilityAdapter
++    │       ├── storage/    DvFileBuilder (ancho fijo ISO-8859-1), GcsDvFileAdapter
++    │       └── pubsub/     DevolutionEventAdapter, DevolutionProcessedEvent
++    └── config/
++        DevsEcDataSourceConfig (@Primary), ArtsEcDataSourceConfig,
++        SaadminDataSourceConfig, MultiSqlSharedConfig
++```
++
++### Flujo de entrada principal (Pub/Sub)
++
++```
++Portal Angular
++  └─► Pub/Sub topic: retail.local.devolucion.request.v1
++           │  { devolutionId: 12345, operatorCode: "001234567" }
++           ▼
++  DevolutionPubSubSubscriber  ← adapter IN
++           │  Ack/Nack según tipo de excepción (ver tabla en init-project.md)
++           ▼
++  ExecuteDevolutionService
++           │  1. loadSession(idDev) → DV_TICKET + DV_ARTS + AS_ITM
++           │  2. ReturnMode.fromCode(devolution.tyDev())  ← de BD
++           │  3. validateTotals / validateCreditNoteEligibility
++           │  4. TransactionData + TaxRates + StoreData
++           │  5. generateSequence → NUM_NC (si no es MODO 80)
++           │  6. DvFileBuilder.build() → byte[] ancho fijo
++           │  7. GCS upload → gs://suite-devoluciones/{storeId}/{fileName}
++           └─► Pub/Sub publish → retail.local.sincronizador.request.v1
+ ```
+ 
+ ## Hard Rules
+ 
+ | Prohibited | Required alternative |
+ |---|---|
+-| Stored procedures / JDBC `callableStatement` | Spring Data JPA + JPQL in `/db/repository/` |
+-| Local filesystem writes (`FileWriter`, `/opt/app/...`) | Google Cloud Storage via `Storage` (Spring Cloud GCP) |
+-| `while(true)` daemon threads | `@Scheduled` with Virtual Thread executor |
++| Stored procedures / JDBC `callableStatement` | Spring Data JPA + JPQL en `/db/repository/` |
++| Local filesystem writes (`FileWriter`, `/opt/app/...`) | GCS via `IGoogleCloudStorageService` de `jlib-storage` |
++| `while(true)` daemon threads | `@Scheduled` con Virtual Thread executor |
+ | `System.out.println` | SLF4J via `@Slf4j` |
+ | Hardcoded credentials or business values | Spring Profiles + Secret Manager / constants |
+ | Mutable POJOs in domain layer | Java Records (immutable) |
++| Crear topics/subscriptions desde código | Definir en Terraform/IaC |
++
++## Multi-Datasource (jlib-multisql)
++
++Tres datasources configurados vía `multi-sql.datasources.*`:
++
++| Key | BD | Paquete entidades | Rol |
++|---|---|---|---|
++| `devs-ec` | DEVS_EC | `db.entity.devsec` | Primary — DV_TICKET, DV_ARTS, etc. |
++| `arts-ec` | ARTS_EC | `db.entity.artsec` | Transacciones origen y maestros retail |
++| `saadmin` | SAADMIN | `db.entity.saadmin` | Parámetros, tiendas, Frecuento |
++
++Cada adaptador que usa `arts-ec` o `saadmin` debe anotar `@Transactional` con el `transactionManagerRef` correspondiente.
+ 
+ ## Spring Profiles
+ 
+-- `application.yml` — shared config (virtual threads enabled, app name)
+-- `application-local.yml` — local dev: plain-text colored logs, localhost DB connection
+-- `application-prod.yml` — GKE: JSON structured logs (`logging.structured.format.console=gcp`), all secrets from env vars / K8s ConfigMaps
++- `application.yaml` — shared: virtual threads, multi-sql, pubsub subscription
++- `application-local.yaml` — local dev: logs coloreados, BD localhost, subscription default
++- `application-prod.yaml` — GKE: JSON structured logs (`logging.structured.format.console=gcp`), env vars K8s
++
++## Variables de entorno
++
++| Variable | Descripción | Default local |
++|---|---|---|
++| `GOOGLE_CLOUD_PROJECT` | Project ID de GCP | `modern-suite-cloud-local` |
++| `DB_DEVS_EC_URL` | JDBC URL DEVS_EC | `localhost:1433` |
++| `DB_DEVS_EC_USER` / `DB_DEVS_EC_PASSWORD` | Credenciales DEVS_EC | `sa` |
++| `DB_ARTS_EC_URL` | JDBC URL ARTS_EC | `localhost:1433` |
++| `DB_ARTS_EC_USER` / `DB_ARTS_EC_PASSWORD` | Credenciales ARTS_EC | `sa` |
++| `DB_SAADMIN_URL` | JDBC URL SAADMIN | `localhost:1433` |
++| `DB_SAADMIN_USER` / `DB_SAADMIN_PASSWORD` | Credenciales SAADMIN | `sa` |
++| `GCS_BUCKET_DEVS` | Bucket GCS archivos DV | `cer-devs-local` |
++| `PUBSUB_TOPIC_DEVOLUTION` | Topic evento procesado → sincronizador | `devolution-processed-local` |
++| `PUBSUB_SUBSCRIPTION_DEVOLUCION` | Subscription entrada portal | `retail.local.devolucion.request.v1-sub` |
+ 
+ ## Code Conventions
+ 
+@@ -88,6 +168,35 @@
+ - Lombok `@Slf4j`, `@RequiredArgsConstructor`, `@Builder`, `@Data` are standard
+ - Functional streams over imperative loops where readable
+ - Zero SonarQube code smells or vulnerabilities
++
++### Naming & Package Conventions (aligned to template-microservice)
++
++| Elemento | Convención | Ejemplo |
++|---|---|---|
++| Repositorios JPA | Prefijo `Jpa` | `JpaDvTicketRepository`, `JpaTrTrnRepository` |
++| Subscriber Pub/Sub | Paquete `adapter/in/event/` | `DevolutionPubSubSubscriber` |
++| Publisher Pub/Sub | Paquete `adapter/out/messaging/` | `DevolutionEventAdapter` |
++| Exception handler global | `infrastructure/exception/` | `GlobalExceptionHandler` |
++| Configuraciones Spring | `infrastructure/config/` | `ThreadConfig`, `DevsEcDataSourceConfig` |
++| DTOs web | `adapter/in/web/dto/` | `ExecuteDevolutionRequest` |
++| Controladores REST | `adapter/in/web/controller/` | `DevolutionController` |
++
++> **Nota**: `jlib-logging` provee `MdcLoggingFilter` equivalente al `LoggingEnrichmentFilter` del template — no duplicar.
++
++### Infraestructura de despliegue
++
++| Archivo | Descripción |
++|---|---|
++| `Dockerfile` | Multi-stage: Maven 3+JDK25 build → JRE25 runtime, usuario `appuser:appgroup` uid 10001 |
++| `docker/dev/Dockerfile` | Igual al root con `SPRING_PROFILES_ACTIVE=local` |
++| `build.sh` | Extrae artifactId/version de Maven, construye y publica con Podman |
++| `skaffold.yaml` | `apiVersion: skaffold/v4beta11`, custom build via `build.sh`, deploys `k8s/*.yaml` |
++| `k8s/namespace.yaml` | `ns-cer-suite-dev` |
++| `k8s/configmap.yaml` | SPRING_PROFILES_ACTIVE, GCS_BUCKET_DEVS, PUBSUB_SUBSCRIPTION_DEVOLUCION |
++| `k8s/secret.yaml` | Credenciales DB (stringData — completar en prod con Secret Manager) |
++| `k8s/deployment.yaml` | Probes liveness/readiness, securityContext runAsUser:10001, limits cpu:1/mem:512Mi |
++| `k8s/service.yaml` | NodePort 30052 → 8080 |
++| `k8s/hpa.yaml` | CPU 75% + memory 80%, min:1 max:5 réplicas |
+ 
+ ## Logging
+ 
+@@ -103,36 +212,34 @@
+ ```
+ 
+ - Use `.setCause(ex)` not `ex.getMessage()` when logging exceptions
+-- Add MDC context (`correlation_id`, `http.method`, etc.) for cross-cutting traceability
++- Add MDC context (`correlation_id`, `http.method`, `devolutionId`) for cross-cutting traceability
+ - Levels: `DEBUG` internal flow, `INFO` business events, `WARN` handled degraded state, `ERROR` unexpected failures
+ 
+ ## Testing
+ 
+-- **Unit tests** (`*/unit/`): JUnit 5 + Mockito only — no Spring context, no external connections. `@ExtendWith(MockitoExtension.class)`. Use `lenient().when(...)` in `@BeforeEach` for stubs that don't apply to all tests.
+-- **Integration tests** (`*/integration/`): annotated `@Disabled`, require local emulators or infra.
+-- Every domain port interface needs at least one happy-path and one error test.
+-- Minimum 80% code coverage (SonarQube standard).
+-
+-## Shared Libraries (Azure Artifacts — `SUITE-CLOUD`)
+-
+-Registry: `https://azdevops1.sipecom.com/SIPEProyectos/CER-SUITE-CLOUD/_packaging/SUITE-CLOUD/maven/v1`  
+-All modules: `groupId=com.elrosado`, version `1.0.0`. Import GCP BOM (`spring-cloud-gcp-dependencies:8.0.2`) before using any module.
+-
+-| Tier | Modules |
+-|---|---|
+-| 0 (no inter-module deps) | `jlib-common`, `jlib-logging`, `jlib-kms`, `jlib-sapcalls`, `jlib-jwt`, `jlib-storage`, `jlib-redis`, `jlib-documents`, `jlib-sheet`, `jlib-barcode`, `jlib-timezone`, `jlib-health`, `jlib-pubsub`, `jlib-firestore`, `jlib-multisql` |
+-| 1 (→ tier 0) | `jlib-secretmanager` (→kms), `jlib-invoicing` (→documents), `jlib-pubsub-logging` (→pubsub), `jlib-apicalls` |
+-| 2 (→ tier 1) | `jlib-sql` (→secretmanager), `jlib-cache` (→apicalls+redis), `jlib-worker` (→timezone+common), `jlib-routervalidator` (→apicalls) |
+-
+-Never add a dependency that inverts tier direction (tier 0 cannot depend on tier 1+).
+-
+-Key utilities from `jlib-common`: `PagedResult<T>`, `@OriginalName`, `@TemplateParameter`, `BusinessRuleValidationException` (400), `DuplicateResourceException` (409).
++- **Unit tests** (sin carpeta `unit/` — directamente en el paquete del componente bajo `test/`): JUnit 5 + Mockito. `@ExtendWith(MockitoExtension.class)`. Los tests de `ExecuteDevolutionService` usan fakes manuales (no Mockito) para evitar warning de agente dinámico en Java 25.
++- **Integration tests**: anotados con `@Disabled`, requieren emuladores o infraestructura local.
++- Cada puerto de dominio necesita al menos un test happy-path y uno de error.
++- Mínimo 80% cobertura de código (estándar SonarQube).
++
++## Shared Libraries activas en este microservicio
++
++| Librería | Versión | Rol |
++|---|---|---|
++| `jlib-logging` | 1.0.0 | MDC filter HTTP + logback base GCP |
++| `jlib-health` | 1.0.0 | Actuator liveness/readiness para GKE |
++| `jlib-multisql` | 1.0.1 | Multi-datasource JPA (DEVS_EC + ARTS_EC + SAADMIN) |
++| `jlib-storage` | 1.0.1 | `IGoogleCloudStorageService` → GCS |
++| `jlib-pubsub-logging` | 1.0.0 | `IMessagePublisher` + `IMessageSubscriber` con MDC |
++
++`jlib-pubsub-logging` incluye transitivamente `jlib-pubsub`. El bean `IMessageSubscriber` que se inyecta en `DevolutionPubSubSubscriber` es el `MdcMessageSubscriber` (decorador con MDC automático).
+ 
+ ## GKE Deployment Requirements
+ 
+ - GCP authentication via **Workload Identity** (no JSON key files on disk)
+ - Kubernetes health probes → `/actuator/health/liveness` and `/actuator/health/readiness`
+-- HPA based on CPU (75%) or Pub/Sub pending message count
++- HPA based on CPU (75%) or Pub/Sub pending message count (`retail.local.devolucion.request.v1-sub`)
+ - Multi-stage Dockerfile (Java 25, non-root user, minimal runtime image)
+ - K8s manifests under `k8s/` directory (Deployment, Service, HPA, ConfigMap, Secret)
+ - Required prod env var: `GOOGLE_CLOUD_PROJECT`
++- Topic y subscription de Pub/Sub se crean vía Terraform — no desde código
+
+
+--- Diff for /Dockerfile ---
+--- a//Dockerfile
++++ b//Dockerfile
+@@ -0,0 +1,35 @@
++# ---- Etapa 1: Build ----
++FROM maven:3-eclipse-temurin-25 AS build
++
++WORKDIR /build
++
++# Copiar settings de Maven con credenciales de Azure Artifacts
++COPY .mvn .mvn
++COPY mvnw pom.xml ./
++
++# Descargar dependencias (cacheable layer)
++RUN --mount=type=cache,target=/root/.m2 \
++    ./mvnw dependency:go-offline -q
++
++COPY src ./src
++
++RUN --mount=type=cache,target=/root/.m2 \
++    ./mvnw clean package -DskipTests -q
++
++# ---- Etapa 2: Runtime ----
++FROM eclipse-temurin:25-jre AS runtime
++
++RUN groupadd --system --gid 10001 appgroup && \
++    useradd --system --uid 10001 --gid appgroup --no-create-home appuser
++
++WORKDIR /app
++
++COPY --from=build /build/target/*.jar app.jar
++
++RUN chown appuser:appgroup app.jar
++
++USER appuser
++
++EXPOSE 8080
++
++ENTRYPOINT ["java", "-XX:+UseG1GC", "-Djava.security.egd=file:/dev/./urandom", "-jar", "app.jar"]
+
+
+--- Diff for /build.sh ---
+--- a//build.sh
++++ b//build.sh
+@@ -0,0 +1,13 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++ARTIFACT_ID=$(./mvnw help:evaluate -Dexpression=project.artifactId -q -DforceStdout)
++VERSION=$(./mvnw help:evaluate -Dexpression=project.version -q -DforceStdout)
++
++IMAGE_NAME="${IMAGE:-localhost:30500/${ARTIFACT_ID}:${VERSION}}"
++
++echo "Construyendo imagen: ${IMAGE_NAME}"
++podman build -t "${IMAGE_NAME}" .
++
++echo "Publicando imagen: ${IMAGE_NAME}"
++podman push "${IMAGE_NAME}"
+
+
+--- Diff for /docker/dev/Dockerfile ---
+--- a//docker/dev/Dockerfile
++++ b//docker/dev/Dockerfile
+@@ -0,0 +1,35 @@
++# ---- Etapa 1: Build ----
++FROM maven:3-eclipse-temurin-25 AS build
++
++WORKDIR /build
++
++COPY .mvn .mvn
++COPY mvnw pom.xml ./
++
++RUN --mount=type=cache,target=/root/.m2 \
++    ./mvnw dependency:go-offline -q
++
++COPY src ./src
++
++RUN --mount=type=cache,target=/root/.m2 \
++    ./mvnw clean package -DskipTests -q
++
++# ---- Etapa 2: Runtime (dev) ----
++FROM eclipse-temurin:25-jre AS runtime
++
++RUN groupadd --system --gid 10001 appgroup && \
++    useradd --system --uid 10001 --gid appgroup --no-create-home appuser
++
++WORKDIR /app
++
++COPY --from=build /build/target/*.jar app.jar
++
++RUN chown appuser:appgroup app.jar
++
++USER appuser
++
++EXPOSE 8080
++
++ENV SPRING_PROFILES_ACTIVE=local
++
++ENTRYPOINT ["java", "-XX:+UseG1GC", "-Djava.security.egd=file:/dev/./urandom", "-jar", "app.jar"]
+
+
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -0,0 +1,11 @@
++apiVersion: v1
++kind: ConfigMap
++metadata:
++  name: cer-suite-cl-local-integration-config
++  namespace: ns-cer-suite-dev
++data:
++  SPRING_PROFILES_ACTIVE: "prod"
++  SERVER_PORT: "8080"
++  GOOGLE_CLOUD_PROJECT: "your-gcp-project-id"
++  GCS_BUCKET_DEVS: "suite-devoluciones"
++  PUBSUB_SUBSCRIPTION_DEVOLUCION: "retail.local.devolucion.request.v1-sub"
+
+
+--- Diff for /k8s/deployment.yaml ---
+--- a//k8s/deployment.yaml
++++ b//k8s/deployment.yaml
+@@ -0,0 +1,56 @@
++apiVersion: apps/v1
++kind: Deployment
++metadata:
++  name: cer-suite-cl-local-integration
++  namespace: ns-cer-suite-dev
++spec:
++  replicas: 1
++  selector:
++    matchLabels:
++      app: cer-suite-cl-local-integration
++  template:
++    metadata:
++      labels:
++        app: cer-suite-cl-local-integration
++    spec:
++      securityContext:
++        runAsNonRoot: true
++        runAsUser: 10001
++      containers:
++        - name: cer-suite-cl-local-integration
++          image: localhost:30500/cer-suite-cl-local-integration:0.0.1-SNAPSHOT
++          ports:
++            - containerPort: 8080
++          resources:
++            limits:
++              cpu: "1"
++              memory: "512Mi"
++            requests:
++              cpu: "500m"
++              memory: "256Mi"
++          envFrom:
++            - configMapRef:
++                name: cer-suite-cl-local-integration-config
++            - secretRef:
++                name: cer-suite-cl-local-integration-secrets
++          startupProbe:
++            httpGet:
++              path: /actuator/health/liveness
++              port: 8080
++            initialDelaySeconds: 30
++            failureThreshold: 10
++            periodSeconds: 5
++          livenessProbe:
++            httpGet:
++              path: /actuator/health/liveness
++              port: 8080
++            initialDelaySeconds: 60
++            periodSeconds: 15
++            failureThreshold: 3
++          readinessProbe:
++            httpGet:
++              path: /actuator/health/readiness
++              port: 8080
++            initialDelaySeconds: 30
++            periodSeconds: 10
++            failureThreshold: 3
+
+
+--- Diff for /k8s/hpa.yaml ---
+--- a//k8s/hpa.yaml
++++ b//k8s/hpa.yaml
+@@ -0,0 +1,25 @@
++apiVersion: autoscaling/v2
++kind: HorizontalPodAutoscaler
++metadata:
++  name: cer-suite-cl-local-integration-hpa
++  namespace: ns-cer-suite-dev
++spec:
++  scaleTargetRef:
++    apiVersion: apps/v1
++    kind: Deployment
++    name: cer-suite-cl-local-integration
++  minReplicas: 1
++  maxReplicas: 5
++  metrics:
++    - type: Resource
++      resource:
++        name: cpu
++        target:
++          type: Utilization
++          averageUtilization: 75
++    - type: Resource
++      resource:
++        name: memory
++        target:
++          type: Utilization
++          averageUtilization: 80
+
+
+--- Diff for /k8s/namespace.yaml ---
+--- a//k8s/namespace.yaml
++++ b//k8s/namespace.yaml
+@@ -0,0 +1,4 @@
++apiVersion: v1
++kind: Namespace
++metadata:
++  name: ns-cer-suite-dev
+
+
+--- Diff for /k8s/secret.yaml ---
+--- a//k8s/secret.yaml
++++ b//k8s/secret.yaml
+@@ -0,0 +1,16 @@
++apiVersion: v1
++kind: Secret
++metadata:
++  name: cer-suite-cl-local-integration-secrets
++  namespace: ns-cer-suite-dev
++type: Opaque
++stringData:
++  DB_DEVS_EC_URL: "jdbc:sqlserver://localhost:1433;databaseName=DEVS_EC"
++  DB_DEVS_EC_USER: "sa"
++  DB_DEVS_EC_PASSWORD: "changeme"
++  DB_ARTS_EC_URL: "jdbc:sqlserver://localhost:1433;databaseName=ARTS_EC"
++  DB_ARTS_EC_USER: "sa"
++  DB_ARTS_EC_PASSWORD: "changeme"
++  DB_SAADMIN_URL: "jdbc:sqlserver://localhost:1433;databaseName=SAADMIN"
++  DB_SAADMIN_USER: "sa"
++  DB_SAADMIN_PASSWORD: "changeme"
+
+
+--- Diff for /k8s/service.yaml ---
+--- a//k8s/service.yaml
++++ b//k8s/service.yaml
+@@ -0,0 +1,13 @@
++apiVersion: v1
++kind: Service
++metadata:
++  name: cer-suite-cl-local-integration
++  namespace: ns-cer-suite-dev
++spec:
++  selector:
++    app: cer-suite-cl-local-integration
++  type: NodePort
++  ports:
++    - port: 8080
++      targetPort: 8080
++      nodePort: 30052
+
+
+--- Diff for /pom.xml ---
+--- a//pom.xml
++++ b//pom.xml
+@@ -20,6 +20,7 @@
+         <spring-cloud-gcp.version>8.0.2</spring-cloud-gcp.version>
+         <jlib.version>1.0.0</jlib.version>
+         <jlib.infrastructure.version>1.0.1</jlib.infrastructure.version>
++        <springdoc.version>2.8.5</springdoc.version>
+     </properties>
+ 
+     <repositories>
+@@ -92,6 +93,13 @@
+             <optional>true</optional>
+         </dependency>
+ 
++        <!-- Swagger / OpenAPI -->
++        <dependency>
++            <groupId>org.springdoc</groupId>
++            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
++            <version>${springdoc.version}</version>
++        </dependency>
++
+         <!-- Test -->
+         <dependency>
+             <groupId>org.springframework.boot</groupId>
+
+
+--- Diff for /skaffold.yaml ---
+--- a//skaffold.yaml
++++ b//skaffold.yaml
+@@ -0,0 +1,20 @@
++apiVersion: skaffold/v4beta11
++kind: Config
++metadata:
++  name: cer-suite-cl-local-integration
++
++build:
++  artifacts:
++    - image: localhost:30500/cer-suite-cl-local-integration
++      custom:
++        buildCommand: bash build.sh
++        dependencies:
++          paths:
++            - src
++            - pom.xml
++            - Dockerfile
++
++deploy:
++  kubectl:
++    manifests:
++      - k8s/*.yaml
+
+
+--- Diff for /src/main/java/com/elrosado/integration/application/command/ExecuteDevolutionCommand.java ---
+--- a//src/main/java/com/elrosado/integration/application/command/ExecuteDevolutionCommand.java
++++ b//src/main/java/com/elrosado/integration/application/command/ExecuteDevolutionCommand.java
+@@ -1,14 +1,6 @@
+ package com.elrosado.integration.application.command;
+-
+-import com.elrosado.integration.domain.model.ConsumerFinalData;
+-import com.elrosado.integration.domain.model.GiftCardData;
+-import com.elrosado.integration.domain.model.ReturnMode;
+ 
+ public record ExecuteDevolutionCommand(
+         Integer devolutionId,
+-        ReturnMode returnMode,
+-        String operatorCode,
+-        String supervisorCode,
+-        ConsumerFinalData consumerFinal,
+-        GiftCardData giftCard
++        String operatorCode
+ ) {}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/application/service/ExecuteDevolutionService.java ---
+--- a//src/main/java/com/elrosado/integration/application/service/ExecuteDevolutionService.java
++++ b//src/main/java/com/elrosado/integration/application/service/ExecuteDevolutionService.java
+@@ -53,15 +53,15 @@
+     @Transactional(transactionManager = "devsEcTransactionManager")
+     public DevolutionResult execute(ExecuteDevolutionCommand command) {
+         Integer idDev = command.devolutionId();
+-        ReturnMode returnMode = command.returnMode();
++
++        Devolution devolution = devolutionReadPort.loadSession(idDev);
++        ReturnMode returnMode = ReturnMode.fromCode(devolution.tyDev());
+ 
+         log.atInfo()
+                 .setMessage("Iniciando proceso de devolucion")
+                 .addKeyValue("devolutionId", idDev)
+                 .addKeyValue("returnMode", returnMode)
+                 .log();
+-
+-        Devolution devolution = devolutionReadPort.loadSession(idDev);
+ 
+         if (devolution.isAlreadyProcessed()) {
+             throw new DevolutionAlreadyProcessedException(idDev);
+@@ -90,7 +90,7 @@
+         }
+ 
+         DvFile dvFile = DvFileBuilder.build(devolution, txData, storeData, taxRates, returnMode, numNc,
+-                command.operatorCode(), command.supervisorCode(), nota);
++                command.operatorCode(), null, nota);
+ 
+         String gcsPath = dvFileStoragePort.upload(dvFile);
+         String messageId = devolutionEventPort.publish(
+
+
+--- Diff for /src/main/java/com/elrosado/integration/domain/model/Devolution.java ---
+--- a//src/main/java/com/elrosado/integration/domain/model/Devolution.java
++++ b//src/main/java/com/elrosado/integration/domain/model/Devolution.java
+@@ -6,6 +6,7 @@
+         Integer idDev,
+         Integer idTrn,
+         Integer idBsnDev,
++        Integer tyDev,
+         Integer status,
+         DevolutionTotals totals,
+         List<DevolutionItem> items
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionPubSubSubscriber.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionPubSubSubscriber.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionPubSubSubscriber.java
+@@ -0,0 +1,135 @@
++package com.elrosado.integration.infrastructure.adapter.in.pubsub;
++
++import com.elrosado.integration.application.command.ExecuteDevolutionCommand;
++import com.elrosado.integration.domain.exception.CreditNoteNotEligibleException;
++import com.elrosado.integration.domain.exception.DevolutionAlreadyProcessedException;
++import com.elrosado.integration.domain.exception.DevolutionValidationException;
++import com.elrosado.integration.domain.port.in.ExecuteDevolutionUseCase;
++import com.elrosado.jlib_pubsub.interfaces.IMessageSubscriber;
++import com.fasterxml.jackson.core.JsonProcessingException;
++import com.fasterxml.jackson.databind.ObjectMapper;
++import jakarta.annotation.PostConstruct;
++import lombok.RequiredArgsConstructor;
++import lombok.extern.slf4j.Slf4j;
++import org.slf4j.MDC;
++import org.springframework.stereotype.Component;
++
++import java.util.NoSuchElementException;
++import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++
++/**
++ * Adaptador de entrada: suscriptor al topic retail.local.devolucion.request.v1.
++ * Cada mensaje recibido dispara la generaciÃ³n del archivo DV de forma asÃ­ncrona
++ * en un virtual thread independiente.
++ */
++@Component
++@RequiredArgsConstructor
++@Slf4j
++public class DevolutionPubSubSubscriber {
++
++    private static final ExecutorService VIRTUAL_EXECUTOR =
++            Executors.newVirtualThreadPerTaskExecutor();
++
++    private final IMessageSubscriber messageSubscriber;
++    private final ExecuteDevolutionUseCase executeDevolutionUseCase;
++    private final ObjectMapper objectMapper;
++
++    @PostConstruct
++    public void startSubscription() {
++        messageSubscriber.startListening(this::handleMessage);
++        log.atInfo()
++                .setMessage("Suscriptor Pub/Sub de devoluciones iniciado")
++                .addKeyValue("topic", "retail.local.devolucion.request.v1")
++                .log();
++    }
++
++    private CompletableFuture<Boolean> handleMessage(String subscriptionId, String body) {
++        return CompletableFuture.supplyAsync(
++                () -> processMessage(subscriptionId, body),
++                VIRTUAL_EXECUTOR
++        );
++    }
++
++    private boolean processMessage(String subscriptionId, String body) {
++        DevolutionTriggerMessage message = null;
++        try {
++            message = objectMapper.readValue(body, DevolutionTriggerMessage.class);
++
++            if (message.devolutionId() == null) {
++                log.atWarn()
++                        .setMessage("Mensaje Pub/Sub descartado: devolutionId ausente")
++                        .addKeyValue("subscriptionId", subscriptionId)
++                        .log();
++                return true;
++            }
++
++            MDC.put("devolutionId", String.valueOf(message.devolutionId()));
++
++            executeDevolutionUseCase.execute(
++                    new ExecuteDevolutionCommand(message.devolutionId(), message.operatorCode())
++            );
++
++            log.atInfo()
++                    .setMessage("Devolucion procesada exitosamente via Pub/Sub")
++                    .addKeyValue("subscriptionId", subscriptionId)
++                    .addKeyValue("devolutionId", message.devolutionId())
++                    .log();
++
++            return true;
++
++        } catch (DevolutionAlreadyProcessedException ex) {
++            // Ack: ya fue procesado previamente, el reintento no ayuda
++            log.atWarn()
++                    .setMessage("Devolucion ya procesada â descartando mensaje duplicado")
++                    .addKeyValue("subscriptionId", subscriptionId)
++                    .addKeyValue("devolutionId", message != null ? message.devolutionId() : null)
++                    .setCause(ex)
++                    .log();
++            return true;
++
++        } catch (DevolutionValidationException | CreditNoteNotEligibleException ex) {
++            // Ack: regla de negocio violada, el reintento no cambia el resultado
++            log.atWarn()
++                    .setMessage("Devolucion rechazada por regla de negocio â descartando mensaje")
++                    .addKeyValue("subscriptionId", subscriptionId)
++                    .addKeyValue("devolutionId", message != null ? message.devolutionId() : null)
++                    .setCause(ex)
++                    .log();
++            return true;
++
++        } catch (NoSuchElementException ex) {
++            // Nack: sesiÃ³n no encontrada â posible retraso de escritura, reintento puede resolver
++            log.atError()
++                    .setMessage("Sesion de devolucion no encontrada â reintentando via Nack")
++                    .addKeyValue("subscriptionId", subscriptionId)
++                    .addKeyValue("devolutionId", message != null ? message.devolutionId() : null)
++                    .setCause(ex)
++                    .log();
++            return false;
++
++        } catch (JsonProcessingException ex) {
++            // Ack: mensaje mal formado, el reintento no lo corregirÃ¡
++            log.atError()
++                    .setMessage("Mensaje Pub/Sub con JSON invalido â descartando mensaje")
++                    .addKeyValue("subscriptionId", subscriptionId)
++                    .setCause(ex)
++                    .log();
++            return true;
++
++        } catch (Exception ex) {
++            // Nack: error transitorio desconocido, reintento puede resolver
++            log.atError()
++                    .setMessage("Error inesperado procesando devolucion â reintentando via Nack")
++                    .addKeyValue("subscriptionId", subscriptionId)
++                    .addKeyValue("devolutionId", message != null ? message.devolutionId() : null)
++                    .setCause(ex)
++                    .log();
++            return false;
++
++        } finally {
++            MDC.remove("devolutionId");
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionTriggerMessage.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionTriggerMessage.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionTriggerMessage.java
+@@ -0,0 +1,6 @@
++package com.elrosado.integration.infrastructure.adapter.in.pubsub;
++
++public record DevolutionTriggerMessage(
++        Integer devolutionId,
++        String operatorCode
++) {}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/adapter/in/web/controller/DevolutionController.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/adapter/in/web/controller/DevolutionController.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/adapter/in/web/controller/DevolutionController.java
+@@ -2,9 +2,6 @@
+ 
+ import com.elrosado.integration.application.command.ExecuteDevolutionCommand;
+ import com.elrosado.integration.application.result.DevolutionResult;
+-import com.elrosado.integration.domain.model.ConsumerFinalData;
+-import com.elrosado.integration.domain.model.GiftCardData;
+-import com.elrosado.integration.domain.model.ReturnMode;
+ import com.elrosado.integration.domain.port.in.ExecuteDevolutionUseCase;
+ import com.elrosado.integration.domain.port.in.GetDevolutionStatusUseCase;
+ import com.elrosado.integration.infrastructure.adapter.in.web.dto.DevolutionResultResponse;
+@@ -25,7 +22,10 @@
+ 
+     @PostMapping
+     public ResponseEntity<DevolutionResultResponse> execute(@Valid @RequestBody ExecuteDevolutionRequest request) {
+-        ExecuteDevolutionCommand command = toCommand(request);
++        ExecuteDevolutionCommand command = new ExecuteDevolutionCommand(
++                request.devolutionId(),
++                request.operatorCode()
++        );
+         DevolutionResult result = executeDevolutionUseCase.execute(command);
+         return ResponseEntity.status(HttpStatus.CREATED).body(DevolutionResultResponse.from(result));
+     }
+@@ -37,21 +37,4 @@
+                 .map(ResponseEntity::ok)
+                 .orElseGet(() -> ResponseEntity.notFound().build());
+     }
+-
+-    private ExecuteDevolutionCommand toCommand(ExecuteDevolutionRequest req) {
+-        ConsumerFinalData consumerFinal = req.consumerFinal() != null
+-                ? new ConsumerFinalData(req.consumerFinal().idType(), req.consumerFinal().idNumber(), req.consumerFinal().fullName())
+-                : null;
+-        GiftCardData giftCard = req.giftCard() != null
+-                ? new GiftCardData(req.giftCard().cardNumber(), req.giftCard().bin())
+-                : null;
+-        return new ExecuteDevolutionCommand(
+-                req.devolutionId(),
+-                ReturnMode.fromCode(req.returnMode()),
+-                req.operatorCode(),
+-                req.supervisorCode(),
+-                consumerFinal,
+-                giftCard
+-        );
+-    }
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/adapter/in/web/dto/ExecuteDevolutionRequest.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/adapter/in/web/dto/ExecuteDevolutionRequest.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/adapter/in/web/dto/ExecuteDevolutionRequest.java
+@@ -1,15 +1,10 @@
+ package com.elrosado.integration.infrastructure.adapter.in.web.dto;
+ 
+-import jakarta.validation.Valid;
+ import jakarta.validation.constraints.NotNull;
+ import jakarta.validation.constraints.Pattern;
+ import jakarta.validation.constraints.Positive;
+ 
+ public record ExecuteDevolutionRequest(
+         @NotNull @Positive Integer devolutionId,
+-        @NotNull Integer returnMode,
+-        @NotNull @Pattern(regexp = "\\d{9}") String operatorCode,
+-        @Pattern(regexp = "\\d{8}") String supervisorCode,
+-        @Valid ConsumerFinalRequestDto consumerFinal,
+-        @Valid GiftCardRequestDto giftCard
++        @Pattern(regexp = "\\d{9}") String operatorCode
+ ) {}
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/adapter/out/db/adapter/DevolutionReadAdapter.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/adapter/out/db/adapter/DevolutionReadAdapter.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/adapter/out/db/adapter/DevolutionReadAdapter.java
+@@ -48,7 +48,7 @@
+                 ticket.getMoDevIva(), ticket.getMoDev());
+ 
+         return new Devolution(idDev, ticket.getIdTrn(), ticket.getIdBsnDev(),
+-                ticket.getIdEstado(), totals, items);
++                ticket.getTyDev(), ticket.getIdEstado(), totals, items);
+     }
+ 
+     private DevolutionItem buildItem(DvArtsEntity art, Integer idTrn, Integer idDev) {
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/config/ThreadConfig.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/config/ThreadConfig.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/config/ThreadConfig.java
+@@ -0,0 +1,17 @@
++package com.elrosado.integration.infrastructure.config;
++
++import org.springframework.context.annotation.Bean;
++import org.springframework.context.annotation.Configuration;
++import org.springframework.core.task.AsyncTaskExecutor;
++import org.springframework.core.task.SimpleAsyncTaskExecutor;
++
++@Configuration
++public class ThreadConfig {
++
++    @Bean(name = "virtualThreadTaskExecutor")
++    public AsyncTaskExecutor virtualThreadTaskExecutor() {
++        SimpleAsyncTaskExecutor executor = new SimpleAsyncTaskExecutor("vt-devolution-");
++        executor.setVirtualThreads(true);
++        return executor;
++    }
++}
+
+
+--- Diff for /src/main/resources/application-local.yaml ---
+--- a//src/main/resources/application-local.yaml
++++ b//src/main/resources/application-local.yaml
+@@ -46,6 +46,11 @@
+     key-ring-id: ${KMS_KEY_RING_ID:suite-cloud-keyring}
+     crypto-key-id: ${KMS_CRYPTO_KEY_ID:devolution-key}
+ 
++pubsub:
++  subscriptions:
++    - topic-id: retail.local.devolucion.request.v1
++      subscription-id: ${PUBSUB_SUBSCRIPTION_DEVOLUCION:retail.local.devolucion.request.v1-sub}
++
+ app:
+   gcp:
+     kms:
+
+
+--- Diff for /src/main/resources/application-prod.yaml ---
+--- a//src/main/resources/application-prod.yaml
++++ b//src/main/resources/application-prod.yaml
+@@ -50,6 +50,11 @@
+     key-ring-id: ${KMS_KEY_RING_ID}
+     crypto-key-id: ${KMS_CRYPTO_KEY_ID}
+ 
++pubsub:
++  subscriptions:
++    - topic-id: retail.local.devolucion.request.v1
++      subscription-id: ${PUBSUB_SUBSCRIPTION_DEVOLUCION}
++
+ app:
+   gcp:
+     kms:
+
+
+--- Diff for /src/main/resources/application.yaml ---
+--- a//src/main/resources/application.yaml
++++ b//src/main/resources/application.yaml
+@@ -6,21 +6,6 @@
+       enabled: true
+   profiles:
+     active: ${SPRING_PROFILES_ACTIVE:local}
+-  jpa:
+-    open-in-view: false
+-    hibernate:
+-      ddl-auto: none
+-    properties:
+-      hibernate:
+-        dialect: org.hibernate.dialect.SQLServerDialect
+-        format_sql: false
+-  cloud:
+-    gcp:
+-      project-id: ${GCP_PROJECT_ID:${GOOGLE_CLOUD_PROJECT:}}
+-      storage:
+-        enabled: true
+-      pubsub:
+-        enabled: true
+ 
+ management:
+   endpoints:
+@@ -33,51 +18,15 @@
+         enabled: true
+       show-details: never
+ 
++springdoc:
++  api-docs:
++    path: /api-docs
++  swagger-ui:
++    path: /swagger-ui.html
++    operationsSorter: alpha
++
+ jlib:
+   logging:
+     enabled: true
+     correlation-header: X-Correlation-Id
+ 
+-multi-sql:
+-  datasources:
+-    devs-ec:
+-      url: ${DB_DEVS_EC_URL}
+-      username: ${DB_DEVS_EC_USER}
+-      password: ${DB_DEVS_EC_PASSWORD}
+-      entity-packages:
+-        - com.elrosado.integration.infrastructure.adapter.out.db.entity.devsec
+-      primary: true
+-      maximum-pool-size: ${DB_DEVS_EC_MAX_POOL_SIZE:10}
+-      minimum-idle: ${DB_DEVS_EC_MIN_IDLE:2}
+-    arts-ec:
+-      url: ${DB_ARTS_EC_URL}
+-      username: ${DB_ARTS_EC_USER}
+-      password: ${DB_ARTS_EC_PASSWORD}
+-      entity-packages:
+-        - com.elrosado.integration.infrastructure.adapter.out.db.entity.artsec
+-      maximum-pool-size: ${DB_ARTS_EC_MAX_POOL_SIZE:10}
+-      minimum-idle: ${DB_ARTS_EC_MIN_IDLE:2}
+-    saadmin:
+-      url: ${DB_SAADMIN_URL}
+-      username: ${DB_SAADMIN_USER}
+-      password: ${DB_SAADMIN_PASSWORD}
+-      entity-packages:
+-        - com.elrosado.integration.infrastructure.adapter.out.db.entity.saadmin
+-      maximum-pool-size: ${DB_SAADMIN_MAX_POOL_SIZE:5}
+-      minimum-idle: ${DB_SAADMIN_MIN_IDLE:1}
+-
+-google:
+-  kms:
+-    project-id: ${GCP_PROJECT_ID:${GOOGLE_CLOUD_PROJECT:}}
+-    location-id: ${KMS_LOCATION_ID:global}
+-    key-ring-id: ${KMS_KEY_RING_ID:}
+-    crypto-key-id: ${KMS_CRYPTO_KEY_ID:}
+-
+-app:
+-  gcp:
+-    kms:
+-      enabled: ${APP_GCP_KMS_ENABLED:false}
+-    storage:
+-      bucket-name: ${GCS_BUCKET_DEVS}
+-  pubsub:
+-    topic-devolution: ${PUBSUB_TOPIC_DEVOLUTION}
+
+
+--- Diff for /src/test/java/com/elrosado/integration/application/service/ExecuteDevolutionServiceTest.java ---
+--- a//src/test/java/com/elrosado/integration/application/service/ExecuteDevolutionServiceTest.java
++++ b//src/test/java/com/elrosado/integration/application/service/ExecuteDevolutionServiceTest.java
+@@ -35,7 +35,7 @@
+     @Test
+     void executeContinuesWhenCalculatedTotalsMatchStoredTotals() {
+         Fakes fakes = new Fakes();
+-        Devolution devolution = devolutionWithTotal(95L);
++        Devolution devolution = devolutionWithTotal(95L, ReturnMode.CASH.getCode());
+         LocalDate accountingDate = LocalDate.of(2026, 6, 3);
+ 
+         fakes.devolutionReadPort.session = devolution;
+@@ -55,7 +55,7 @@
+         fakes.dvFileStoragePort.response = "devs/005/DV000789.005";
+         fakes.devolutionEventPort.response = "message-1";
+ 
+-        DevolutionResult result = fakes.service().execute(command(ReturnMode.CASH));
++        DevolutionResult result = fakes.service().execute(command());
+ 
+         assertThat(result.devolutionId()).isEqualTo(789);
+         assertThat(result.status()).isEqualTo("PROCESSED");
+@@ -74,9 +74,9 @@
+     @Test
+     void executeAuditsAndStopsWhenCalculatedTotalsDifferByMoreThanOne() {
+         Fakes fakes = new Fakes();
+-        fakes.devolutionReadPort.session = devolutionWithTotal(90L);
+-
+-        assertThatThrownBy(() -> fakes.service().execute(command(ReturnMode.CASH)))
++        fakes.devolutionReadPort.session = devolutionWithTotal(90L, ReturnMode.CASH.getCode());
++
++        assertThatThrownBy(() -> fakes.service().execute(command()))
+                 .isInstanceOf(DevolutionValidationException.class)
+                 .hasMessageContaining("Totales discrepantes");
+ 
+@@ -93,22 +93,16 @@
+         assertThat(fakes.devolutionEventPort.called).isFalse();
+     }
+ 
+-    private ExecuteDevolutionCommand command(ReturnMode returnMode) {
+-        return new ExecuteDevolutionCommand(
+-                789,
+-                returnMode,
+-                "999",
+-                "1",
+-                null,
+-                null
+-        );
+-    }
+-
+-    private Devolution devolutionWithTotal(Long total) {
++    private ExecuteDevolutionCommand command() {
++        return new ExecuteDevolutionCommand(789, "000000999");
++    }
++
++    private Devolution devolutionWithTotal(Long total, Integer tyDev) {
+         return new Devolution(
+                 789,
+                 456,
+                 99,
++                tyDev,
+                 0,
+                 new DevolutionTotals(100L, 5L, 6L, 6L, total),
+                 List.of(new DevolutionItem(
+
+
+--- Diff for /src/test/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionPubSubSubscriberTest.java ---
+--- a//src/test/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionPubSubSubscriberTest.java
++++ b//src/test/java/com/elrosado/integration/infrastructure/adapter/in/pubsub/DevolutionPubSubSubscriberTest.java
+@@ -0,0 +1,157 @@
++package com.elrosado.integration.infrastructure.adapter.in.pubsub;
++
++import com.elrosado.integration.application.command.ExecuteDevolutionCommand;
++import com.elrosado.integration.application.result.DevolutionResult;
++import com.elrosado.integration.domain.exception.CreditNoteNotEligibleException;
++import com.elrosado.integration.domain.exception.DevolutionAlreadyProcessedException;
++import com.elrosado.integration.domain.exception.DevolutionValidationException;
++import com.elrosado.integration.domain.port.in.ExecuteDevolutionUseCase;
++import com.elrosado.jlib_pubsub.interfaces.IMessageSubscriber;
++import com.fasterxml.jackson.databind.ObjectMapper;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.ArgumentCaptor;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.time.Instant;
++import java.util.NoSuchElementException;
++import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.TimeUnit;
++import java.util.function.BiFunction;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.Mockito.doThrow;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.when;
++
++@ExtendWith(MockitoExtension.class)
++class DevolutionPubSubSubscriberTest {
++
++    @Mock
++    private IMessageSubscriber messageSubscriber;
++
++    @Mock
++    private ExecuteDevolutionUseCase executeDevolutionUseCase;
++
++    private DevolutionPubSubSubscriber subscriber;
++
++    private static final String SUBSCRIPTION_ID = "retail.local.devolucion.request.v1-sub";
++    private static final String VALID_BODY = """
++            {"devolutionId":123,"operatorCode":"000000001"}
++            """;
++    private static final String NULL_ID_BODY = """
++            {"devolutionId":null,"operatorCode":"000000001"}
++            """;
++    private static final String INVALID_JSON = "not-json";
++
++    @BeforeEach
++    void setUp() {
++        subscriber = new DevolutionPubSubSubscriber(
++                messageSubscriber, executeDevolutionUseCase, new ObjectMapper()
++        );
++    }
++
++    @SuppressWarnings("unchecked")
++    private BiFunction<String, String, CompletableFuture<Boolean>> captureHandler() {
++        subscriber.startSubscription();
++        ArgumentCaptor<BiFunction<String, String, CompletableFuture<Boolean>>> captor =
++                ArgumentCaptor.forClass(BiFunction.class);
++        verify(messageSubscriber).startListening(captor.capture());
++        return captor.getValue();
++    }
++
++    @Test
++    void returnsAckWhenMessageProcessedSuccessfully() throws Exception {
++        when(executeDevolutionUseCase.execute(any())).thenReturn(
++                new DevolutionResult(123, "PROCESSED", "012007000000001",
++                        "DV000123.005", "devs/005/DV000123.005", Instant.now(), "msg-1")
++        );
++
++        boolean result = captureHandler()
++                .apply(SUBSCRIPTION_ID, VALID_BODY)
++                .get(5, TimeUnit.SECONDS);
++
++        assertThat(result).isTrue();
++    }
++
++    @Test
++    void returnsAckWhenDevolutionAlreadyProcessed() throws Exception {
++        doThrow(new DevolutionAlreadyProcessedException(123))
++                .when(executeDevolutionUseCase).execute(any(ExecuteDevolutionCommand.class));
++
++        boolean result = captureHandler()
++                .apply(SUBSCRIPTION_ID, VALID_BODY)
++                .get(5, TimeUnit.SECONDS);
++
++        assertThat(result).isTrue();
++    }
++
++    @Test
++    void returnsAckWhenValidationFails() throws Exception {
++        doThrow(new DevolutionValidationException("totales invalidos"))
++                .when(executeDevolutionUseCase).execute(any(ExecuteDevolutionCommand.class));
++
++        boolean result = captureHandler()
++                .apply(SUBSCRIPTION_ID, VALID_BODY)
++                .get(5, TimeUnit.SECONDS);
++
++        assertThat(result).isTrue();
++    }
++
++    @Test
++    void returnsAckWhenCreditNoteNotEligible() throws Exception {
++        doThrow(new CreditNoteNotEligibleException("consumidor final"))
++                .when(executeDevolutionUseCase).execute(any(ExecuteDevolutionCommand.class));
++
++        boolean result = captureHandler()
++                .apply(SUBSCRIPTION_ID, VALID_BODY)
++                .get(5, TimeUnit.SECONDS);
++
++        assertThat(result).isTrue();
++    }
++
++    @Test
++    void returnsNackWhenDevolutionSessionNotFound() throws Exception {
++        doThrow(new NoSuchElementException("no encontrado"))
++                .when(executeDevolutionUseCase).execute(any(ExecuteDevolutionCommand.class));
++
++        boolean result = captureHandler()
++                .apply(SUBSCRIPTION_ID, VALID_BODY)
++                .get(5, TimeUnit.SECONDS);
++
++        assertThat(result).isFalse();
++    }
++
++    @Test
++    void returnsAckWhenJsonIsInvalid() throws Exception {
++        boolean result = captureHandler()
++                .apply(SUBSCRIPTION_ID, INVALID_JSON)
++                .get(5, TimeUnit.SECONDS);
++
++        assertThat(result).isTrue();
++    }
++
++    @Test
++    void returnsAckWhenDevolutionIdIsNull() throws Exception {
++        boolean result = captureHandler()
++                .apply(SUBSCRIPTION_ID, NULL_ID_BODY)
++                .get(5, TimeUnit.SECONDS);
++
++        assertThat(result).isTrue();
++    }
++
++    @Test
++    void returnsNackWhenUnexpectedErrorOccurs() throws Exception {
++        doThrow(new RuntimeException("BD no disponible"))
++                .when(executeDevolutionUseCase).execute(any(ExecuteDevolutionCommand.class));
++
++        boolean result = captureHandler()
++                .apply(SUBSCRIPTION_ID, VALID_BODY)
++                .get(5, TimeUnit.SECONDS);
++
++        assertThat(result).isFalse();
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/integration/infrastructure/adapter/out/storage/DvFileBuilderTest.java ---
+--- a//src/test/java/com/elrosado/integration/infrastructure/adapter/out/storage/DvFileBuilderTest.java
++++ b//src/test/java/com/elrosado/integration/infrastructure/adapter/out/storage/DvFileBuilderTest.java
+@@ -8,6 +8,7 @@
+ import com.elrosado.integration.domain.model.StoreData;
+ import com.elrosado.integration.domain.model.TaxRates;
+ import com.elrosado.integration.domain.model.TransactionData;
++
+ import org.junit.jupiter.api.Test;
+ 
+ import java.nio.charset.StandardCharsets;
+@@ -25,6 +26,7 @@
+                 789,
+                 456,
+                 99,
++                ReturnMode.CASH.getCode(),
+                 0,
+                 new DevolutionTotals(100L, 5L, 6L, 6L, 95L),
+                 List.of(new DevolutionItem(
+
+

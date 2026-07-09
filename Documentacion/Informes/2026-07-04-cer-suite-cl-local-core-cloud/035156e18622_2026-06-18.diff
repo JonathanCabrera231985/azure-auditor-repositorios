@@ -1,0 +1,2320 @@
+--- Diff for /.claude_rules/GCS_ROUTES_INVENTORY.md ---
+--- a//.claude_rules/GCS_ROUTES_INVENTORY.md
++++ b//.claude_rules/GCS_ROUTES_INVENTORY.md
+@@ -0,0 +1,24 @@
++# GCS Routes Inventory
++
++Official inventory for GCS routes confirmed during SuiteCloud migration.
++Future migrations must check this file before requesting or adding a route.
++
++## Defined Routes
++
++| Legacy property | Canonical GCS URI | Bucket | Prefix | Status | Source |
++|---|---|---|---|---|---|
++| `updateCedPadRuc.in.folder.path` | `gs://gcs-cer-suite-core-files/eyes/arsap/in` | `gcs-cer-suite-core-files` | `eyes/arsap/in` | Defined | User migration prompt, 2026-06-18 |
++| `updateCedPadRuc.out.folder.path` | `gs://gcs-cer-suite-core-files/eyes/arsap/bkp` | `gcs-cer-suite-core-files` | `eyes/arsap/bkp` | Defined | User migration prompt, 2026-06-18 |
++| `eyes.ups.file.name` | `gs://gcs-cer-suite-core-files/eyes-server` | `gcs-cer-suite-core-files` | `eyes-server` | Defined | User migration prompt, 2026-06-18 |
++| `app.update-ced-pad-ruc.gcs.error-uri` | `gs://gcs-cer-suite-core-files/eyes/arsap/in/cedpadruc-error` | `gcs-cer-suite-core-files` | `eyes/arsap/in/cedpadruc-error` | Defined | User confirmation, 2026-06-18 |
++
++## Pending Routes
++
++No pending GCS routes for `UpdateCedPadRucProcess` as of 2026-06-18.
++
++## Rules
++
++- Do not invent GCS bucket or prefix values.
++- If a legacy file route is not listed under "Defined Routes", stop and request the exact GCS value.
++- Store successful `UpdateCedPadRucProcess` files in the defined backup route, matching the legacy successful move to `outFolder`.
++- Firestore error tracking for `UpdateCedPadRucProcess` is only created after a file is moved to the confirmed error route.
+
+
+--- Diff for /.claude_rules/MIGRATION_PHASES_AND_PROPERTIES.md ---
+--- a//.claude_rules/MIGRATION_PHASES_AND_PROPERTIES.md
++++ b//.claude_rules/MIGRATION_PHASES_AND_PROPERTIES.md
+@@ -0,0 +1,75 @@
++# Migration Phases And Legacy Properties
++
++This rule applies to every migrated legacy `Process` or `Operation` in this repository.
++It extends the existing SuiteCloud rules without replacing them.
++
++## Phase 1
++
++- Legacy properties that come from `ArmsServerConf.properties` must be registered in `k8s/properties.yaml`.
++- Do not add `ArmsServerConf.properties` keys to the main Kubernetes ConfigMap.
++- `k8s/properties.yaml` must contain only values that originate from `ArmsServerConf.properties`.
++- File storage must use Google Cloud Storage. Do not introduce local physical paths for business files.
++- Before adding or changing a GCS route, check `.claude_rules/GCS_ROUTES_INVENTORY.md`.
++- If a required GCS route is not already documented, stop the migration and request the exact value.
++- Scheduled legacy loops must be migrated to Spring `@Scheduled`.
++- Do not use Pub/Sub, `@Async`, `ExecutorService`, manual `Thread`, or infinite loops for Phase 1 polling processes unless a later phase explicitly changes the rule.
++- Firestore must only be used for `UpdateCedPadRucProcess` error tracking when a file is sent to the error bucket.
++- Database credentials remain in Kubernetes Secrets during this phase.
++- Do not create or update JPA entities, repositories, DTOs, projections, queries, or mappers unless the exact DDL of every involved table is available.
++
++## Phase 2
++
++- Pub/Sub can be introduced only when the upstream producer is identified and can publish a file-created event with the GCS object location.
++- A Pub/Sub design must keep the same domain use case as the scheduler so Phase 1 and Phase 2 share business behavior.
++- Topics and subscriptions must be created by IaC, not application code.
++- The GCS object location remains the source of truth for file state unless a specific architecture decision changes it.
++
++## Future Redis Phase
++
++Target parameter flow:
++
++```text
++Central Database
++        |
++        v
++Redis parameter cache
++        |
++        v
++Application parameter provider
++```
++
++Recommended extension points:
++
++- `ParameterProviderPort`: application-facing port for reading typed parameters.
++- `ParameterSourcePort`: source port for loading parameter snapshots from central storage.
++- `ParameterCachePort`: cache port for Redis get/set/evict operations with TTL.
++- `KubernetesPropertiesParameterProviderAdapter`: Phase 1 adapter backed by Spring configuration loaded from `properties.yaml`.
++- `RedisParameterProviderAdapter`: future adapter backed by Redis.
++- `CentralDatabaseParameterSourceAdapter`: future adapter that reads authoritative parameters from the central database.
++
++The application layer must depend on `ParameterProviderPort`, not directly on Redis, Kubernetes ConfigMaps, or `Environment`.
++
++## Future Secret Manager Phase
++
++- Database credentials currently remain in Kubernetes Secrets.
++- Do not migrate database credentials to GCP Secret Manager in Phase 1.
++- When this phase starts, use the project shared-library rules for `jlib-secretmanager`.
++- Do not add direct `jlib-kms` if it is already transitively provided by `jlib-secretmanager`.
++
++## Parameter Strategy Decision
++
++Alternatives considered:
++
++| Alternative | Advantages | Disadvantages |
++|---|---|---|
++| Keep legacy parameters in `application.yml` | Simple Spring binding; low implementation effort. | Mixes migrated legacy parameters with normal app config; harder future Redis migration; duplicates Kubernetes ownership. |
++| Keep legacy parameters in `k8s/properties.yaml` | Isolates `ArmsServerConf.properties`; aligns with the requested Redis migration path; keeps the main ConfigMap clean. | Requires explicit import or mount strategy when the application starts consuming the values. |
++| Use an abstraction from now | Application code becomes independent of the source; easier Redis replacement. | Adds interfaces before every migrated process needs dynamic parameters. |
++| Prepare Redis without implementing it | Avoids premature runtime dependencies; documents the target architecture. | Requires a later adapter implementation and migration task. |
++
++Decision for Phase 1:
++
++- Use `k8s/properties.yaml` as the authoritative Kubernetes registry for properties migrated from `ArmsServerConf.properties`.
++- Add application code against a parameter abstraction only when a migrated process actually consumes those parameters.
++- Do not add Redis dependencies or Redis runtime configuration in Phase 1.
++- Keep normal service configuration in `application*.yml` and the main ConfigMap only when it is not inherited from `ArmsServerConf.properties`.
+
+
+--- Diff for /AGENTS.md ---
+--- a//AGENTS.md
++++ b//AGENTS.md
+@@ -23,6 +23,14 @@
+ - **Domain models**: immutable Java `record`s — mutations return `with*()` copies. Collections wrapped in `List.copyOf()`.
+ - **Two datasources**: primary `ARTS_EC` (`datasource`), secondary `DEVS_EC` (`datasource-devs`).
+ - **JPA `ddl-auto: none`** — DevTicketEntity cross-database ref (`DEVS_EC.dbo.DV_TICKET`) can't be validated by Hibernate.
++
++## Migration phases
++
++- **Migration Phase 1**: `ArmsServerConf.properties` values go in `k8s/properties.yaml`, never in the main ConfigMap.
++- **GCS routes**: check `.claude_rules/GCS_ROUTES_INVENTORY.md`; if a route is missing, stop and request the exact value.
++- **DDL gate**: do not add Entity/Repository/DTO/Projection/Query/Mapper for legacy tables without exact DDL.
++- **Schedulers**: migrated polling processes use `@Scheduled`; no Pub/Sub, `@Async`, `ExecutorService`, manual threads, or infinite loops in Phase 1.
++- **Future phases**: Redis parameter flow is Central DB -> Redis -> application; DB secrets stay in Kubernetes Secrets until the future Secret Manager phase.
+ 
+ ## Code style (will be flagged by review)
+ 
+
+
+--- Diff for /CLAUDE.md ---
+--- a//CLAUDE.md
++++ b//CLAUDE.md
+@@ -2,33 +2,35 @@
+ 
+ This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+ 
+-## Reglas del proyecto (cargadas automáticamente)
+-
+-Los siguientes archivos definen las reglas de arquitectura, tecnología y diseño que **deben aplicarse en toda sesión y consulta**:
++## Reglas del proyecto (cargadas automГЎticamente)
++
++Los siguientes archivos definen las reglas de arquitectura, tecnologГ­a y diseГ±o que **deben aplicarse en toda sesiГіn y consulta**:
+ 
+ @../.claude_rules/rules_and_prompt.md
+ @../.claude_rules/sharedlibs.md
+ @.claude_rules/RTD_VENTAS_CLOUD.md
+ @.claude_rules/ALCANCE_COMPONENTE.md
++@.claude_rules/MIGRATION_PHASES_AND_PROPERTIES.md
++@.claude_rules/GCS_ROUTES_INVENTORY.md
+ 
+ ## Project Overview
+ 
+-**SuiteCloud – Ventas** (artifact: `cer-suite-cloud-local-core`) — asynchronous component of the SuiteCloud ecosystem. Migrates Java 8 legacy retail POS backend (ArmsServerLocal) to Java 25 + Spring Boot 4.0.6 on GCP Cloud Run. Receives TSL (Terminal Sales Log) transaction frames from Point-of-Sale terminals via Pub/Sub, parses them, generates XML, and distributes to downstream systems (Firestore, Pub/Sub, Cloud SQL).
++**SuiteCloud вЂ“ Ventas** (artifact: `cer-suite-cloud-local-core`) вЂ” asynchronous component of the SuiteCloud ecosystem. Migrates Java 8 legacy retail POS backend (ArmsServerLocal) to Java 25 + Spring Boot 4.0.6 on GCP Cloud Run. Receives TSL (Terminal Sales Log) transaction frames from Point-of-Sale terminals via Pub/Sub, parses them, generates XML, and distributes to downstream systems (Firestore, Pub/Sub, Cloud SQL).
+ 
+ ## Template Base
+ 
+ Reference project: `D:\SIPECOM\repository-git\cer-gcp\template-microservice`.
+ 
+-This template defines the **structural conventions** to follow in this and all SuiteCloud microservices. It is a reference — apply only the patterns that make sense for each service's actual responsibilities.
++This template defines the **structural conventions** to follow in this and all SuiteCloud microservices. It is a reference вЂ” apply only the patterns that make sense for each service's actual responsibilities.
+ 
+ ### Conventions that apply to this project
+ 
+ - **Package layout** (hexagonal): `domain/{model,port/{in,out}}`, `service/`, `infrastructure/adapter/{in,out}`, `infrastructure/config/`
+ - **Build/deploy artifacts**: `build.sh` (Podman + Skaffold `$IMAGE` support), `skaffold.yaml` (v4beta11), `docker/dev/Dockerfile` (dev image with `SPRING_PROFILES_ACTIVE=dev`), `k8s/namespace.yaml` (`ns-cer-suite-dev`)
+ - **Profiles**: `local` (developer machine, local SQL + GCP credentials file), `dev` (GCP dev, env vars), `prod` (GCP prod, env vars)
+-- **Exception handling**: `@RestControllerAdvice` with RFC 7807 `ProblemDetail` — already implemented as `SuiteCloudExceptionHandler`
++- **Exception handling**: `@RestControllerAdvice` with RFC 7807 `ProblemDetail` вЂ” already implemented as `SuiteCloudExceptionHandler`
+ - **Domain models**: immutable Java `record`s; mutations return copies via `with*()` methods
+-- **Virtual threads**: `spring.threads.virtual.enabled: true`; no `synchronized` — use `ReentrantLock`/`Semaphore`
++- **Virtual threads**: `spring.threads.virtual.enabled: true`; no `synchronized` вЂ” use `ReentrantLock`/`Semaphore`
+ 
+ ### Template patterns NOT used in this project (and why)
+ 
+@@ -62,25 +64,25 @@
+ Java 25 preview features are required (`--enable-preview` is configured in pom.xml for compile, test, and runtime).
+ 
+ **Known pre-existing test failures (do not investigate):**
+-- `XmlGeneratorServiceTest.generate_omitDeclaration_false_hasXmlDeclaration` — Spring XML transformer behavior difference.
++- `XmlGeneratorServiceTest.generate_omitDeclaration_false_hasXmlDeclaration` вЂ” Spring XML transformer behavior difference.
+ 
+ ## Architecture
+ 
+ Hexagonal (Ports & Adapters) layered as:
+ 
+ ```
+-infrastructure/adapter/in/event/   ← PubSubSalesAdapter (inbound trigger)
+-infrastructure/adapter/out/        ← DB, Firestore, KMS, Pub/Sub adapters
+-service/                           ← Business logic (implements domain ports)
+-domain/port/in/                    ← UseCase interfaces
+-domain/port/out/                   ← Repository/publisher interfaces
+-domain/model/                      ← Immutable Java records + enums
++infrastructure/adapter/in/event/   в†ђ PubSubSalesAdapter (inbound trigger)
++infrastructure/adapter/out/        в†ђ DB, Firestore, KMS, Pub/Sub adapters
++service/                           в†ђ Business logic (implements domain ports)
++domain/port/in/                    в†ђ UseCase interfaces
++domain/port/out/                   в†ђ Repository/publisher interfaces
++domain/model/                      в†ђ Immutable Java records + enums
+ ```
+ 
+ ### Data flow
+ 
+ 1. **PubSubSalesAdapter** receives a `transactionId` and dispatches to a virtual thread.
+-2. **ProcessSaleService** orchestrates: reads Firestore payload → parses → fetches store from SQL → builds transaction → generates XML → updates Firestore → publishes to Pub/Sub.
++2. **ProcessSaleService** orchestrates: reads Firestore payload в†’ parses в†’ fetches store from SQL в†’ builds transaction в†’ generates XML в†’ updates Firestore в†’ publishes to Pub/Sub.
+ 3. **TslFrameParserService** does all TSL parsing (see below).
+ 4. **XmlGeneratorService** serializes the domain model to XML using JDK DOM API (no XStream/JAXB).
+ 
+@@ -88,8 +90,8 @@
+ 
+ | Class | Role |
+ |-------|------|
+-| `TslFrameParserService` | Parses raw TSL string → `SaleTransaction`. Contains a private `TransactionBuilder` for accumulating mutable state during parsing; `build()` produces the immutable record. |
+-| `XmlGeneratorService` | `SaleTransaction` → XML string. Mirrors the legacy XStreamConfig2 alias map field-by-field. |
++| `TslFrameParserService` | Parses raw TSL string в†’ `SaleTransaction`. Contains a private `TransactionBuilder` for accumulating mutable state during parsing; `build()` produces the immutable record. |
++| `XmlGeneratorService` | `SaleTransaction` в†’ XML string. Mirrors the legacy XStreamConfig2 alias map field-by-field. |
+ | `SaleTransaction` | Central immutable record holding all parsed data: header, lineItems, tenders, taxes, and all UserData subtypes. |
+ | `TslTransactionHeader` | Transaction metadata (timestamps, flags, operator, store). |
+ | `TslLineItem` | Single sale/return item. `withAppliedTax()` / `withTaxType()` return copies. |
+@@ -98,9 +100,9 @@
+ 
+ ### TSL Frame Format
+ 
+-Frame separator: `'|'` (three characters — single-quote, pipe, single-quote). Body is split by `,`.
+-
+-Header segments (indices 0–5): `communicationChannel`, `operationType`, `responseChannel`, `storeCode`, `permanentConn`, `dateTimeProcess`. Body is `header[6]`; `businessDayDate` is `header[7]`.
++Frame separator: `'|'` (three characters вЂ” single-quote, pipe, single-quote). Body is split by `,`.
++
++Header segments (indices 0вЂ“5): `communicationChannel`, `operationType`, `responseChannel`, `storeCode`, `permanentConn`, `dateTimeProcess`. Body is `header[6]`; `businessDayDate` is `header[7]`.
+ 
+ Body record types:
+ 
+@@ -114,12 +116,12 @@
+ | `09` | Change | change/cashback amount |
+ | `11` | DataEntry | `EE` identifier = PreferredCustomer data |
+ | `13` | TillChange | cashier loan/pickup (logged, not persisted) |
+-| `21` | StoreClosing | EOD → ControlTransaction |
++| `21` | StoreClosing | EOD в†’ ControlTransaction |
+ | `99` | UserData | sub-typed extended data (see below) |
+ 
+ Records with type `03`, `04`, `16`, `80`, `97` are explicit no-ops (logged at DEBUG, ignored).
+ 
+-### Type 99 UserData — implemented subtypes
++### Type 99 UserData вЂ” implemented subtypes
+ 
+ | Subtype | Name | XML element produced |
+ |---------|------|----------------------|
+@@ -145,20 +147,20 @@
+ | `64` | GIFTCARD_DATA | `<GiftcardDataList>` |
+ | `77` | RECAUDACION_DATA | `<Recaudaciones>` |
+ 
+-All `99` records (regardless of subtype) are also stored verbatim in `rawUserDataList` → `<StringUsuariosDataList>` in XML.
++All `99` records (regardless of subtype) are also stored verbatim in `rawUserDataList` в†’ `<StringUsuariosDataList>` in XML.
+ 
+ ### TslLineItem (critical record)
+-- `extendedAmountCents` — raw cents, **never divide by 100** (legacy compatibility and XML output both use raw cents).
+-- `isVoid` — derived from INDICAT2 bit 7 or INDICAT3 T-value `'8'`/`'9'`.
+-- `taxType` — `"A"`–`"H"` or `"0"` (no IVA); bit4→A, bit5→B, bit6→C, bit7→D from INDICAT1 (ISSUE-02). Overridden by `99|06|41` INDITAX field (VERIF-03).
+-- `itemCode` — leading zero stripped only for 12-char codes starting with `"0"` (ISSUE-22).
+-- `merchandiseHierarchyGroup` — stored as int, leading zeros removed (ISSUE-21).
+-- `departmentCode` — normalized numeric string; `01`, `04`, `05` must serialize as `1`, `4`, `5` like legacy integer fields.
+-- `appliedTaxCents` — filled by `99|06|41` FIFO queue per itemCode (ISSUE-V3-06).
+-- `itemType` — legacy `INDICAT3[0]` value, not inferred from `itemCode`; `7` is store coupon/service and `8`/`9` are cancel item types.
+-- `priceEntered` — `1` when `INDICAT1` bit 13 is active, otherwise `0`.
+-- `promoFlag` — nullable XML flag: `true` for `811099999998`/`811099999996`, `false` for store coupon `itemType=7`, `null` means omit `<IsPromo>`.
+-- `isPorMayor` — set by `99|06|16` on the last line item and serialized as `<IsPorMayor>true</IsPorMayor>`.
++- `extendedAmountCents` вЂ” raw cents, **never divide by 100** (legacy compatibility and XML output both use raw cents).
++- `isVoid` вЂ” derived from INDICAT2 bit 7 or INDICAT3 T-value `'8'`/`'9'`.
++- `taxType` вЂ” `"A"`вЂ“`"H"` or `"0"` (no IVA); bit4в†’A, bit5в†’B, bit6в†’C, bit7в†’D from INDICAT1 (ISSUE-02). Overridden by `99|06|41` INDITAX field (VERIF-03).
++- `itemCode` вЂ” leading zero stripped only for 12-char codes starting with `"0"` (ISSUE-22).
++- `merchandiseHierarchyGroup` вЂ” stored as int, leading zeros removed (ISSUE-21).
++- `departmentCode` вЂ” normalized numeric string; `01`, `04`, `05` must serialize as `1`, `4`, `5` like legacy integer fields.
++- `appliedTaxCents` вЂ” filled by `99|06|41` FIFO queue per itemCode (ISSUE-V3-06).
++- `itemType` вЂ” legacy `INDICAT3[0]` value, not inferred from `itemCode`; `7` is store coupon/service and `8`/`9` are cancel item types.
++- `priceEntered` вЂ” `1` when `INDICAT1` bit 13 is active, otherwise `0`.
++- `promoFlag` вЂ” nullable XML flag: `true` for `811099999998`/`811099999996`, `false` for store coupon `itemType=7`, `null` means omit `<IsPromo>`.
++- `isPorMayor` вЂ” set by `99|06|16` on the last line item and serialized as `<IsPorMayor>true</IsPorMayor>`.
+ - `emitSaleReturnSequenceNumber` - parser-resolved legacy parity flag for the inner `<Sale>/<Return><sequenceNumber>`; promo behavior depends on `99|06|53` state, not only on `itemType`.
+ 
+ ### Timestamp handling (changeNDate)
+@@ -174,7 +176,7 @@
+ Collections are wrapped with `List.copyOf()` / `Map.copyOf()` in canonical constructors.
+ 
+ ### Virtual threads
+-`spring.threads.virtual.enabled: true` — all Pub/Sub dispatch goes through `virtualThreadTaskExecutor`. Do not block virtual threads with `synchronized`; prefer `ReentrantLock` or `Semaphore`.
++`spring.threads.virtual.enabled: true` вЂ” all Pub/Sub dispatch goes through `virtualThreadTaskExecutor`. Do not block virtual threads with `synchronized`; prefer `ReentrantLock` or `Semaphore`.
+ 
+ ## Test Fixtures
+ 
+@@ -189,7 +191,7 @@
+ 
+ Active ISSUE labels in source track intentional deviations from the legacy system:
+ - **ISSUE-01**: Amounts in cents (no /100).
+-- **ISSUE-05**: Operator ID from field[6] (cédula), not field[5].
++- **ISSUE-05**: Operator ID from field[6] (cГ©dula), not field[5].
+ - **ISSUE-V3-06**: Queued tax application by itemCode (FIFO) for `99|06|41` records.
+ - **VERIF-03**: `INDITAX` field overrides `taxType` for a line item.
+ 
+@@ -207,29 +209,29 @@
+ - `<PriceEntered>` is serialized from `INDICAT1` bit 13; never hardcode it to `0`.
+ - `<Totals>` each `<Total>` has `CancelFlag="false"` attribute.
+ - `<InvoiceData>` includes `<Address>`, `<Telephone>`, `<flagReg>1</flagReg>` (from subtype 27 f[7], f[8]).
+-- Amounts in XML are formatted as `"171.0"` (long + `.0`) — no decimal arithmetic.
++- Amounts in XML are formatted as `"171.0"` (long + `.0`) вЂ” no decimal arithmetic.
+ - `<StringUsuariosDataList>` cadenas use `'|'` as separator with `&apos;` XML-escaping.
+ 
+ ## GCP Infrastructure
+ 
+-- **Firestore**: transaction state machine (`IN_PROCESS` → `XML_GENERATED`) and payload storage.
++- **Firestore**: transaction state machine (`IN_PROCESS` в†’ `XML_GENERATED`) and payload storage.
+ - **Pub/Sub**: inbound transaction events + outbound XML distribution.
+ - **Cloud SQL (SQL Server)**: retail store catalog (`RetailStore`).
+ - **KMS**: decryption of sensitive fields via `KmsDecryptionAdapter`.
+ 
+-Kubernetes manifests are in `k8s/` (deployment, service, HPA, configmap, secret). Cloud Run target: 80 concurrent requests, 1–100 instances, 1 GB RAM, 2 CPU.
++Kubernetes manifests are in `k8s/` (deployment, service, HPA, configmap, secret). Cloud Run target: 80 concurrent requests, 1вЂ“100 instances, 1 GB RAM, 2 CPU.
+ 
+ ---
+ 
+ ## SuiteCloud Ecosystem
+ 
+-SuiteCloud is composed of five services communicating via GCP Pub/Sub and Firestore. This repository implements **SuiteCloud – Ventas** only.
++SuiteCloud is composed of five services communicating via GCP Pub/Sub and Firestore. This repository implements **SuiteCloud вЂ“ Ventas** only.
+ 
+ | Service | Mode | Responsibility |
+ |---------|------|----------------|
+ | **Generador** | Sync | Entry point: receives TCP frames from POS terminals, stores in Firestore, sends ACK, publishes to Pub/Sub. |
+-| **SuiteCloud – Ventas** *(this service)* | Async | Processes TSL frame, applies business logic, generates XML, persists in Firestore, notifies Distributor Cloud. |
+-| **SuiteCloud – Consultas** | Sync | Answers real-time queries (prices, stock, customers) from Cloud SQL Multi Local. |
++| **SuiteCloud вЂ“ Ventas** *(this service)* | Async | Processes TSL frame, applies business logic, generates XML, persists in Firestore, notifies Distributor Cloud. |
++| **SuiteCloud вЂ“ Consultas** | Sync | Answers real-time queries (prices, stock, customers) from Cloud SQL Multi Local. |
+ | **Distributor Cloud** | Async | Persists XML to Cloud SQL Multi Local, updates Firestore state to `PROCESSED`, inserts XML into `TBL_XML_GENERATOR` in Central DB, updates Firestore state to `PROCESSED_CENTRAL`. |
+ | **Transaction Cloud** | Async | Transfers XML to Central DB, manages day-close, journal, customer replica, and old-return recovery. |
+ 
+@@ -238,8 +240,8 @@
+ | Step | State | Meaning |
+ |------|-------|---------|
+ | 1 | `PENDING` | Received and queued. |
+-| 2 | `IN_PROCESS` | SuiteCloud – Ventas is processing. |
+-| 3 | `XML_GENERATED` | SuiteCloud – Ventas finished; XML created. |
++| 2 | `IN_PROCESS` | SuiteCloud вЂ“ Ventas is processing. |
++| 3 | `XML_GENERATED` | SuiteCloud вЂ“ Ventas finished; XML created. |
+ | 4 | `DISTRIBUTING` | Distributor Cloud persisting to Cloud SQL Multi Local. |
+ | 5 | `PROCESSED` | Persisted in Cloud SQL Multi Local. |
+ | 6 | `PROCESSED_CENTRAL` | Distributor Cloud inserted XML into `TBL_XML_GENERATOR` in Central DB. |
+@@ -248,7 +250,7 @@
+ 
+ ---
+ 
+-## SuiteCloud – Ventas: Scope
++## SuiteCloud вЂ“ Ventas: Scope
+ 
+ ### What this service DOES
+ 1. Subscribes to the Pub/Sub sales topic published by Generador.
+@@ -261,10 +263,10 @@
+ 8. Publishes a Pub/Sub event notifying Distributor Cloud that the XML is available.
+ 
+ ### What this service does NOT do
+-- Does NOT persist to Cloud SQL Server (Multi Local) — that is Distributor Cloud's responsibility.
++- Does NOT persist to Cloud SQL Server (Multi Local) вЂ” that is Distributor Cloud's responsibility.
+ - Does NOT communicate directly with POS terminals or controllers (no TCP).
+ - Does NOT transfer data to the Central El Rosado database (Transaction Cloud's responsibility).
+-- Does NOT answer real-time queries (SuiteCloud – Consultas handles that).
++- Does NOT answer real-time queries (SuiteCloud вЂ“ Consultas handles that).
+ - Does NOT handle the ACK to the Controller/POS (Generador already sent it before this process starts).
+ 
+ ---
+@@ -276,7 +278,18 @@
+ - DB adapter sub-packages: `infrastructure/adapter/out/db/entity/` for JPA entities, `infrastructure/adapter/out/db/repository/` for Spring Data interfaces.
+ - No stored procedure calls. All business logic lives in Java; the database is a pure persistence engine.
+ - No local filesystem access. All file storage goes through GCS.
+-- No `synchronized` blocks on virtual threads — use `ReentrantLock` or `Semaphore`.
++- No `synchronized` blocks on virtual threads вЂ” use `ReentrantLock` or `Semaphore`.
++
++### Migration phases
++- **Phase 1**: migrated legacy `Process`/`Operation` components that use `ArmsServerConf.properties` values must register those values only in `k8s/properties.yaml`, never in the main ConfigMap.
++- **Phase 1**: file routes must use GCS and must be checked against `.claude_rules/GCS_ROUTES_INVENTORY.md`; missing routes stop the migration until the exact value is provided.
++- **Phase 1**: scheduled legacy polling uses Spring `@Scheduled`; do not use Pub/Sub, `@Async`, `ExecutorService`, manual `Thread`, or infinite loops unless a later phase explicitly changes the rule.
++- **Phase 1**: Firestore error tracking for `UpdateCedPadRucProcess` is limited to files moved to the confirmed error bucket/path, collection `update_ced_pad_ruc_error`.
++- **Phase 1**: database credentials remain in Kubernetes Secrets.
++- **DDL gate**: do not create or update JPA entities, repositories, DTOs, projections, queries, or mappers without the exact DDL of every involved table.
++- **Phase 2**: Pub/Sub is allowed only after the upstream file producer and event contract are defined.
++- **Future Redis**: parameter flow is Central Database -> Redis -> application through a `ParameterProviderPort` abstraction.
++- **Future Secret Manager**: database credentials can move from Kubernetes Secrets to GCP Secret Manager only in that future phase.
+ 
+ ### Code style
+ - **All identifiers** (classes, methods, variables, packages, fields): **English**.
+@@ -284,32 +297,32 @@
+ - Lombok `@Slf4j`, `@RequiredArgsConstructor`, `@Builder`, `@Data` are project standard.
+ - Domain models: immutable Java `record`s; mutations return copies via `with*()` methods.
+ - Prefer functional style (`stream`, `map`, `filter`, `.toList()`) over imperative loops where readable.
+-- No hardcoded business values — use configuration or named constants.
++- No hardcoded business values вЂ” use configuration or named constants.
+ - Code must pass SonarQube quality gate (no smells, no vulnerabilities).
+ 
+ ### Logging
+ 
+-- `DEBUG` — internal flow steps.
+-- `INFO` — business events (use SLF4J 2.0+ fluent API).
+-- `WARN` — degraded but handled situations.
+-- `ERROR` — unexpected failures on the critical path.
++- `DEBUG` вЂ” internal flow steps.
++- `INFO` вЂ” business events (use SLF4J 2.0+ fluent API).
++- `WARN` вЂ” degraded but handled situations.
++- `ERROR` вЂ” unexpected failures on the critical path.
+ 
+ ```java
+ log.atInfo()
+-   .setMessage("Descripción del evento")
++   .setMessage("DescripciГіn del evento")
+    .addKeyValue("transactionId", id)
+    .addKeyValue("estado", estado)
+    .log();
+ ```
+-In production, `logging.structured.format.console=gcp` converts `addKeyValue` to structured Cloud Logging fields — never concatenate values into the message string.
++In production, `logging.structured.format.console=gcp` converts `addKeyValue` to structured Cloud Logging fields вЂ” never concatenate values into the message string.
+ 
+ ### Spring profiles
+-- `application.yml` — shared generic config (virtual threads, app name).
+-- `application-local.yml` — local dev: plain-text logs, localhost DB connection.
+-- `application-prod.yml` — GCP/K8s: JSON logs, env-var-injected secrets.
++- `application.yml` вЂ” shared generic config (virtual threads, app name).
++- `application-local.yml` вЂ” local dev: plain-text logs, localhost DB connection.
++- `application-prod.yml` вЂ” GCP/K8s: JSON logs, env-var-injected secrets.
+ 
+ ### Testing standards
+-- Unit tests: **no Spring context** — JUnit 5 + Mockito only (`@ExtendWith(MockitoExtension.class)`).
++- Unit tests: **no Spring context** вЂ” JUnit 5 + Mockito only (`@ExtendWith(MockitoExtension.class)`).
+ - Integration tests: annotated `@Disabled`; require emulators or local infra.
+ - Use `lenient().when(...)` in `@BeforeEach` when a stub only applies to some tests.
+ - Minimum **80% code coverage** per SonarQube standards.
+
+
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -24,7 +24,10 @@
+   REPRO_POLLING_MS: "30000"
+   REPRO_BATCH_SIZE: "10"
+ 
++  UPDATE_CED_PAD_RUC_ENABLED: "true"
++  UPDATE_CED_PAD_RUC_BATCH_SIZE: "500"
++  UPDATE_CED_PAD_RUC_ERROR_URI: "gs://gcs-cer-suite-core-files/eyes/arsap/in/cedpadruc-error"
++
+   # Nivel de logging global y de frameworks
+   LOGGING_LEVEL_ROOT: "INFO"
+   LOGGING_LEVEL_APPLICATION: "INFO"
+-
+
+
+--- Diff for /k8s/deployment.yaml ---
+--- a//k8s/deployment.yaml
++++ b//k8s/deployment.yaml
+@@ -39,6 +39,8 @@
+           env:
+             - name: SPRING_THREADS_VIRTUAL_ENABLED
+               value: "true"
++            - name: SPRING_CONFIG_IMPORT
++              value: "optional:file:/etc/arms/ArmsServerConf.properties"
+             # 2. Credenciales y Cadenas de Conexión desde el Secret
+             - name: SPRING_DATASOURCE_URL
+               valueFrom:
+@@ -74,6 +76,9 @@
+             - name: GOOGLE_APPLICATION_CREDENTIALS
+               value: /var/secrets/google/key.json
+           volumeMounts:
++            - name: arms-properties
++              mountPath: /etc/arms
++              readOnly: true
+             - name: gcp-credentials
+               mountPath: /var/secrets/google
+               readOnly: true
+@@ -105,6 +110,9 @@
+             periodSeconds: 30
+             failureThreshold: 5
+       volumes:
++        - name: arms-properties
++          configMap:
++            name: cer-suite-local-core-arms-properties
+         - name: gcp-credentials
+           secret:
+-            secretName: gcp-credentials+            secretName: gcp-credentials
+
+
+--- Diff for /k8s/properties.yaml ---
+--- a//k8s/properties.yaml
++++ b//k8s/properties.yaml
+@@ -0,0 +1,13 @@
++apiVersion: v1
++kind: ConfigMap
++metadata:
++  name: cer-suite-local-core-arms-properties
++  namespace: ns-cer-suite-dev
++  labels:
++    app: cer-suite-local-core
++data:
++  ArmsServerConf.properties: |
++    updateCedPadRuc.in.folder.path=gs://gcs-cer-suite-core-files/eyes/arsap/in
++    updateCedPadRuc.out.folder.path=gs://gcs-cer-suite-core-files/eyes/arsap/bkp
++    updateCedPadRuc.sleeptime=30000
++    eyes.ups.file.name=gs://gcs-cer-suite-core-files/eyes-server
+
+
+--- Diff for /k8s/secret.yaml ---
+--- a//k8s/secret.yaml
++++ b//k8s/secret.yaml
+@@ -14,6 +14,6 @@
+   SPRING_DATASOURCE_PASSWORD: "QUxMQ18wMTgw"
+ 
+   #datasource Central ARTS_EC (10.2.7.21) — validación PI_CONTROL
+-  SPRING_DATASOURCE_CENTRAL_URL: "amRiYzpzcWxzZXJ2ZXI6Ly8xMC4yLjcuMjE6MTQzMztkYXRhYmFzZU5hbWU9QVJUU19FQztlbmNyeXB0PWZhbHNl"
++  SPRING_DATASOURCE_CENTRAL_URL: "amRiYzpzcWxzZXJ2ZXI6Ly9DUzNEV1NBUk1DMUNPUk86MTQzMztkYXRhYmFzZU5hbWU9QVJUU19FQztlbmNyeXB0PWZhbHNl"
+   SPRING_DATASOURCE_CENTRAL_USERNAME: "YWxsaWFuY2Vz"
+   SPRING_DATASOURCE_CENTRAL_PASSWORD: "QUxMQ18wMTgw"
+
+
+--- Diff for /pom.xml ---
+--- a//pom.xml
++++ b//pom.xml
+@@ -50,6 +50,12 @@
+             <groupId>com.elrosado</groupId>
+             <artifactId>jlib-firestore</artifactId>
+             <version>1.0.0</version>
++        </dependency>
++
++        <dependency>
++            <groupId>com.elrosado</groupId>
++            <artifactId>jlib-storage</artifactId>
++            <version>1.0.1</version>
+         </dependency>
+ 
+         <dependency>
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/exception/UpdateCedPadRucProcessingException.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/exception/UpdateCedPadRucProcessingException.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/exception/UpdateCedPadRucProcessingException.java
+@@ -0,0 +1,17 @@
++package com.elrosado.cersuitecloudlocalcore.domain.exception;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.UpdateCedPadRucProcessingStage;
++
++public class UpdateCedPadRucProcessingException extends RuntimeException {
++
++    private final UpdateCedPadRucProcessingStage stage;
++
++    public UpdateCedPadRucProcessingException(UpdateCedPadRucProcessingStage stage, String message, Throwable cause) {
++        super(message, cause);
++        this.stage = stage;
++    }
++
++    public UpdateCedPadRucProcessingStage stage() {
++        return stage;
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/CedRegElecUpdateRecord.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/CedRegElecUpdateRecord.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/CedRegElecUpdateRecord.java
+@@ -0,0 +1,16 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++public record CedRegElecUpdateRecord(
++        Long id,
++        String province,
++        String canton,
++        String parish,
++        String zone,
++        String precinct,
++        String table,
++        String board,
++        String circumscription,
++        String function,
++        String gender
++) {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/CedRucUpdateRecord.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/CedRucUpdateRecord.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/CedRucUpdateRecord.java
+@@ -0,0 +1,11 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++public record CedRucUpdateRecord(
++        Long id,
++        String code,
++        String type,
++        int registryInternal,
++        String name,
++        String gender
++) {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/CedulaUpdateRecord.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/CedulaUpdateRecord.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/CedulaUpdateRecord.java
+@@ -0,0 +1,7 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++public record CedulaUpdateRecord(
++        CedRucUpdateRecord customer,
++        CedRegElecUpdateRecord electoralRecord
++) {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/GcsObjectReference.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/GcsObjectReference.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/GcsObjectReference.java
+@@ -0,0 +1,64 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++public record GcsObjectReference(String bucket, String objectName) {
++
++    private static final String GCS_SCHEME = "gs://";
++
++    public GcsObjectReference {
++        if (bucket == null || bucket.isBlank()) {
++            throw new IllegalArgumentException("bucket is required");
++        }
++        if (objectName == null || objectName.isBlank()) {
++            throw new IllegalArgumentException("objectName is required");
++        }
++        objectName = normalizeObjectName(objectName);
++    }
++
++    public static GcsObjectReference fromUri(String uri) {
++        if (uri == null || !uri.startsWith(GCS_SCHEME)) {
++            throw new IllegalArgumentException("GCS URI must start with gs://");
++        }
++
++        String value = uri.substring(GCS_SCHEME.length());
++        int separator = value.indexOf('/');
++        if (separator <= 0 || separator == value.length() - 1) {
++            throw new IllegalArgumentException("GCS URI must include bucket and object path");
++        }
++
++        return new GcsObjectReference(
++                value.substring(0, separator),
++                value.substring(separator + 1)
++        );
++    }
++
++    public GcsObjectReference resolve(String fileName) {
++        if (fileName == null || fileName.isBlank() || fileName.contains("/")) {
++            throw new IllegalArgumentException("fileName must be a single object name");
++        }
++        return new GcsObjectReference(bucket, objectName + "/" + fileName);
++    }
++
++    public String fileName() {
++        int index = objectName.lastIndexOf('/');
++        return index >= 0 ? objectName.substring(index + 1) : objectName;
++    }
++
++    public String prefixWithSlash() {
++        return objectName.endsWith("/") ? objectName : objectName + "/";
++    }
++
++    public String toUri() {
++        return GCS_SCHEME + bucket + "/" + objectName;
++    }
++
++    private static String normalizeObjectName(String value) {
++        String normalized = value;
++        while (normalized.startsWith("/")) {
++            normalized = normalized.substring(1);
++        }
++        while (normalized.endsWith("/")) {
++            normalized = normalized.substring(0, normalized.length() - 1);
++        }
++        return normalized;
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/PadronUpdateRecord.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/PadronUpdateRecord.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/PadronUpdateRecord.java
+@@ -0,0 +1,12 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++public record PadronUpdateRecord(
++        Integer id,
++        String code,
++        String precinct,
++        String table,
++        String board,
++        String function,
++        String address
++) {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/UpdateCedPadRucErrorRecord.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/UpdateCedPadRucErrorRecord.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/UpdateCedPadRucErrorRecord.java
+@@ -0,0 +1,18 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++import java.time.Instant;
++
++public record UpdateCedPadRucErrorRecord(
++        String processId,
++        Instant executionDate,
++        String fileName,
++        String bucket,
++        String sourceObjectName,
++        String errorObjectName,
++        String errorType,
++        String errorMessage,
++        String stackTrace,
++        UpdateCedPadRucProcessingStage processingStage,
++        Instant createdAt
++) {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/UpdateCedPadRucFile.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/UpdateCedPadRucFile.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/UpdateCedPadRucFile.java
+@@ -0,0 +1,9 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++public record UpdateCedPadRucFile(
++        GcsObjectReference location,
++        String fileName,
++        UpdateCedPadRucFileType type,
++        int sequenceNumber
++) {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/UpdateCedPadRucFileType.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/UpdateCedPadRucFileType.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/UpdateCedPadRucFileType.java
+@@ -0,0 +1,32 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++import java.util.Optional;
++
++public enum UpdateCedPadRucFileType {
++    CED(1),
++    PAD(2),
++    RUC(3);
++
++    private final int legacyOrder;
++
++    UpdateCedPadRucFileType(int legacyOrder) {
++        this.legacyOrder = legacyOrder;
++    }
++
++    public int legacyOrder() {
++        return legacyOrder;
++    }
++
++    public static Optional<UpdateCedPadRucFileType> fromFileName(String fileName) {
++        if (fileName == null || fileName.length() < 3) {
++            return Optional.empty();
++        }
++
++        return switch (fileName.substring(0, 3).toUpperCase()) {
++            case "CED" -> Optional.of(CED);
++            case "PAD" -> Optional.of(PAD);
++            case "RUC" -> Optional.of(RUC);
++            default -> Optional.empty();
++        };
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/UpdateCedPadRucProcessingResult.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/UpdateCedPadRucProcessingResult.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/UpdateCedPadRucProcessingResult.java
+@@ -0,0 +1,7 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++public record UpdateCedPadRucProcessingResult(
++        UpdateCedPadRucFileType fileType,
++        long recordsProcessed
++) {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/UpdateCedPadRucProcessingStage.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/UpdateCedPadRucProcessingStage.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/UpdateCedPadRucProcessingStage.java
+@@ -0,0 +1,11 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++public enum UpdateCedPadRucProcessingStage {
++    GCS_LIST,
++    GCS_READ,
++    PARSING,
++    DATABASE_WRITE,
++    GCS_MOVE_TO_BACKUP,
++    GCS_MOVE_TO_ERROR,
++    UNKNOWN
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/UpdateCedPadRucUseCase.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/UpdateCedPadRucUseCase.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/UpdateCedPadRucUseCase.java
+@@ -0,0 +1,6 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.in;
++
++public interface UpdateCedPadRucUseCase {
++
++    void processPendingFiles();
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/UpdateCedPadRucErrorTrackerPort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/UpdateCedPadRucErrorTrackerPort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/UpdateCedPadRucErrorTrackerPort.java
+@@ -0,0 +1,8 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.UpdateCedPadRucErrorRecord;
++
++public interface UpdateCedPadRucErrorTrackerPort {
++
++    void recordError(UpdateCedPadRucErrorRecord errorRecord);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/UpdateCedPadRucPersistencePort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/UpdateCedPadRucPersistencePort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/UpdateCedPadRucPersistencePort.java
+@@ -0,0 +1,16 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.CedRucUpdateRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.model.CedulaUpdateRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.model.PadronUpdateRecord;
++
++import java.util.List;
++
++public interface UpdateCedPadRucPersistencePort {
++
++    void saveCedulas(List<CedulaUpdateRecord> records);
++
++    void saveRucs(List<CedRucUpdateRecord> records);
++
++    void savePadrones(List<PadronUpdateRecord> records);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/UpdateCedPadRucStoragePort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/UpdateCedPadRucStoragePort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/UpdateCedPadRucStoragePort.java
+@@ -0,0 +1,18 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.UpdateCedPadRucFile;
++
++import java.io.BufferedReader;
++import java.util.List;
++
++public interface UpdateCedPadRucStoragePort {
++
++    List<UpdateCedPadRucFile> listPendingFiles();
++
++    BufferedReader openReader(UpdateCedPadRucFile file);
++
++    GcsObjectReference moveToBackup(UpdateCedPadRucFile file);
++
++    GcsObjectReference moveToError(UpdateCedPadRucFile file);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/UpdateCedPadRucSchedulerAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/UpdateCedPadRucSchedulerAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/UpdateCedPadRucSchedulerAdapter.java
+@@ -0,0 +1,31 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.scheduler;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.UpdateCedPadRucUseCase;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.scheduling.annotation.Scheduled;
++import org.springframework.stereotype.Component;
++
++@Component
++public class UpdateCedPadRucSchedulerAdapter {
++
++    private static final Logger log = LoggerFactory.getLogger(UpdateCedPadRucSchedulerAdapter.class);
++
++    private final UpdateCedPadRucUseCase updateCedPadRucUseCase;
++
++    public UpdateCedPadRucSchedulerAdapter(UpdateCedPadRucUseCase updateCedPadRucUseCase) {
++        this.updateCedPadRucUseCase = updateCedPadRucUseCase;
++    }
++
++    @Scheduled(fixedDelayString = "${updateCedPadRuc.sleeptime:30000}")
++    public void poll() {
++        try {
++            updateCedPadRucUseCase.processPendingFiles();
++        } catch (Exception e) {
++            log.atError()
++                    .setMessage("Error no controlado en scheduler UpdateCedPadRuc")
++                    .setCause(e)
++                    .log();
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbUpdateCedPadRucAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbUpdateCedPadRucAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbUpdateCedPadRucAdapter.java
+@@ -0,0 +1,71 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.CedRucUpdateRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.model.CedulaUpdateRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.model.PadronUpdateRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.UpdateCedPadRucPersistencePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.CedRegElecUpdateEntity;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.CedRucUpdateEntity;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.PadronUpdateEntity;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository.CedRegElecUpdateJpaRepository;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository.CedRucUpdateJpaRepository;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository.PadronUpdateJpaRepository;
++import org.springframework.stereotype.Component;
++import org.springframework.transaction.annotation.Transactional;
++
++import java.util.List;
++
++@Component
++public class DbUpdateCedPadRucAdapter implements UpdateCedPadRucPersistencePort {
++
++    private final CedRucUpdateJpaRepository cedRucRepository;
++    private final CedRegElecUpdateJpaRepository cedRegElecRepository;
++    private final PadronUpdateJpaRepository padronRepository;
++
++    public DbUpdateCedPadRucAdapter(
++            CedRucUpdateJpaRepository cedRucRepository,
++            CedRegElecUpdateJpaRepository cedRegElecRepository,
++            PadronUpdateJpaRepository padronRepository) {
++        this.cedRucRepository = cedRucRepository;
++        this.cedRegElecRepository = cedRegElecRepository;
++        this.padronRepository = padronRepository;
++    }
++
++    @Override
++    @Transactional(transactionManager = "artsEcTransactionManager")
++    public void saveCedulas(List<CedulaUpdateRecord> records) {
++        if (records.isEmpty()) {
++            return;
++        }
++        cedRucRepository.saveAll(records.stream()
++                .map(CedulaUpdateRecord::customer)
++                .map(CedRucUpdateEntity::fromDomain)
++                .toList());
++        cedRegElecRepository.saveAll(records.stream()
++                .map(CedulaUpdateRecord::electoralRecord)
++                .map(CedRegElecUpdateEntity::fromDomain)
++                .toList());
++    }
++
++    @Override
++    @Transactional(transactionManager = "artsEcTransactionManager")
++    public void saveRucs(List<CedRucUpdateRecord> records) {
++        if (records.isEmpty()) {
++            return;
++        }
++        cedRucRepository.saveAll(records.stream()
++                .map(CedRucUpdateEntity::fromDomain)
++                .toList());
++    }
++
++    @Override
++    @Transactional(transactionManager = "artsEcTransactionManager")
++    public void savePadrones(List<PadronUpdateRecord> records) {
++        if (records.isEmpty()) {
++            return;
++        }
++        padronRepository.saveAll(records.stream()
++                .map(PadronUpdateEntity::fromDomain)
++                .toList());
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/CedRegElecUpdateEntity.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/CedRegElecUpdateEntity.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/CedRegElecUpdateEntity.java
+@@ -0,0 +1,67 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.CedRegElecUpdateRecord;
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++import jakarta.persistence.Table;
++
++@Entity
++@Table(name = "CO_REL_CER", schema = "dbo", catalog = "VotacionCNE")
++public class CedRegElecUpdateEntity {
++
++    @Id
++    @Column(name = "ID_CPR", nullable = false)
++    private Long id;
++
++    @Column(name = "PROVINCIA", length = 50)
++    private String province;
++
++    @Column(name = "CANTON", length = 50)
++    private String canton;
++
++    @Column(name = "PARROQUIA", length = 30)
++    private String parish;
++
++    @Column(name = "ZONA", length = 40)
++    private String zone;
++
++    @Column(name = "RECINTO", length = 255)
++    private String precinct;
++
++    @Column(name = "MESA", length = 250)
++    private String table;
++
++    @Column(name = "JUNTA", length = 5)
++    private String board;
++
++    @Column(name = "CIRCUNSCRIPCION", length = 75)
++    private String circumscription;
++
++    @Column(name = "FUNCION", length = 800)
++    private String function;
++
++    @Column(name = "GENERO", length = 10)
++    private String gender;
++
++    protected CedRegElecUpdateEntity() {
++    }
++
++    private CedRegElecUpdateEntity(CedRegElecUpdateRecord record) {
++        this.id = record.id();
++        this.province = record.province();
++        this.canton = record.canton();
++        this.parish = record.parish();
++        this.zone = record.zone();
++        this.precinct = record.precinct();
++        this.table = record.table();
++        this.board = record.board();
++        this.circumscription = record.circumscription();
++        this.function = record.function();
++        this.gender = record.gender();
++    }
++
++    public static CedRegElecUpdateEntity fromDomain(CedRegElecUpdateRecord record) {
++        return new CedRegElecUpdateEntity(record);
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/CedRucUpdateEntity.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/CedRucUpdateEntity.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/CedRucUpdateEntity.java
+@@ -0,0 +1,49 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.CedRucUpdateRecord;
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++import jakarta.persistence.Table;
++import org.hibernate.annotations.DynamicUpdate;
++
++@Entity
++@DynamicUpdate
++@Table(name = "CO_CPR_CER", schema = "dbo")
++public class CedRucUpdateEntity {
++
++    @Id
++    @Column(name = "ID_CPR", nullable = false)
++    private Long id;
++
++    @Column(name = "CD_CPR", length = 20)
++    private String code;
++
++    @Column(name = "TY_CPR", length = 1)
++    private String type;
++
++    @Column(name = "RG_INT", nullable = false)
++    private Integer registryInternal;
++
++    @Column(name = "NOMBRE", length = 250)
++    private String name;
++
++    @Column(name = "GENERO", length = 10)
++    private String gender;
++
++    protected CedRucUpdateEntity() {
++    }
++
++    private CedRucUpdateEntity(CedRucUpdateRecord record) {
++        this.id = record.id();
++        this.code = record.code();
++        this.type = record.type();
++        this.registryInternal = record.registryInternal();
++        this.name = record.name();
++        this.gender = record.gender();
++    }
++
++    public static CedRucUpdateEntity fromDomain(CedRucUpdateRecord record) {
++        return new CedRucUpdateEntity(record);
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/PadronUpdateEntity.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/PadronUpdateEntity.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/PadronUpdateEntity.java
+@@ -0,0 +1,51 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.PadronUpdateRecord;
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++import jakarta.persistence.Table;
++
++@Entity
++@Table(name = "CO_PAD_CER", schema = "dbo")
++public class PadronUpdateEntity {
++
++    @Id
++    @Column(name = "ID_CPR", nullable = false)
++    private Integer id;
++
++    @Column(name = "CD_CPR", length = 20)
++    private String code;
++
++    @Column(name = "RECINTO", length = 80)
++    private String precinct;
++
++    @Column(name = "MESA", length = 4)
++    private String table;
++
++    @Column(name = "JUNTA", length = 1)
++    private String board;
++
++    @Column(name = "FUNCION", length = 75)
++    private String function;
++
++    @Column(name = "DIRECCION", length = 250)
++    private String address;
++
++    protected PadronUpdateEntity() {
++    }
++
++    private PadronUpdateEntity(PadronUpdateRecord record) {
++        this.id = record.id();
++        this.code = record.code();
++        this.precinct = record.precinct();
++        this.table = record.table();
++        this.board = record.board();
++        this.function = record.function();
++        this.address = record.address();
++    }
++
++    public static PadronUpdateEntity fromDomain(PadronUpdateRecord record) {
++        return new PadronUpdateEntity(record);
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/CedRegElecUpdateJpaRepository.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/CedRegElecUpdateJpaRepository.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/CedRegElecUpdateJpaRepository.java
+@@ -0,0 +1,7 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository;
++
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.CedRegElecUpdateEntity;
++import org.springframework.data.jpa.repository.JpaRepository;
++
++public interface CedRegElecUpdateJpaRepository extends JpaRepository<CedRegElecUpdateEntity, Long> {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/CedRucUpdateJpaRepository.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/CedRucUpdateJpaRepository.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/CedRucUpdateJpaRepository.java
+@@ -0,0 +1,7 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository;
++
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.CedRucUpdateEntity;
++import org.springframework.data.jpa.repository.JpaRepository;
++
++public interface CedRucUpdateJpaRepository extends JpaRepository<CedRucUpdateEntity, Long> {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/PadronUpdateJpaRepository.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/PadronUpdateJpaRepository.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/PadronUpdateJpaRepository.java
+@@ -0,0 +1,7 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository;
++
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.PadronUpdateEntity;
++import org.springframework.data.jpa.repository.JpaRepository;
++
++public interface PadronUpdateJpaRepository extends JpaRepository<PadronUpdateEntity, Integer> {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/UpdateCedPadRucErrorFirestoreAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/UpdateCedPadRucErrorFirestoreAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/UpdateCedPadRucErrorFirestoreAdapter.java
+@@ -0,0 +1,59 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.firestore;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.UpdateCedPadRucErrorRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.UpdateCedPadRucErrorTrackerPort;
++import com.google.cloud.Timestamp;
++import com.google.cloud.firestore.Firestore;
++import org.springframework.stereotype.Component;
++
++import java.util.LinkedHashMap;
++import java.util.Map;
++import java.util.concurrent.ExecutionException;
++
++@Component
++public class UpdateCedPadRucErrorFirestoreAdapter implements UpdateCedPadRucErrorTrackerPort {
++
++    private static final String COLLECTION = "update_ced_pad_ruc_error";
++
++    private final Firestore firestore;
++
++    public UpdateCedPadRucErrorFirestoreAdapter(Firestore firestore) {
++        this.firestore = firestore;
++    }
++
++    @Override
++    public void recordError(UpdateCedPadRucErrorRecord errorRecord) {
++        Map<String, Object> document = new LinkedHashMap<>();
++        document.put("processId", errorRecord.processId());
++        document.put("executionDate", Timestamp.ofTimeSecondsAndNanos(
++                errorRecord.executionDate().getEpochSecond(),
++                errorRecord.executionDate().getNano()));
++        document.put("fileName", errorRecord.fileName());
++        document.put("bucket", errorRecord.bucket());
++        document.put("sourceObjectName", errorRecord.sourceObjectName());
++        document.put("errorObjectName", errorRecord.errorObjectName());
++        document.put("errorType", valueOrDefault(errorRecord.errorType()));
++        document.put("errorMessage", valueOrDefault(errorRecord.errorMessage()));
++        document.put("stackTrace", valueOrDefault(errorRecord.stackTrace()));
++        document.put("processingStage", errorRecord.processingStage().name());
++        document.put("createdAt", Timestamp.ofTimeSecondsAndNanos(
++                errorRecord.createdAt().getEpochSecond(),
++                errorRecord.createdAt().getNano()));
++
++        try {
++            firestore.collection(COLLECTION)
++                    .document(errorRecord.processId())
++                    .set(document)
++                    .get();
++        } catch (InterruptedException e) {
++            Thread.currentThread().interrupt();
++            throw new IllegalStateException("Registro Firestore UpdateCedPadRuc interrumpido", e);
++        } catch (ExecutionException e) {
++            throw new IllegalStateException("Error registrando Firestore UpdateCedPadRuc", e.getCause());
++        }
++    }
++
++    private String valueOrDefault(String value) {
++        return value == null ? "" : value;
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsUpdateCedPadRucStorageAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsUpdateCedPadRucStorageAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsUpdateCedPadRucStorageAdapter.java
+@@ -0,0 +1,140 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.storage;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.UpdateCedPadRucFile;
++import com.elrosado.cersuitecloudlocalcore.domain.model.UpdateCedPadRucFileType;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.UpdateCedPadRucStoragePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.LegacyUpdateCedPadRucProperties;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.UpdateCedPadRucProperties;
++import com.google.cloud.storage.Blob;
++import com.google.cloud.storage.BlobId;
++import com.google.cloud.storage.BlobInfo;
++import com.google.cloud.storage.Storage;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Component;
++
++import java.io.BufferedReader;
++import java.io.InputStreamReader;
++import java.nio.channels.Channels;
++import java.nio.charset.StandardCharsets;
++import java.util.Comparator;
++import java.util.List;
++import java.util.Optional;
++import java.util.stream.StreamSupport;
++
++@Component
++public class GcsUpdateCedPadRucStorageAdapter implements UpdateCedPadRucStoragePort {
++
++    private static final Logger log = LoggerFactory.getLogger(GcsUpdateCedPadRucStorageAdapter.class);
++
++    private final Storage storage;
++    private final LegacyUpdateCedPadRucProperties legacyProperties;
++    private final UpdateCedPadRucProperties properties;
++
++    public GcsUpdateCedPadRucStorageAdapter(
++            Storage storage,
++            LegacyUpdateCedPadRucProperties legacyProperties,
++            UpdateCedPadRucProperties properties) {
++        this.storage = storage;
++        this.legacyProperties = legacyProperties;
++        this.properties = properties;
++    }
++
++    @Override
++    public List<UpdateCedPadRucFile> listPendingFiles() {
++        GcsObjectReference input = GcsObjectReference.fromUri(legacyProperties.inputUri());
++        String prefix = input.prefixWithSlash();
++
++        return StreamSupport.stream(storage.list(input.bucket(), Storage.BlobListOption.prefix(prefix))
++                        .iterateAll()
++                        .spliterator(), false)
++                .filter(blob -> !blob.isDirectory())
++                .flatMap(blob -> toPendingFile(input, prefix, blob).stream())
++                .sorted(Comparator
++                        .comparing((UpdateCedPadRucFile file) -> file.type().legacyOrder())
++                        .thenComparingInt(UpdateCedPadRucFile::sequenceNumber)
++                        .thenComparing(UpdateCedPadRucFile::fileName))
++                .toList();
++    }
++
++    @Override
++    public BufferedReader openReader(UpdateCedPadRucFile file) {
++        Blob blob = storage.get(BlobId.of(file.location().bucket(), file.location().objectName()));
++        if (blob == null) {
++            throw new IllegalArgumentException("Objeto GCS no encontrado: " + file.location().toUri());
++        }
++        return new BufferedReader(new InputStreamReader(
++                Channels.newInputStream(blob.reader()),
++                StandardCharsets.UTF_8));
++    }
++
++    @Override
++    public GcsObjectReference moveToBackup(UpdateCedPadRucFile file) {
++        return move(file, GcsObjectReference.fromUri(legacyProperties.backupUri()));
++    }
++
++    @Override
++    public GcsObjectReference moveToError(UpdateCedPadRucFile file) {
++        return move(file, GcsObjectReference.fromUri(properties.gcs().errorUri()));
++    }
++
++    private Optional<UpdateCedPadRucFile> toPendingFile(
++            GcsObjectReference input,
++            String prefix,
++            Blob blob) {
++        String objectName = blob.getName();
++        if (!objectName.startsWith(prefix)) {
++            return Optional.empty();
++        }
++
++        String relativeName = objectName.substring(prefix.length());
++        if (relativeName.isBlank() || relativeName.contains("/")) {
++            return Optional.empty();
++        }
++
++        return UpdateCedPadRucFileType.fromFileName(relativeName)
++                .map(type -> new UpdateCedPadRucFile(
++                        new GcsObjectReference(input.bucket(), objectName),
++                        relativeName,
++                        type,
++                        sequenceNumber(relativeName)
++                ));
++    }
++
++    private int sequenceNumber(String fileName) {
++        if (fileName.length() < 7) {
++            return Integer.MAX_VALUE;
++        }
++        try {
++            return Integer.parseInt(fileName.substring(3, 7));
++        } catch (NumberFormatException e) {
++            log.atWarn()
++                    .setMessage("Secuencia UpdateCedPadRuc invalida; se procesara al final del tipo")
++                    .addKeyValue("fileName", fileName)
++                    .log();
++            return Integer.MAX_VALUE;
++        }
++    }
++
++    private GcsObjectReference move(UpdateCedPadRucFile file, GcsObjectReference targetFolder) {
++        GcsObjectReference target = targetFolder.resolve(file.fileName());
++        BlobId sourceId = BlobId.of(file.location().bucket(), file.location().objectName());
++        BlobId targetId = BlobId.of(target.bucket(), target.objectName());
++
++        storage.delete(targetId);
++        storage.copy(Storage.CopyRequest.newBuilder()
++                .setSource(sourceId)
++                .setTarget(BlobInfo.newBuilder(targetId).build())
++                .build()).getResult();
++
++        boolean deleted = storage.delete(sourceId);
++        if (!deleted) {
++            log.atWarn()
++                    .setMessage("Objeto fuente no eliminado luego del movimiento GCS")
++                    .addKeyValue("sourceObject", file.location().toUri())
++                    .log();
++        }
++        return target;
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LegacyUpdateCedPadRucProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LegacyUpdateCedPadRucProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LegacyUpdateCedPadRucProperties.java
+@@ -0,0 +1,47 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.boot.context.properties.ConfigurationProperties;
++
++@ConfigurationProperties(prefix = "update-ced-pad-ruc")
++public record LegacyUpdateCedPadRucProperties(
++        LegacyRoute in,
++        LegacyRoute out,
++        long sleeptime
++) {
++
++    public LegacyUpdateCedPadRucProperties {
++        if (in == null) {
++            in = new LegacyRoute(new LegacyFolder(""));
++        }
++        if (out == null) {
++            out = new LegacyRoute(new LegacyFolder(""));
++        }
++        if (sleeptime <= 0) {
++            sleeptime = 30_000L;
++        }
++    }
++
++    public String inputUri() {
++        return in.folder().path();
++    }
++
++    public String backupUri() {
++        return out.folder().path();
++    }
++
++    public record LegacyRoute(LegacyFolder folder) {
++        public LegacyRoute {
++            if (folder == null) {
++                folder = new LegacyFolder("");
++            }
++        }
++    }
++
++    public record LegacyFolder(String path) {
++        public LegacyFolder {
++            if (path == null) {
++                path = "";
++            }
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java
+@@ -9,6 +9,10 @@
+  */
+ @Configuration
+ @EnableScheduling
+-@EnableConfigurationProperties(ReproProperties.class)
++@EnableConfigurationProperties({
++        ReproProperties.class,
++        UpdateCedPadRucProperties.class,
++        LegacyUpdateCedPadRucProperties.class
++})
+ public class SchedulingConfig {
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/UpdateCedPadRucProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/UpdateCedPadRucProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/UpdateCedPadRucProperties.java
+@@ -0,0 +1,23 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.boot.context.properties.ConfigurationProperties;
++
++@ConfigurationProperties(prefix = "app.update-ced-pad-ruc")
++public record UpdateCedPadRucProperties(
++        boolean enabled,
++        int batchSize,
++        GcsProperties gcs
++) {
++
++    public UpdateCedPadRucProperties {
++        if (batchSize <= 0) {
++            batchSize = 500;
++        }
++        if (gcs == null) {
++            gcs = new GcsProperties("");
++        }
++    }
++
++    public record GcsProperties(String errorUri) {
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/UpdateCedPadRucParser.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/UpdateCedPadRucParser.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/UpdateCedPadRucParser.java
+@@ -0,0 +1,91 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.CedRegElecUpdateRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.model.CedRucUpdateRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.model.CedulaUpdateRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.model.PadronUpdateRecord;
++import org.springframework.stereotype.Service;
++
++@Service
++public class UpdateCedPadRucParser {
++
++    private static final String PIPE_REGEX = "\\|";
++
++    public CedulaUpdateRecord parseCedula(String line, long lineNumber) {
++        String[] fields = split(line, 11, lineNumber);
++        Long id = parseLong(fields[0], lineNumber);
++        String gender = fields[7];
++
++        return new CedulaUpdateRecord(
++                new CedRucUpdateRecord(id, fields[0], "C", 0, fields[1], gender),
++                new CedRegElecUpdateRecord(
++                        id,
++                        truncate(fields[2], 25),
++                        truncate(fields[4], 25),
++                        truncate(fields[5], 30),
++                        truncate(fields[6], 40),
++                        truncate(fields[8], 80),
++                        "",
++                        truncate(fields[10], 5),
++                        truncate(fields[3], 75),
++                        "",
++                        gender
++                )
++        );
++    }
++
++    public PadronUpdateRecord parsePadron(String line, long lineNumber) {
++        String[] fields = split(line, 6, lineNumber);
++        Integer id = parseInteger(fields[0], lineNumber);
++        return new PadronUpdateRecord(
++                id,
++                fields[0],
++                fields[2],
++                fields[4],
++                fields[5],
++                fields[1],
++                fields[3]
++        );
++    }
++
++    public CedRucUpdateRecord parseRuc(String line, long lineNumber) {
++        String[] fields = split(line, 2, lineNumber);
++        Long id = parseLong(fields[0], lineNumber);
++        return new CedRucUpdateRecord(id, fields[0], "R", 0, fields[1], "");
++    }
++
++    private String[] split(String line, int expectedFields, long lineNumber) {
++        if (line == null) {
++            throw new IllegalArgumentException("Line " + lineNumber + " is null");
++        }
++        String[] fields = line.split(PIPE_REGEX, -1);
++        if (fields.length < expectedFields) {
++            throw new IllegalArgumentException(
++                    "Line " + lineNumber + " has " + fields.length + " fields; expected at least " + expectedFields);
++        }
++        return fields;
++    }
++
++    private Long parseLong(String value, long lineNumber) {
++        try {
++            return Long.parseLong(value);
++        } catch (NumberFormatException e) {
++            throw new IllegalArgumentException("Line " + lineNumber + " has invalid long id: " + value, e);
++        }
++    }
++
++    private Integer parseInteger(String value, long lineNumber) {
++        try {
++            return Integer.parseInt(value);
++        } catch (NumberFormatException e) {
++            throw new IllegalArgumentException("Line " + lineNumber + " has invalid integer id: " + value, e);
++        }
++    }
++
++    private String truncate(String value, int maxLength) {
++        if (value == null || value.length() <= maxLength) {
++            return value;
++        }
++        return value.substring(0, maxLength);
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/UpdateCedPadRucService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/UpdateCedPadRucService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/UpdateCedPadRucService.java
+@@ -0,0 +1,379 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.exception.UpdateCedPadRucProcessingException;
++import com.elrosado.cersuitecloudlocalcore.domain.model.CedRucUpdateRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.model.CedulaUpdateRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.PadronUpdateRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.model.UpdateCedPadRucErrorRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.model.UpdateCedPadRucFile;
++import com.elrosado.cersuitecloudlocalcore.domain.model.UpdateCedPadRucFileType;
++import com.elrosado.cersuitecloudlocalcore.domain.model.UpdateCedPadRucProcessingResult;
++import com.elrosado.cersuitecloudlocalcore.domain.model.UpdateCedPadRucProcessingStage;
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.UpdateCedPadRucUseCase;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.UpdateCedPadRucErrorTrackerPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.UpdateCedPadRucPersistencePort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.UpdateCedPadRucStoragePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.UpdateCedPadRucProperties;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Service;
++
++import java.io.BufferedReader;
++import java.io.IOException;
++import java.time.Instant;
++import java.util.ArrayList;
++import java.util.List;
++import java.util.UUID;
++
++@Service
++public class UpdateCedPadRucService implements UpdateCedPadRucUseCase {
++
++    private static final Logger log = LoggerFactory.getLogger(UpdateCedPadRucService.class);
++    private static final int MAX_ATTEMPTS = 3;
++    private static final int STACKTRACE_MAX_LINES = 8;
++
++    private final UpdateCedPadRucStoragePort storagePort;
++    private final UpdateCedPadRucPersistencePort persistencePort;
++    private final UpdateCedPadRucErrorTrackerPort errorTrackerPort;
++    private final UpdateCedPadRucParser parser;
++    private final UpdateCedPadRucProperties properties;
++
++    public UpdateCedPadRucService(
++            UpdateCedPadRucStoragePort storagePort,
++            UpdateCedPadRucPersistencePort persistencePort,
++            UpdateCedPadRucErrorTrackerPort errorTrackerPort,
++            UpdateCedPadRucParser parser,
++            UpdateCedPadRucProperties properties) {
++        this.storagePort = storagePort;
++        this.persistencePort = persistencePort;
++        this.errorTrackerPort = errorTrackerPort;
++        this.parser = parser;
++        this.properties = properties;
++    }
++
++    @Override
++    public void processPendingFiles() {
++        if (!properties.enabled()) {
++            log.atDebug().setMessage("UpdateCedPadRuc deshabilitado").log();
++            return;
++        }
++
++        List<UpdateCedPadRucFile> pendingFiles;
++        try {
++            pendingFiles = storagePort.listPendingFiles();
++        } catch (RuntimeException e) {
++            throw new UpdateCedPadRucProcessingException(
++                    UpdateCedPadRucProcessingStage.GCS_LIST,
++                    "Error listando archivos UpdateCedPadRuc en GCS",
++                    e);
++        }
++
++        if (pendingFiles.isEmpty()) {
++            log.atDebug().setMessage("Sin archivos UpdateCedPadRuc pendientes").log();
++            return;
++        }
++
++        log.atInfo()
++                .setMessage("Archivos UpdateCedPadRuc pendientes detectados")
++                .addKeyValue("count", pendingFiles.size())
++                .log();
++
++        pendingFiles.forEach(this::processWithRetry);
++    }
++
++    private void processWithRetry(UpdateCedPadRucFile file) {
++        String processId = UUID.randomUUID().toString();
++        Instant executionDate = Instant.now();
++
++        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
++            try {
++                UpdateCedPadRucProcessingResult result = processFile(file);
++                GcsObjectReference backupObject = moveToBackup(file);
++
++                log.atInfo()
++                        .setMessage("Archivo UpdateCedPadRuc procesado")
++                        .addKeyValue("processId", processId)
++                        .addKeyValue("fileName", file.fileName())
++                        .addKeyValue("fileType", result.fileType())
++                        .addKeyValue("recordsProcessed", result.recordsProcessed())
++                        .addKeyValue("backupObject", backupObject.toUri())
++                        .log();
++                return;
++
++            } catch (Exception e) {
++                UpdateCedPadRucProcessingStage stage = resolveStage(e);
++                if (attempt < MAX_ATTEMPTS) {
++                    log.atWarn()
++                            .setMessage("Error procesando UpdateCedPadRuc; se reintentara")
++                            .addKeyValue("processId", processId)
++                            .addKeyValue("fileName", file.fileName())
++                            .addKeyValue("attempt", attempt)
++                            .addKeyValue("stage", stage)
++                            .setCause(e)
++                            .log();
++                    continue;
++                }
++
++                handleFinalFailure(file, processId, executionDate, stage, e);
++            }
++        }
++    }
++
++    private UpdateCedPadRucProcessingResult processFile(UpdateCedPadRucFile file) {
++        return switch (file.type()) {
++            case CED -> processCedulaFile(file);
++            case PAD -> processPadronFile(file);
++            case RUC -> processRucFile(file);
++        };
++    }
++
++    private UpdateCedPadRucProcessingResult processCedulaFile(UpdateCedPadRucFile file) {
++        List<CedulaUpdateRecord> batch = new ArrayList<>(properties.batchSize());
++        long processed = 0;
++        long lineNumber = 0;
++
++        try (BufferedReader reader = openReader(file)) {
++            String line;
++            while ((line = reader.readLine()) != null) {
++                lineNumber++;
++                if (lineNumber == 1) {
++                    continue;
++                }
++                batch.add(parseCedula(line, lineNumber));
++                if (batch.size() >= properties.batchSize()) {
++                    saveCedulas(batch);
++                    processed += batch.size();
++                    batch.clear();
++                }
++            }
++            if (!batch.isEmpty()) {
++                saveCedulas(batch);
++                processed += batch.size();
++            }
++            return new UpdateCedPadRucProcessingResult(UpdateCedPadRucFileType.CED, processed);
++        } catch (IOException e) {
++            throw new UpdateCedPadRucProcessingException(
++                    UpdateCedPadRucProcessingStage.GCS_READ,
++                    "Error leyendo archivo CED desde GCS",
++                    e);
++        }
++    }
++
++    private UpdateCedPadRucProcessingResult processPadronFile(UpdateCedPadRucFile file) {
++        List<PadronUpdateRecord> batch = new ArrayList<>(properties.batchSize());
++        long processed = 0;
++        long lineNumber = 0;
++
++        try (BufferedReader reader = openReader(file)) {
++            String line;
++            while ((line = reader.readLine()) != null) {
++                lineNumber++;
++                batch.add(parsePadron(line, lineNumber));
++                if (batch.size() >= properties.batchSize()) {
++                    savePadrones(batch);
++                    processed += batch.size();
++                    batch.clear();
++                }
++            }
++            if (!batch.isEmpty()) {
++                savePadrones(batch);
++                processed += batch.size();
++            }
++            return new UpdateCedPadRucProcessingResult(UpdateCedPadRucFileType.PAD, processed);
++        } catch (IOException e) {
++            throw new UpdateCedPadRucProcessingException(
++                    UpdateCedPadRucProcessingStage.GCS_READ,
++                    "Error leyendo archivo PAD desde GCS",
++                    e);
++        }
++    }
++
++    private UpdateCedPadRucProcessingResult processRucFile(UpdateCedPadRucFile file) {
++        List<CedRucUpdateRecord> batch = new ArrayList<>(properties.batchSize());
++        long processed = 0;
++        long lineNumber = 0;
++
++        try (BufferedReader reader = openReader(file)) {
++            String line;
++            while ((line = reader.readLine()) != null) {
++                lineNumber++;
++                batch.add(parseRuc(line, lineNumber));
++                if (batch.size() >= properties.batchSize()) {
++                    saveRucs(batch);
++                    processed += batch.size();
++                    batch.clear();
++                }
++            }
++            if (!batch.isEmpty()) {
++                saveRucs(batch);
++                processed += batch.size();
++            }
++            return new UpdateCedPadRucProcessingResult(UpdateCedPadRucFileType.RUC, processed);
++        } catch (IOException e) {
++            throw new UpdateCedPadRucProcessingException(
++                    UpdateCedPadRucProcessingStage.GCS_READ,
++                    "Error leyendo archivo RUC desde GCS",
++                    e);
++        }
++    }
++
++    private BufferedReader openReader(UpdateCedPadRucFile file) {
++        try {
++            return storagePort.openReader(file);
++        } catch (RuntimeException e) {
++            throw new UpdateCedPadRucProcessingException(
++                    UpdateCedPadRucProcessingStage.GCS_READ,
++                    "Error abriendo archivo UpdateCedPadRuc desde GCS",
++                    e);
++        }
++    }
++
++    private CedulaUpdateRecord parseCedula(String line, long lineNumber) {
++        try {
++            return parser.parseCedula(line, lineNumber);
++        } catch (RuntimeException e) {
++            throw new UpdateCedPadRucProcessingException(
++                    UpdateCedPadRucProcessingStage.PARSING,
++                    "Error parseando linea CED " + lineNumber,
++                    e);
++        }
++    }
++
++    private PadronUpdateRecord parsePadron(String line, long lineNumber) {
++        try {
++            return parser.parsePadron(line, lineNumber);
++        } catch (RuntimeException e) {
++            throw new UpdateCedPadRucProcessingException(
++                    UpdateCedPadRucProcessingStage.PARSING,
++                    "Error parseando linea PAD " + lineNumber,
++                    e);
++        }
++    }
++
++    private CedRucUpdateRecord parseRuc(String line, long lineNumber) {
++        try {
++            return parser.parseRuc(line, lineNumber);
++        } catch (RuntimeException e) {
++            throw new UpdateCedPadRucProcessingException(
++                    UpdateCedPadRucProcessingStage.PARSING,
++                    "Error parseando linea RUC " + lineNumber,
++                    e);
++        }
++    }
++
++    private void saveCedulas(List<CedulaUpdateRecord> records) {
++        try {
++            persistencePort.saveCedulas(List.copyOf(records));
++        } catch (RuntimeException e) {
++            throw new UpdateCedPadRucProcessingException(
++                    UpdateCedPadRucProcessingStage.DATABASE_WRITE,
++                    "Error persistiendo registros CED",
++                    e);
++        }
++    }
++
++    private void savePadrones(List<PadronUpdateRecord> records) {
++        try {
++            persistencePort.savePadrones(List.copyOf(records));
++        } catch (RuntimeException e) {
++            throw new UpdateCedPadRucProcessingException(
++                    UpdateCedPadRucProcessingStage.DATABASE_WRITE,
++                    "Error persistiendo registros PAD",
++                    e);
++        }
++    }
++
++    private void saveRucs(List<CedRucUpdateRecord> records) {
++        try {
++            persistencePort.saveRucs(List.copyOf(records));
++        } catch (RuntimeException e) {
++            throw new UpdateCedPadRucProcessingException(
++                    UpdateCedPadRucProcessingStage.DATABASE_WRITE,
++                    "Error persistiendo registros RUC",
++                    e);
++        }
++    }
++
++    private GcsObjectReference moveToBackup(UpdateCedPadRucFile file) {
++        try {
++            return storagePort.moveToBackup(file);
++        } catch (RuntimeException e) {
++            throw new UpdateCedPadRucProcessingException(
++                    UpdateCedPadRucProcessingStage.GCS_MOVE_TO_BACKUP,
++                    "Error moviendo archivo procesado a backup GCS",
++                    e);
++        }
++    }
++
++    private void handleFinalFailure(
++            UpdateCedPadRucFile file,
++            String processId,
++            Instant executionDate,
++            UpdateCedPadRucProcessingStage stage,
++            Exception error) {
++        GcsObjectReference errorObject;
++        try {
++            errorObject = storagePort.moveToError(file);
++        } catch (RuntimeException moveError) {
++            log.atError()
++                    .setMessage("No fue posible mover archivo UpdateCedPadRuc al bucket de error")
++                    .addKeyValue("processId", processId)
++                    .addKeyValue("fileName", file.fileName())
++                    .addKeyValue("stage", UpdateCedPadRucProcessingStage.GCS_MOVE_TO_ERROR)
++                    .setCause(moveError)
++                    .log();
++            return;
++        }
++
++        try {
++            errorTrackerPort.recordError(new UpdateCedPadRucErrorRecord(
++                    processId,
++                    executionDate,
++                    file.fileName(),
++                    file.location().bucket(),
++                    file.location().objectName(),
++                    errorObject.objectName(),
++                    error.getClass().getSimpleName(),
++                    error.getMessage(),
++                    summarizeStackTrace(error),
++                    stage,
++                    Instant.now()
++            ));
++        } catch (RuntimeException trackingError) {
++            log.atError()
++                    .setMessage("Archivo UpdateCedPadRuc movido a error sin registro Firestore")
++                    .addKeyValue("processId", processId)
++                    .addKeyValue("fileName", file.fileName())
++                    .addKeyValue("errorObject", errorObject.toUri())
++                    .setCause(trackingError)
++                    .log();
++        }
++
++        log.atError()
++                .setMessage("Archivo UpdateCedPadRuc enviado a error")
++                .addKeyValue("processId", processId)
++                .addKeyValue("fileName", file.fileName())
++                .addKeyValue("stage", stage)
++                .addKeyValue("errorObject", errorObject.toUri())
++                .setCause(error)
++                .log();
++    }
++
++    private UpdateCedPadRucProcessingStage resolveStage(Exception error) {
++        if (error instanceof UpdateCedPadRucProcessingException processingException) {
++            return processingException.stage();
++        }
++        return UpdateCedPadRucProcessingStage.UNKNOWN;
++    }
++
++    private String summarizeStackTrace(Exception error) {
++        StringBuilder summary = new StringBuilder(error.toString());
++        StackTraceElement[] stackTrace = error.getStackTrace();
++        int max = Math.min(stackTrace.length, STACKTRACE_MAX_LINES);
++        for (int i = 0; i < max; i++) {
++            summary.append(System.lineSeparator()).append("at ").append(stackTrace[i]);
++        }
++        return summary.toString();
++    }
++}
+
+
+--- Diff for /src/main/resources/application-dev.yml ---
+--- a//src/main/resources/application-dev.yml
++++ b//src/main/resources/application-dev.yml
+@@ -44,6 +44,11 @@
+         - com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.central
+ 
+ app:
++  update-ced-pad-ruc:
++    enabled: ${UPDATE_CED_PAD_RUC_ENABLED:true}
++    batch-size: ${UPDATE_CED_PAD_RUC_BATCH_SIZE:500}
++    gcs:
++      error-uri: ${UPDATE_CED_PAD_RUC_ERROR_URI}
+   gcp:
+     pubsub:
+       topic-distributor: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR}
+@@ -53,4 +58,4 @@
+   repro:
+     enabled: true
+     polling-interval-ms: 30000
+-    batch-size: 10+    batch-size: 10
+
+
+--- Diff for /src/main/resources/application-local.yml ---
+--- a//src/main/resources/application-local.yml
++++ b//src/main/resources/application-local.yml
+@@ -69,6 +69,11 @@
+         - com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.central
+ 
+ app:
++  update-ced-pad-ruc:
++    enabled: false
++    batch-size: 500
++    gcs:
++      error-uri: gs://gcs-cer-suite-core-files/eyes/arsap/in/cedpadruc-error
+   gcp:
+     pubsub:
+       topic-distributor: retail.local.distributor.request.v1
+
+
+--- Diff for /src/main/resources/application-prod.yml ---
+--- a//src/main/resources/application-prod.yml
++++ b//src/main/resources/application-prod.yml
+@@ -50,6 +50,11 @@
+         - com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.central
+ 
+ app:
++  update-ced-pad-ruc:
++    enabled: ${UPDATE_CED_PAD_RUC_ENABLED:true}
++    batch-size: ${UPDATE_CED_PAD_RUC_BATCH_SIZE:500}
++    gcs:
++      error-uri: ${UPDATE_CED_PAD_RUC_ERROR_URI}
+   gcp:
+     pubsub:
+       topic-distributor: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR}
+
+
+--- Diff for /src/main/resources/application.yml ---
+--- a//src/main/resources/application.yml
++++ b//src/main/resources/application.yml
+@@ -42,3 +42,10 @@
+     health:
+       probes:
+         enabled: true
++
++app:
++  update-ced-pad-ruc:
++    enabled: false
++    batch-size: 500
++    gcs:
++      error-uri: ""
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/UpdateCedPadRucSchedulerAdapterTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/UpdateCedPadRucSchedulerAdapterTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/UpdateCedPadRucSchedulerAdapterTest.java
+@@ -0,0 +1,37 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.scheduler;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.UpdateCedPadRucUseCase;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.InjectMocks;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import static org.mockito.Mockito.doThrow;
++import static org.mockito.Mockito.verify;
++
++@ExtendWith(MockitoExtension.class)
++class UpdateCedPadRucSchedulerAdapterTest {
++
++    @Mock
++    UpdateCedPadRucUseCase useCase;
++
++    @InjectMocks
++    UpdateCedPadRucSchedulerAdapter scheduler;
++
++    @Test
++    void poll_invocaUseCase() {
++        scheduler.poll();
++
++        verify(useCase).processPendingFiles();
++    }
++
++    @Test
++    void poll_errorUseCase_noPropagaExcepcion() {
++        doThrow(new IllegalStateException("GCS unavailable")).when(useCase).processPendingFiles();
++
++        scheduler.poll();
++
++        verify(useCase).processPendingFiles();
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/UpdateCedPadRucParserTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/UpdateCedPadRucParserTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/UpdateCedPadRucParserTest.java
+@@ -0,0 +1,66 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.CedRucUpdateRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.model.CedulaUpdateRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.model.PadronUpdateRecord;
++import org.junit.jupiter.api.Test;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertThrows;
++
++class UpdateCedPadRucParserTest {
++
++    private final UpdateCedPadRucParser parser = new UpdateCedPadRucParser();
++
++    @Test
++    void parseCedula_aplicaReglasLegacyYTruncamientos() {
++        String line = "1234567890|CLIENTE UNO|PROVINCIA-MUY-LARGA-1234567890|CIRCUNSCRIPCION-LARGA-1234567890"
++                + "|CANTON-MUY-LARGO-1234567890|PARROQUIA-MUY-LARGA-1234567890"
++                + "|ZONA-MUY-LARGA-1234567890-ABCDEFGHIJKLMNOPQRSTUVWXYZ|M|RECINTO-MUY-LARGO-1234567890-ABCDEFGHIJKLMNOPQRSTUVWXYZ"
++                + "|NO-USADO|JUNTA-LARGA";
++
++        CedulaUpdateRecord record = parser.parseCedula(line, 2);
++
++        assertEquals(1234567890L, record.customer().id());
++        assertEquals("C", record.customer().type());
++        assertEquals(0, record.customer().registryInternal());
++        assertEquals("CLIENTE UNO", record.customer().name());
++        assertEquals("M", record.customer().gender());
++        assertEquals(25, record.electoralRecord().province().length());
++        assertEquals(25, record.electoralRecord().canton().length());
++        assertEquals(30, record.electoralRecord().parish().length());
++        assertEquals(40, record.electoralRecord().zone().length());
++        assertEquals(5, record.electoralRecord().board().length());
++        assertEquals("", record.electoralRecord().table());
++        assertEquals("", record.electoralRecord().function());
++    }
++
++    @Test
++    void parsePadron_noOmitePrimeraLinea() {
++        PadronUpdateRecord record = parser.parsePadron("123|FUNCION|RECINTO|DIRECCION|MESA|J", 1);
++
++        assertEquals(123, record.id());
++        assertEquals("123", record.code());
++        assertEquals("FUNCION", record.function());
++        assertEquals("RECINTO", record.precinct());
++        assertEquals("DIRECCION", record.address());
++        assertEquals("MESA", record.table());
++        assertEquals("J", record.board());
++    }
++
++    @Test
++    void parseRuc_generaCedRucTipoR() {
++        CedRucUpdateRecord record = parser.parseRuc("1790012345001|EMPRESA UNO", 1);
++
++        assertEquals(1790012345001L, record.id());
++        assertEquals("1790012345001", record.code());
++        assertEquals("R", record.type());
++        assertEquals("EMPRESA UNO", record.name());
++        assertEquals("", record.gender());
++    }
++
++    @Test
++    void parseCedula_camposInsuficientes_lanzaExcepcion() {
++        assertThrows(IllegalArgumentException.class, () -> parser.parseCedula("1|NOMBRE", 5));
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/UpdateCedPadRucServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/UpdateCedPadRucServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/UpdateCedPadRucServiceTest.java
+@@ -0,0 +1,118 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.UpdateCedPadRucErrorRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.model.UpdateCedPadRucFile;
++import com.elrosado.cersuitecloudlocalcore.domain.model.UpdateCedPadRucFileType;
++import com.elrosado.cersuitecloudlocalcore.domain.model.UpdateCedPadRucProcessingStage;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.UpdateCedPadRucErrorTrackerPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.UpdateCedPadRucPersistencePort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.UpdateCedPadRucStoragePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.UpdateCedPadRucProperties;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.ArgumentCaptor;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.io.BufferedReader;
++import java.io.StringReader;
++import java.util.List;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.Mockito.*;
++
++@ExtendWith(MockitoExtension.class)
++class UpdateCedPadRucServiceTest {
++
++    @Mock
++    UpdateCedPadRucStoragePort storagePort;
++    @Mock
++    UpdateCedPadRucPersistencePort persistencePort;
++    @Mock
++    UpdateCedPadRucErrorTrackerPort errorTrackerPort;
++
++    UpdateCedPadRucService service;
++
++    @BeforeEach
++    void setUp() {
++        service = new UpdateCedPadRucService(
++                storagePort,
++                persistencePort,
++                errorTrackerPort,
++                new UpdateCedPadRucParser(),
++                new UpdateCedPadRucProperties(true, 2,
++                        new UpdateCedPadRucProperties.GcsProperties("gs://bucket/error"))
++        );
++    }
++
++    @Test
++    void processPendingFiles_cedExitoso_omiteCabeceraPersisteYMueveBackup() {
++        UpdateCedPadRucFile file = file("CED0001.txt", UpdateCedPadRucFileType.CED);
++        String content = "HEADER\n"
++                + "123|NOMBRE UNO|PROV|CIRC|CANTON|PARR|ZONA|M|RECINTO|X|J\n"
++                + "456|NOMBRE DOS|PROV|CIRC|CANTON|PARR|ZONA|F|RECINTO|X|K\n";
++
++        when(storagePort.listPendingFiles()).thenReturn(List.of(file));
++        when(storagePort.openReader(file)).thenReturn(reader(content));
++        when(storagePort.moveToBackup(file)).thenReturn(new GcsObjectReference("bucket", "bkp/CED0001.txt"));
++
++        service.processPendingFiles();
++
++        verify(persistencePort).saveCedulas(argThat(records -> records.size() == 2));
++        verify(storagePort).moveToBackup(file);
++        verify(storagePort, never()).moveToError(any());
++        verifyNoInteractions(errorTrackerPort);
++    }
++
++    @Test
++    void processPendingFiles_parseFallaTresVeces_mueveErrorYRegistraFirestore() {
++        UpdateCedPadRucFile file = file("RUC0001.txt", UpdateCedPadRucFileType.RUC);
++        when(storagePort.listPendingFiles()).thenReturn(List.of(file));
++        when(storagePort.openReader(file)).thenAnswer(invocation -> reader("BAD|EMPRESA\n"));
++        when(storagePort.moveToError(file)).thenReturn(new GcsObjectReference("bucket", "error/RUC0001.txt"));
++
++        service.processPendingFiles();
++
++        verify(storagePort, times(3)).openReader(file);
++        verify(storagePort, never()).moveToBackup(any());
++        verify(storagePort).moveToError(file);
++
++        ArgumentCaptor<UpdateCedPadRucErrorRecord> captor = ArgumentCaptor.forClass(UpdateCedPadRucErrorRecord.class);
++        verify(errorTrackerPort).recordError(captor.capture());
++        assertEquals("RUC0001.txt", captor.getValue().fileName());
++        assertEquals(UpdateCedPadRucProcessingStage.PARSING, captor.getValue().processingStage());
++        assertEquals("error/RUC0001.txt", captor.getValue().errorObjectName());
++    }
++
++    @Test
++    void processPendingFiles_deshabilitado_noConsultaStorage() {
++        service = new UpdateCedPadRucService(
++                storagePort,
++                persistencePort,
++                errorTrackerPort,
++                new UpdateCedPadRucParser(),
++                new UpdateCedPadRucProperties(false, 2,
++                        new UpdateCedPadRucProperties.GcsProperties("gs://bucket/error"))
++        );
++
++        service.processPendingFiles();
++
++        verifyNoInteractions(storagePort, persistencePort, errorTrackerPort);
++    }
++
++    private UpdateCedPadRucFile file(String fileName, UpdateCedPadRucFileType type) {
++        return new UpdateCedPadRucFile(
++                new GcsObjectReference("bucket", "in/" + fileName),
++                fileName,
++                type,
++                1
++        );
++    }
++
++    private BufferedReader reader(String content) {
++        return new BufferedReader(new StringReader(content));
++    }
++}
+
+

@@ -1,0 +1,515 @@
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/in/pubsub/DistributorRequestMessage.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/in/pubsub/DistributorRequestMessage.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/in/pubsub/DistributorRequestMessage.java
+@@ -0,0 +1,25 @@
++package com.elrosado.distributor_cloud.infrastructure.adapter.in.pubsub;
++
++import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
++
++/**
++ * Mensaje JSON que llega por la cola retail.local.distributor.request.v1.
++ * El ID del documento Firestore con el TLOG viaja en {@code transactionId}.
++ *
++ * <p>Ejemplo:
++ * <pre>{@code
++ * {
++ *   "transactionId": "9c949056-d9db-4165-a563-79105b2019f9",
++ *   "status": "XML_GENERATED",
++ *   "publishedAt": "2026-06-17T22:33:06.570808Z",
++ *   "storeId": "100"
++ * }
++ * }</pre>
++ */
++@JsonIgnoreProperties(ignoreUnknown = true)
++public record DistributorRequestMessage(
++        String transactionId,
++        String status,
++        String publishedAt,
++        String storeId
++) {}
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/in/pubsub/TlogMessageHandler.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/in/pubsub/TlogMessageHandler.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/in/pubsub/TlogMessageHandler.java
+@@ -5,6 +5,7 @@
+ import com.elrosado.distributor_cloud.domain.port.out.TlogDocumentPort;
+ import com.elrosado.distributor_cloud.infrastructure.adapter.out.tlog.TlogXmlParser;
+ import com.elrosado.jlib_pubsub.interfaces.IMessagePublisher;
++import com.fasterxml.jackson.databind.ObjectMapper;
+ import lombok.RequiredArgsConstructor;
+ import lombok.extern.slf4j.Slf4j;
+ import org.springframework.stereotype.Component;
+@@ -16,6 +17,9 @@
+  * Procesa mensajes de retail.local.distributor.request.v1-sub y, tras guardar correctamente,
+  * publica el transactionId en retail.local.distributor.processed.v1 para disparar la
+  * replicaciÃ³n central.
++ *
++ * <p>El mensaje de entrada es un JSON (ver {@link DistributorRequestMessage}); el ID del
++ * documento Firestore con el TLOG viaja en el campo {@code transactionId}.
+  */
+ @Component
+ @RequiredArgsConstructor
+@@ -23,17 +27,45 @@
+ public class TlogMessageHandler {
+ 
+     private static final String TOPIC_PROCESSED = "retail.local.distributor.processed.v1";
++    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+ 
+     private final TlogDocumentPort           tlogDocumentPort;
+     private final TlogXmlParser              tlogXmlParser;
+     private final TransactionProcessingService transactionProcessingService;
+     private final IMessagePublisher          messagePublisher;
+ 
+-    public CompletableFuture<Boolean> handle(String subscriptionId, String documentId) {
++    public CompletableFuture<Boolean> handle(String subscriptionId, String body) {
++        String documentId;
++        String storeCode;
++        try {
++            DistributorRequestMessage message = OBJECT_MAPPER.readValue(body, DistributorRequestMessage.class);
++            documentId = message != null ? message.transactionId() : null;
++            storeCode = message != null ? message.storeId() : null;
++        } catch (Exception e) {
++            // JSON invÃ¡lido: mensaje envenenado, reintentar no ayuda â ACK para descartar
++            log.atError()
++               .setMessage("Mensaje de request con JSON invÃ¡lido â ACK para descartar")
++               .addKeyValue("subscriptionId", subscriptionId)
++               .addKeyValue("body", body)
++               .setCause(e)
++               .log();
++            return CompletableFuture.completedFuture(true);
++        }
++
++        if (documentId == null || documentId.isBlank()) {
++            log.atError()
++               .setMessage("Mensaje de request sin transactionId â ACK para descartar")
++               .addKeyValue("subscriptionId", subscriptionId)
++               .addKeyValue("body", body)
++               .log();
++            return CompletableFuture.completedFuture(true);
++        }
++
+         log.atInfo()
+            .setMessage("Mensaje TLOG recibido")
+            .addKeyValue("subscriptionId", subscriptionId)
+            .addKeyValue("documentId", documentId)
++           .addKeyValue("storeCode", storeCode)
+            .log();
+ 
+         try {
+
+
+--- Diff for /src/test/java/com/elrosado/distributor_cloud/unit/CustomerAdapterTest.java ---
+--- a//src/test/java/com/elrosado/distributor_cloud/unit/CustomerAdapterTest.java
++++ b//src/test/java/com/elrosado/distributor_cloud/unit/CustomerAdapterTest.java
+@@ -80,7 +80,7 @@
+ 
+     private InvoiceData invoiceData(String id, String type, String name, String address, String phone) {
+         InvoiceData inv = new InvoiceData();
+-        inv.setIdentificacionCustomer(id);
++        inv.setCustomerId(id);
+         inv.setCustomerType(type);
+         inv.setNameCustomer(name);
+         inv.setCustomerDireccion(address);
+
+
+--- Diff for /src/test/java/com/elrosado/distributor_cloud/unit/TlogMessageHandlerTest.java ---
+--- a//src/test/java/com/elrosado/distributor_cloud/unit/TlogMessageHandlerTest.java
++++ b//src/test/java/com/elrosado/distributor_cloud/unit/TlogMessageHandlerTest.java
+@@ -34,6 +34,10 @@
+     private static final String SUBSCRIPTION = "retail.local.distributor.request.v1-sub";
+     private static final String DOC_ID       = "doc-12345";
+     private static final String XML_CONTENT  = "<Transaction/>";
++    // El mensaje de la cola es un JSON; el id del documento viaja en transactionId
++    private static final String MESSAGE =
++            "{\"transactionId\":\"" + DOC_ID + "\",\"status\":\"XML_GENERATED\","
++            + "\"publishedAt\":\"2026-06-17T22:33:06.570808Z\",\"storeId\":\"100\"}";
+ 
+     @BeforeEach
+     void setUp() {
+@@ -50,7 +54,7 @@
+         when(tlogDocumentPort.readXml(DOC_ID)).thenReturn(XML_CONTENT);
+         when(tlogXmlParser.parse(XML_CONTENT)).thenReturn(tx);
+ 
+-        Boolean result = handler.handle(SUBSCRIPTION, DOC_ID).get();
++        Boolean result = handler.handle(SUBSCRIPTION, MESSAGE).get();
+ 
+         assertThat(result).isTrue();
+         verify(transactionProcessingService).process(tx);
+@@ -62,7 +66,7 @@
+     void handle_tlogDuplicado_marcaDuplicadoYRetornaAckSinProcesar() throws Exception {
+         when(tlogDocumentPort.isDuplicated(DOC_ID)).thenReturn(true);
+ 
+-        Boolean result = handler.handle(SUBSCRIPTION, DOC_ID).get();
++        Boolean result = handler.handle(SUBSCRIPTION, MESSAGE).get();
+ 
+         assertThat(result).isTrue();
+         verify(tlogDocumentPort).markDuplicated(DOC_ID);
+@@ -74,7 +78,7 @@
+         when(tlogDocumentPort.isDuplicated(DOC_ID)).thenReturn(false);
+         when(tlogDocumentPort.readXml(DOC_ID)).thenReturn("  ");
+ 
+-        Boolean result = handler.handle(SUBSCRIPTION, DOC_ID).get();
++        Boolean result = handler.handle(SUBSCRIPTION, MESSAGE).get();
+ 
+         assertThat(result).isTrue();
+         verify(tlogDocumentPort).markError(eq(DOC_ID), any());
+@@ -86,7 +90,7 @@
+         when(tlogDocumentPort.isDuplicated(DOC_ID)).thenReturn(false);
+         when(tlogDocumentPort.readXml(DOC_ID)).thenReturn(null);
+ 
+-        Boolean result = handler.handle(SUBSCRIPTION, DOC_ID).get();
++        Boolean result = handler.handle(SUBSCRIPTION, MESSAGE).get();
+ 
+         assertThat(result).isTrue();
+         verify(tlogDocumentPort).markError(eq(DOC_ID), any());
+@@ -97,7 +101,7 @@
+         when(tlogDocumentPort.isDuplicated(DOC_ID))
+                 .thenThrow(new FirestoreException("Firestore no disponible"));
+ 
+-        Boolean result = handler.handle(SUBSCRIPTION, DOC_ID).get();
++        Boolean result = handler.handle(SUBSCRIPTION, MESSAGE).get();
+ 
+         assertThat(result).isFalse();
+         verify(tlogDocumentPort, never()).markSaved(any(), any());
+@@ -109,7 +113,7 @@
+         when(tlogDocumentPort.readXml(DOC_ID)).thenReturn(XML_CONTENT);
+         when(tlogXmlParser.parse(any())).thenThrow(new RuntimeException("Error de parseo"));
+ 
+-        Boolean result = handler.handle(SUBSCRIPTION, DOC_ID).get();
++        Boolean result = handler.handle(SUBSCRIPTION, MESSAGE).get();
+ 
+         assertThat(result).isTrue();
+         verify(tlogDocumentPort).markError(eq(DOC_ID), any());
+@@ -127,10 +131,28 @@
+         when(messagePublisher.publishAsync(any(), any()))
+                 .thenReturn(CompletableFuture.failedFuture(new RuntimeException("Pub/Sub error")));
+ 
+-        Boolean result = handler.handle(SUBSCRIPTION, DOC_ID).get();
++        Boolean result = handler.handle(SUBSCRIPTION, MESSAGE).get();
+ 
+         // El TLOG ya fue guardado â se ACK aunque el publish falle
+         assertThat(result).isTrue();
+         verify(tlogDocumentPort).markSaved(DOC_ID, "0005");
+     }
++
++    @Test
++    void handle_jsonInvalido_retornaAckSinProcesar() throws Exception {
++        Boolean result = handler.handle(SUBSCRIPTION, "esto no es json").get();
++
++        assertThat(result).isTrue();
++        verifyNoInteractions(tlogDocumentPort, tlogXmlParser, transactionProcessingService, messagePublisher);
++    }
++
++    @Test
++    void handle_jsonSinTransactionId_retornaAckSinProcesar() throws Exception {
++        String sinId = "{\"storeId\":\"100\",\"status\":\"XML_GENERATED\"}";
++
++        Boolean result = handler.handle(SUBSCRIPTION, sinId).get();
++
++        assertThat(result).isTrue();
++        verifyNoInteractions(tlogDocumentPort, tlogXmlParser, transactionProcessingService, messagePublisher);
++    }
+ }
+
+
+--- Diff for /src/test/java/com/elrosado/distributor_cloud/unit/TlogXmlParserInvoiceTest.java ---
+--- a//src/test/java/com/elrosado/distributor_cloud/unit/TlogXmlParserInvoiceTest.java
++++ b//src/test/java/com/elrosado/distributor_cloud/unit/TlogXmlParserInvoiceTest.java
+@@ -0,0 +1,77 @@
++package com.elrosado.distributor_cloud.unit;
++
++import com.elrosado.distributor_cloud.domain.model.xml.InvoiceData;
++import com.elrosado.distributor_cloud.domain.model.xml.Transaction;
++import com.elrosado.distributor_cloud.domain.model.xml.VentaMayoreoItem;
++import com.elrosado.distributor_cloud.infrastructure.adapter.out.tlog.TlogXmlParser;
++import org.junit.jupiter.api.Test;
++
++import java.util.List;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++/**
++ * Verifica que el binding de InvoiceData y VentaMayoreoItems coincide con los nombres de tag
++ * reales del TLOG (regresiÃ³n de los alias mal mapeados).
++ */
++class TlogXmlParserInvoiceTest {
++
++    private final TlogXmlParser parser = new TlogXmlParser();
++
++    @Test
++    void parseaInvoiceDataConTagsRealesDelTlog() throws Exception {
++        String xml = """
++                <Transaction>
++                  <OperatorID>0123</OperatorID>
++                  <WorkstationID>0001</WorkstationID>
++                  <RetailStoreID>100</RetailStoreID>
++                  <SequenceNumber>615</SequenceNumber>
++                  <RetailTransaction>
++                    <InvoiceData>
++                      <CustomerID>1234567897</CustomerID>
++                      <customerType>3</customerType>
++                      <CustomerName>GRIJALVA GRIJALVA SONIA MARIA</CustomerName>
++                      <Address>Av. Siempre Viva</Address>
++                      <Telephone>0991234567</Telephone>
++                      <flagReg>1</flagReg>
++                    </InvoiceData>
++                  </RetailTransaction>
++                </Transaction>
++                """;
++
++        Transaction trx = parser.parse(xml);
++        InvoiceData inv = trx.getRetailTransaction().getInvoiceData();
++
++        assertThat(inv.getCustomerId()).isEqualTo("1234567897");
++        assertThat(inv.getCustomerType()).isEqualTo("3");
++        assertThat(inv.getNameCustomer()).isEqualTo("GRIJALVA GRIJALVA SONIA MARIA");
++        assertThat(inv.getCustomerDireccion()).isEqualTo("Av. Siempre Viva");
++        assertThat(inv.getCustomerTelefono()).isEqualTo("0991234567");
++        assertThat(inv.getFlagReg()).isEqualTo(1);
++    }
++
++    @Test
++    void parseaVentaMayoreoItems() throws Exception {
++        String xml = """
++                <Transaction>
++                  <RetailStoreID>100</RetailStoreID>
++                  <SequenceNumber>6745</SequenceNumber>
++                  <RetailTransaction>
++                    <VentaMayoreoItems>
++                      <VentaMayoreoItem><SequenceNumber>27</SequenceNumber><sequenceNumberMay>28</sequenceNumberMay></VentaMayoreoItem>
++                      <VentaMayoreoItem><SequenceNumber>27</SequenceNumber><sequenceNumberMay>29</sequenceNumberMay></VentaMayoreoItem>
++                      <VentaMayoreoItem><SequenceNumber>27</SequenceNumber><sequenceNumberMay>30</sequenceNumberMay></VentaMayoreoItem>
++                    </VentaMayoreoItems>
++                  </RetailTransaction>
++                </Transaction>
++                """;
++
++        Transaction trx = parser.parse(xml);
++        List<VentaMayoreoItem> items = trx.getRetailTransaction().getItemsVentaMayoreo();
++
++        assertThat(items).hasSize(3);
++        assertThat(items).allMatch(i -> i.getSequenceNumber() == 27);
++        assertThat(items).extracting(VentaMayoreoItem::getSequenceNumberMay)
++                .containsExactlyInAnyOrder(28, 29, 30);
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/distributor_cloud/unit/TransactionPersistenceAdapterStringUsuarioTest.java ---
+--- a//src/test/java/com/elrosado/distributor_cloud/unit/TransactionPersistenceAdapterStringUsuarioTest.java
++++ b//src/test/java/com/elrosado/distributor_cloud/unit/TransactionPersistenceAdapterStringUsuarioTest.java
+@@ -0,0 +1,197 @@
++package com.elrosado.distributor_cloud.unit;
++
++import com.elrosado.distributor_cloud.domain.model.xml.RetailTransaction;
++import com.elrosado.distributor_cloud.domain.model.xml.StringUsuario;
++import com.elrosado.distributor_cloud.domain.model.xml.Transaction;
++import com.elrosado.distributor_cloud.infrastructure.adapter.out.db.TransactionPersistenceAdapter;
++import com.elrosado.distributor_cloud.infrastructure.adapter.out.db.artsec.entity.CoTndRappiEntity;
++import com.elrosado.distributor_cloud.infrastructure.adapter.out.db.artsec.entity.PaStrRtlEntity;
++import com.elrosado.distributor_cloud.infrastructure.adapter.out.db.artsec.entity.TrDevivaEntity;
++import com.elrosado.distributor_cloud.infrastructure.adapter.out.db.artsec.entity.TrTrnEntity;
++import com.elrosado.distributor_cloud.infrastructure.adapter.out.db.artsec.repository.*;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.ArgumentCaptor;
++import org.mockito.InjectMocks;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.math.BigDecimal;
++import java.util.List;
++import java.util.Optional;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.mockito.ArgumentMatchers.*;
++import static org.mockito.Mockito.*;
++
++/**
++ * Verifica el dispatch de StringUsuario en TransactionPersistenceAdapter contra el legacy:
++ * - Toda cadena no vacÃ­a se guarda cruda en CO_STR_USU_CER.
++ * - CÃ³digo 94 -> TR_DEVIVA (IVA mayor edad), 95 -> TR_VNTAVERDE (pre-commit).
++ * - CÃ³digo 90 -> CO_TND_RAPPI, 51 -> update contingencia en CO_TND_PINPAD (post-commit).
++ */
++@ExtendWith(MockitoExtension.class)
++class TransactionPersistenceAdapterStringUsuarioTest {
++
++    // Cadenas con el formato real del TLOG ('|' rodeado de apÃ³strofes que se eliminan al parsear)
++    private static final String CAD_GENERICA_01 = "99'|'06'|'01'|'1'|'3'|'X'|'";
++    private static final String CAD_IVA_MAYOR_94 = "99'|'06'|'94'|'1234567897'|'CLAVE123'|'143'|'";
++    private static final String CAD_VENTAVERDE_95 = "99'|'06'|'95'|'VENTA'|'";
++    private static final String CAD_RAPPI_90 =
++            "99'|'06'|'90'|'X'|'X'|'202606171200'|'OP123'|'ORD456'|'10.0'|'1.2'|'0.5'|'QR789'|'AUTH'|'";
++    private static final String CAD_CONTINGENCIA_51 =
++            "99'|'06'|'51'|'1'|'00'|'00'|'  '|'15597'|'11935'|'1872'|'1790'|'000034'|'165712'|'";
++
++    @Mock TrTrnRepository trTrnRepository;
++    @Mock TrRtlRepository trRtlRepository;
++    @Mock TrLtmRtlTrnRepository trLtmRtlTrnRepository;
++    @Mock TrLtmSlsRtnRepository trLtmSlsRtnRepository;
++    @Mock TrLtmTndRepository trLtmTndRepository;
++    @Mock TrLtmTndRtnRepository trLtmTndRtnRepository;
++    @Mock TrLtmTxRepository trLtmTxRepository;
++    @Mock TrLtmMdfRepository trLtmMdfRepository;
++    @Mock TrLtmPrmRepository trLtmPrmRepository;
++    @Mock TrTotRtlRepository trTotRtlRepository;
++    @Mock TrRtnRepository trRtnRepository;
++    @Mock TrInvcRepository trInvcRepository;
++    @Mock TrDevivaRepository trDevivaRepository;
++    @Mock TrVntaverdeRepository trVntaverdeRepository;
++    @Mock TrCtlRepository trCtlRepository;
++    @Mock TrCtlTndRepository trCtlTndRepository;
++    @Mock TrLtmTndCtlTndRepository trLtmTndCtlTndRepository;
++    @Mock TrSgnOnRepository trSgnOnRepository;
++    @Mock TrSgnOffRepository trSgnOffRepository;
++    @Mock TrBsnEodRepository trBsnEodRepository;
++    @Mock TrLtmMotoDtRepository trLtmMotoDtRepository;
++    @Mock TrCryFwrdRepository trCryFwrdRepository;
++    @Mock TblRetiroEfectivoStrRepository tblRetiroEfectivoStrRepository;
++    @Mock CoTndRappiRepository coTndRappiRepository;
++    @Mock CoTndPinpadRepository coTndPinpadRepository;
++    @Mock CoIlimDtRepository coIlimDtRepository;
++    @Mock CoCpnDtRepository coCpnDtRepository;
++    @Mock PaStrRtlRepository paStrRtlRepository;
++    @Mock PaOprRepository paOprRepository;
++    @Mock AsWsRepository asWsRepository;
++    @Mock AsItmRepository asItmRepository;
++    @Mock AsItmStrRepository asItmStrRepository;
++    @Mock TrTotTypRepository trTotTypRepository;
++    @Mock TrLtmRtnRepository trLtmRtnRepository;
++    @Mock CoBillDtRepository coBillDtRepository;
++    @Mock CoChkDtRepository coChkDtRepository;
++    @Mock CoCrdDtRepository coCrdDtRepository;
++    @Mock CoBonSolRepository coBonSolRepository;
++    @Mock CoRecElecRepository coRecElecRepository;
++    @Mock CoRecaudosRepository coRecaudosRepository;
++    @Mock CoTransfBancRepository coTransfBancRepository;
++    @Mock CoDscEmpRepository coDscEmpRepository;
++    @Mock CoDatosEmpRepository coDatosEmpRepository;
++    @Mock CoGftcrdDtRepository coGftcrdDtRepository;
++    @Mock CoPtsRdmDtRepository coPtsRdmDtRepository;
++    @Mock MgrOvrdRepository mgrOvrdRepository;
++    @Mock CoStrUsuCerRepository coStrUsuCerRepository;
++    @Mock CoRdmCpnDtRepository coRdmCpnDtRepository;
++    @Mock CoRecaudacionRepository coRecaudacionRepository;
++    @Mock CoRtncCerRepository coRtncCerRepository;
++    @Mock CoValeEmpCerRepository coValeEmpCerRepository;
++    @Mock CoGastoEfeCerRepository coGastoEfeCerRepository;
++    @Mock AsTndRepository asTndRepository;
++    @Mock CoPrfrdCtDtRepository coPrfrdCtDtRepository;
++    @Mock CoAssociatedDataRepository coAssociatedDataRepository;
++    @Mock CoPtsPrmDtaRepository coPtsPrmDtaRepository;
++    @Mock CoTktDtRepository coTktDtRepository;
++    @Mock CoDeducibleRepository coDeducibleRepository;
++    @Mock CoItmSlsMayRepository coItmSlsMayRepository;
++
++    @InjectMocks TransactionPersistenceAdapter adapter;
++
++    private void stubResolucionTiendaYTrn() {
++        PaStrRtlEntity store = new PaStrRtlEntity();
++        store.setRetailStoreId(100);
++        when(paStrRtlRepository.findByCode("100")).thenReturn(Optional.of(store));
++    }
++
++    @Test
++    void save_guardaTodasLasCadenasCrudasYProcesa94y95() {
++        stubResolucionTiendaYTrn();
++        when(trTrnRepository.save(any(TrTrnEntity.class))).thenAnswer(inv -> {
++            TrTrnEntity e = inv.getArgument(0);
++            e.setTransactionId(42);
++            return e;
++        });
++
++        Transaction trx = retailTrxConCadenas(List.of(
++                su(1, CAD_GENERICA_01),
++                su(2, CAD_IVA_MAYOR_94),
++                su(3, CAD_VENTAVERDE_95)));
++
++        adapter.save(trx);
++
++        // Las tres cadenas (incluida la genÃ©rica 01) se guardan crudas
++        verify(coStrUsuCerRepository, times(3)).save(any());
++
++        // 94 -> TR_DEVIVA con los valores parseados de la cadena
++        ArgumentCaptor<TrDevivaEntity> devivaCaptor = ArgumentCaptor.forClass(TrDevivaEntity.class);
++        verify(trDevivaRepository, times(1)).save(devivaCaptor.capture());
++        TrDevivaEntity deviva = devivaCaptor.getValue();
++        assertThat(deviva.getTransactionId()).isEqualTo(42);
++        assertThat(deviva.getIdentificacion()).isEqualTo("1234567897");
++        assertThat(deviva.getClaveAcceso()).isEqualTo("CLAVE123");
++        assertThat(deviva.getMontoIva()).isEqualByComparingTo(new BigDecimal("143"));
++
++        // 95 -> TR_VNTAVERDE
++        verify(trVntaverdeRepository, times(1)).save(any());
++    }
++
++    @Test
++    void postCommit_procesaRappi90YContingencia51() {
++        stubResolucionTiendaYTrn();
++
++        Transaction trx = retailTrxConCadenas(List.of(
++                su(1, CAD_RAPPI_90),
++                su(2, CAD_CONTINGENCIA_51)));
++
++        adapter.processStringUsuarioPostCommitEffects(42, trx);
++
++        // 90 -> CO_TND_RAPPI con los valores parseados
++        ArgumentCaptor<CoTndRappiEntity> rappiCaptor = ArgumentCaptor.forClass(CoTndRappiEntity.class);
++        verify(coTndRappiRepository, times(1)).save(rappiCaptor.capture());
++        CoTndRappiEntity rappi = rappiCaptor.getValue();
++        assertThat(rappi.getNumOperacion()).isEqualTo("OP123");
++        assertThat(rappi.getNumOrden()).isEqualTo("ORD456");
++        assertThat(rappi.getNumAutoriz()).isEqualTo("AUTH");
++        assertThat(rappi.getNumCodeQr()).isEqualTo("QR789");
++
++        // 51 -> update contingencia por seqTrx (Ã­ndice 11)
++        verify(coTndPinpadRepository, times(1)).updateContingencia(eq(42), eq("000034"), isNull());
++
++        // El post-commit NO re-guarda la cadena cruda (eso ocurre en save)
++        verify(coStrUsuCerRepository, never()).save(any());
++    }
++
++    @Test
++    void postCommit_ignoraTransaccionSinStringUsuario() {
++        adapter.processStringUsuarioPostCommitEffects(42, retailTrxConCadenas(null));
++        adapter.processStringUsuarioPostCommitEffects(null, retailTrxConCadenas(List.of(su(1, CAD_RAPPI_90))));
++
++        verifyNoInteractions(coTndRappiRepository, coTndPinpadRepository);
++    }
++
++    private Transaction retailTrxConCadenas(List<StringUsuario> cadenas) {
++        Transaction t = new Transaction();
++        t.setRetailStoreCode("100");
++        t.setWorkstationCode("0001");
++        t.setOperatorCode("0123");
++        t.setSequenceNumber(615);
++        RetailTransaction rtl = new RetailTransaction();
++        rtl.setStringsUsuario(cadenas);
++        t.setRetailTransaction(rtl);
++        return t;
++    }
++
++    private StringUsuario su(int seq, String cadena) {
++        StringUsuario s = new StringUsuario();
++        s.setSequenceNumber(seq);
++        s.setCadena(cadena);
++        return s;
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/distributor_cloud/unit/TransactionProcessingServiceTest.java ---
+--- a//src/test/java/com/elrosado/distributor_cloud/unit/TransactionProcessingServiceTest.java
++++ b//src/test/java/com/elrosado/distributor_cloud/unit/TransactionProcessingServiceTest.java
+@@ -71,7 +71,7 @@
+     @Test
+     void process_registraClienteDespuesDeGuardar() {
+         InvoiceData inv = new InvoiceData();
+-        inv.setIdentificacionCustomer("0987654321");
++        inv.setCustomerId("0987654321");
+ 
+         RetailTransaction rtl = new RetailTransaction();
+         rtl.setInvoiceData(inv);
+
+

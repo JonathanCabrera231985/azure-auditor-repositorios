@@ -1,0 +1,16 @@
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/messaging/PubSubDistributorPublisher.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/messaging/PubSubDistributorPublisher.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/messaging/PubSubDistributorPublisher.java
+@@ -38,8 +38,8 @@
+             // Construye el payload JSON del evento antes de publicar
+             Map<String, Object> message = Map.of(
+                     "transactionId", transactionId,
+-                    "storeCode",     storeCode,
+-                    "eventType",     EVENT_TYPE_XML_GENERATED,
++                    "storeId",     storeCode,
++                    "status",     EVENT_TYPE_XML_GENERATED,
+                     "publishedAt",   Instant.now().toString()
+             );
+ 
+
+

@@ -1,0 +1,286 @@
+--- Diff for /k8s/deployment.yaml ---
+--- a//k8s/deployment.yaml
++++ b//k8s/deployment.yaml
+@@ -55,11 +55,6 @@
+                 secretKeyRef:
+                   name: cer-suite-local-core-secret
+                   key: SPRING_DATASOURCE_PASSWORD
+-            - name: SPRING_DATASOURCE_DEVS_URL
+-              valueFrom:
+-                secretKeyRef:
+-                  name: cer-suite-local-core-secret
+-                  key: SPRING_DATASOURCE_DEVS_URL
+             # Credenciales BD Central (PI_CONTROL — 10.2.7.21/ARTS_EC)
+             - name: SPRING_DATASOURCE_CENTRAL_URL
+               valueFrom:
+
+
+--- Diff for /k8s/secret.yaml ---
+--- a//k8s/secret.yaml
++++ b//k8s/secret.yaml
+@@ -13,9 +13,6 @@
+   SPRING_DATASOURCE_USERNAME: "YWxsaWFuY2Vz"
+   SPRING_DATASOURCE_PASSWORD: "QUxMQ18wMTgw"
+ 
+-  #datasource DEVS_EC
+-  SPRING_DATASOURCE_DEVS_URL: "amRiYzpzcWxzZXJ2ZXI6Ly9DUzNEV1NBUk1MMUNPUk86MTQzMztkYXRhYmFzZU5hbWU9REVWU19FQztlbmNyeXB0PWZhbHNl"
+-
+   #datasource Central ARTS_EC (10.2.7.21) — validación PI_CONTROL
+   SPRING_DATASOURCE_CENTRAL_URL: "amRiYzpzcWxzZXJ2ZXI6Ly8xMC4yLjcuMjE6MTQzMztkYXRhYmFzZU5hbWU9QVJUU19FQztlbmNyeXB0PWZhbHNl"
+   SPRING_DATASOURCE_CENTRAL_USERNAME: "YWxsaWFuY2Vz"
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/ArtsEcDataSourceConfig.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/ArtsEcDataSourceConfig.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/ArtsEcDataSourceConfig.java
+@@ -0,0 +1,21 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.context.annotation.Configuration;
++import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
++
++/**
++ * Activa los repositorios Spring Data JPA del datasource principal (ARTS_EC).
++ * <p>
++ * Cubre todos los repositorios del proyecto: RetailStore, Invoice, CustomerType,
++ * CustomerExt (tablas en ARTS_EC) y DevTicket (DEVS_EC.dbo.DV_TICKET, accesible
++ * vÃ­a cross-database SQL Server desde la misma instancia, declarado con catalog="DEVS_EC"
++ * en la anotaciÃ³n @Table de la entidad).
++ */
++@Configuration
++@EnableJpaRepositories(
++        basePackages = "com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository",
++        entityManagerFactoryRef = "artsEcEntityManagerFactory",
++        transactionManagerRef = "artsEcTransactionManager"
++)
++public class ArtsEcDataSourceConfig {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/MultiSqlConfig.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/MultiSqlConfig.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/MultiSqlConfig.java
+@@ -1,6 +1,8 @@
+ package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
+ 
++import com.elrosado.jlib_multisql.config.MultiSqlProperties;
+ import com.elrosado.jlib_multisql.registrar.MultiSqlBeanRegistrar;
++import org.springframework.boot.context.properties.EnableConfigurationProperties;
+ import org.springframework.context.annotation.Configuration;
+ import org.springframework.context.annotation.Import;
+ 
+@@ -14,6 +16,7 @@
+  * El registrador usa internamente {@code Binder} que sÃ­ resuelve mapas YAML correctamente.
+  */
+ @Configuration
++@EnableConfigurationProperties(MultiSqlProperties.class)
+ @Import(MultiSqlBeanRegistrar.class)
+ public class MultiSqlConfig {
+ }
+
+
+--- Diff for /src/main/resources/application-dev.yml ---
+--- a//src/main/resources/application-dev.yml
++++ b//src/main/resources/application-dev.yml
+@@ -2,31 +2,6 @@
+   port: 8080
+ 
+ spring:
+-  # Datasource primario: ARTS_EC (entorno GCP Dev)
+-  datasource:
+-    url: ${SPRING_DATASOURCE_URL}
+-    username: ${SPRING_DATASOURCE_USERNAME}
+-    password: ${SPRING_DATASOURCE_PASSWORD}
+-    driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
+-    hikari:
+-      maximum-pool-size: 10
+-      minimum-idle: 2
+-      pool-name: hikari-arts-ec
+-
+-  datasource-devs:
+-    url: ${SPRING_DATASOURCE_DEVS_URL}
+-    username: ${SPRING_DATASOURCE_USERNAME}
+-    password: ${SPRING_DATASOURCE_PASSWORD}
+-    driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
+-    hikari:
+-      maximum-pool-size: 3
+-      minimum-idle: 1
+-      pool-name: hikari-devs-ec
+-
+-  jpa:
+-    database-platform: org.hibernate.dialect.SQLServerDialect
+-    show-sql: false
+-
+   cloud:
+     gcp:
+       project-id: ${GCP_PROJECT_ID}
+@@ -51,6 +26,13 @@
+ 
+ multi-sql:
+   datasources:
++    arts-ec:
++      url: ${SPRING_DATASOURCE_URL}
++      username: ${SPRING_DATASOURCE_USERNAME}
++      password: ${SPRING_DATASOURCE_PASSWORD}
++      entity-packages:
++        - com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity
++      primary: true
+     central:
+       url: ${SPRING_DATASOURCE_CENTRAL_URL}
+       username: ${SPRING_DATASOURCE_CENTRAL_USERNAME}
+
+
+--- Diff for /src/main/resources/application-local.yml ---
+--- a//src/main/resources/application-local.yml
++++ b//src/main/resources/application-local.yml
+@@ -1,41 +1,7 @@
+ server:
+   port: 8091
++
+ spring:
+-
+-  # Datasource primario: ARTS_EC
+-  # Tablas: PA_STR_RTL, TR_INVC, CO_CPR_CER, CO_EXT_CER
+-  # Requisito: GRANT SELECT, EXECUTE ON ARTS_EC TO alliances
+-  datasource:
+-    url: jdbc:sqlserver://10.2.7.23:1433;databaseName=ARTS_EC;encrypt=false
+-    username: alliances
+-    password: ALLC_0180
+-    driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
+-    hikari:
+-      maximum-pool-size: 5
+-      minimum-idle: 2
+-      pool-name: hikari-arts-ec
+-
+-  # Datasource secundario: DEVS_EC (DevTicketEntity — DV_TICKET)
+-  # Requisito: GRANT SELECT ON DEVS_EC.dbo.DV_TICKET TO alliances
+-  # Si ARTS_EC y DEVS_EC están en la misma instancia SQL Server puedes usar
+-  # la misma URL cambiando databaseName; si son instancias diferentes ajusta el host.
+-  datasource-devs:
+-    url: jdbc:sqlserver://10.2.7.23:1433;databaseName=DEVS_EC;encrypt=false
+-    username: alliances
+-    password: allc_0180
+-    driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
+-    hikari:
+-      maximum-pool-size: 3
+-      minimum-idle: 1
+-      pool-name: hikari-devs-ec
+-
+-  jpa:
+-    database-platform: org.hibernate.dialect.SQLServerDialect
+-    show-sql: true
+-    properties:
+-      hibernate:
+-        format_sql: true
+-
+   data:
+     redis:
+       host: localhost
+@@ -46,8 +12,6 @@
+   cloud:
+     gcp:
+       project-id: modern-suite-cloud-per-b55b0
+-      # Credenciales de cuenta de servicio para desarrollo local.
+-      # En GCP (Cloud Run/GKE) se usa Workload Identity — sin este bloque.
+       credentials:
+         location: file:D:/SIPECOM/repository-git/cer-gcp/credentials_per.json
+       storage:
+@@ -67,9 +31,9 @@
+ management:
+   health:
+     db:
+-      enabled: false   # SQL Server no siempre alcanzable sin VPN
++      enabled: false
+     redis:
+-      enabled: false   # Redis opcional en local; activar si está corriendo
++      enabled: false
+ 
+ pubsub:
+   subscriptions:
+@@ -83,8 +47,20 @@
+     key-ring-id: ${KMS_KEY_RING_ID:suite-cloud-keyring}
+     crypto-key-id: ${KMS_CRYPTO_KEY_ID:trama-encryption-key}
+ 
++# Datasource principal (ARTS_EC + acceso cross-DB a DEVS_EC via catalog="DEVS_EC" en @Table).
++# Cubre entidades: PA_STR_RTL, TR_INVC, CO_CPR_CER, CO_EXT_CER, DV_TICKET.
++# Datasource central (PI_CONTROL — 10.2.7.21): acceso JDBC puro, sin entidades JPA.
+ multi-sql:
+   datasources:
++    arts-ec:
++      url: jdbc:sqlserver://10.2.7.23:1433;databaseName=ARTS_EC;encrypt=false
++      username: alliances
++      password: ALLC_0180
++      entity-packages:
++        - com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity
++      primary: true
++      maximum-pool-size: 5
++      minimum-idle: 2
+     central:
+       url: jdbc:sqlserver://10.2.7.21:1433;databaseName=ARTS_EC;encrypt=false
+       username: alliances
+
+
+--- Diff for /src/main/resources/application-prod.yml ---
+--- a//src/main/resources/application-prod.yml
++++ b//src/main/resources/application-prod.yml
+@@ -1,38 +1,7 @@
+ server:
+   port: 8080
++
+ spring:
+-  # Datasource primario: ARTS_EC
+-  datasource:
+-    url: ${SPRING_DATASOURCE_URL}
+-    username: ${SPRING_DATASOURCE_USERNAME}
+-    password: ${SPRING_DATASOURCE_PASSWORD}
+-    driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
+-    hikari:
+-      maximum-pool-size: 20
+-      minimum-idle: 5
+-      idle-timeout: 300000
+-      connection-timeout: 20000
+-      max-lifetime: 1200000
+-      pool-name: hikari-arts-ec
+-
+-  # Datasource secundario: DEVS_EC (DV_TICKET — consulta de devolutions)
+-  datasource-devs:
+-    url: ${SPRING_DATASOURCE_DEVS_URL}
+-    username: ${SPRING_DATASOURCE_DEVS_USERNAME}
+-    password: ${SPRING_DATASOURCE_DEVS_PASSWORD}
+-    driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
+-    hikari:
+-      maximum-pool-size: 5
+-      minimum-idle: 2
+-      idle-timeout: 300000
+-      connection-timeout: 20000
+-      max-lifetime: 1200000
+-      pool-name: hikari-devs-ec
+-
+-  jpa:
+-    database-platform: org.hibernate.dialect.SQLServerDialect
+-    show-sql: false
+-
+   cloud:
+     gcp:
+       project-id: ${GCP_PROJECT_ID}
+@@ -62,9 +31,17 @@
+     - subscription-id: ${GCP_PUBSUB_SUB_VENTAS}
+       topic-id: ${GCP_PUBSUB_TOPIC_VENTAS}
+ 
+-
+ multi-sql:
+   datasources:
++    arts-ec:
++      url: ${SPRING_DATASOURCE_URL}
++      username: ${SPRING_DATASOURCE_USERNAME}
++      password: ${SPRING_DATASOURCE_PASSWORD}
++      entity-packages:
++        - com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity
++      primary: true
++      maximum-pool-size: 20
++      minimum-idle: 5
+     central:
+       url: ${SPRING_DATASOURCE_CENTRAL_URL}
+       username: ${SPRING_DATASOURCE_CENTRAL_USERNAME}
+
+

@@ -1,0 +1,3175 @@
+--- Diff for /.claude_rules/GCS_ROUTES_INVENTORY.md ---
+--- a//.claude_rules/GCS_ROUTES_INVENTORY.md
++++ b//.claude_rules/GCS_ROUTES_INVENTORY.md
+@@ -11,10 +11,12 @@
+ | `updateCedPadRuc.out.folder.path` | `gs://gcs-cer-suite-core-files/eyes/arsap/bkp` | `gcs-cer-suite-core-files` | `eyes/arsap/bkp` | Defined | User migration prompt, 2026-06-18 |
+ | `eyes.ups.file.name` | `gs://gcs-cer-suite-core-files/eyes-server` | `gcs-cer-suite-core-files` | `eyes-server` | Defined | User migration prompt, 2026-06-18 |
+ | `app.update-ced-pad-ruc.gcs.error-uri` | `gs://gcs-cer-suite-core-files/eyes/arsap/in/cedpadruc-error` | `gcs-cer-suite-core-files` | `eyes/arsap/in/cedpadruc-error` | Defined | User confirmation, 2026-06-18 |
++| `sendCartaMoto.in.folder.path` | `gs://gcs-cer-suite-core-files/eyes/xmlcvm/out` | `gcs-cer-suite-core-files` | `eyes/xmlcvm/out` | Defined | User confirmation, 2026-06-23 |
++| `sendCartaMoto.out.folder.path` | `gs://gcs-cer-suite-core-files/eyes/xmlcvm/bkp` | `gcs-cer-suite-core-files` | `eyes/xmlcvm/bkp` | Defined | User confirmation, 2026-06-23 |
+ 
+ ## Pending Routes
+ 
+-No pending GCS routes for `UpdateCedPadRucProcess` as of 2026-06-18.
++No pending GCS routes as of 2026-06-23.
+ 
+ ## Rules
+ 
+
+
+--- Diff for /.gitignore ---
+--- a//.gitignore
++++ b//.gitignore
+@@ -17,6 +17,7 @@
+ .idea
+ .claude
+ .claude_analytics
++.migration
+ *.iws
+ *.iml
+ *.ipr
+
+
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -29,6 +29,17 @@
+   UPDATE_CED_PAD_RUC_BATCH_SIZE: "500"
+   UPDATE_CED_PAD_RUC_ERROR_URI: "gs://gcs-cer-suite-core-files/eyes/arsap/in/cedpadruc-error"
+ 
++  # UpdateMotoProcess — one service instance handles all active MULTI_LOCAL stores from MN_TIENDA
++  UPDATE_MOTO_ENABLED: "true"
++  UPDATE_MOTO_BATCH_SIZE: "100"
++  UPDATE_MOTO_ERROR_URI: "gs://gcs-cer-suite-core-files/eyes/arsap/error"
++
++  # SendCartaMotoProcess — envío SFTP de cartas moto a servidor remoto
++  SEND_CARTA_MOTO_ENABLED: "true"
++
++  # SAADMIN datasource credentials must be injected via Kubernetes Secret:
++  # SAADMIN_DB_URL, SAADMIN_DB_USERNAME, SAADMIN_DB_PASSWORD
++
+   # Nivel de logging global y de frameworks
+   LOGGING_LEVEL_ROOT: "INFO"
+   LOGGING_LEVEL_APPLICATION: "INFO"
+
+
+--- Diff for /k8s/deployment.yaml ---
+--- a//k8s/deployment.yaml
++++ b//k8s/deployment.yaml
+@@ -73,6 +73,33 @@
+                 secretKeyRef:
+                   name: cer-suite-local-core-secret
+                   key: SPRING_DATASOURCE_CENTRAL_PASSWORD
++            # Credenciales CVMT_EC — SendCartaMotoProcess
++            - name: CVMT_DB_URL
++              valueFrom:
++                secretKeyRef:
++                  name: cer-suite-local-core-secret
++                  key: CVMT_DB_URL
++            - name: CVMT_DB_USERNAME
++              valueFrom:
++                secretKeyRef:
++                  name: cer-suite-local-core-secret
++                  key: CVMT_DB_USERNAME
++            - name: CVMT_DB_PASSWORD
++              valueFrom:
++                secretKeyRef:
++                  name: cer-suite-local-core-secret
++                  key: CVMT_DB_PASSWORD
++            # Credenciales SFTP — SendCartaMotoProcess
++            - name: SFTP_CARTA_MOTO_USERNAME
++              valueFrom:
++                secretKeyRef:
++                  name: cer-suite-local-core-secret
++                  key: SFTP_CARTA_MOTO_USERNAME
++            - name: SFTP_CARTA_MOTO_PASSWORD
++              valueFrom:
++                secretKeyRef:
++                  name: cer-suite-local-core-secret
++                  key: SFTP_CARTA_MOTO_PASSWORD
+             - name: GOOGLE_APPLICATION_CREDENTIALS
+               value: /var/secrets/google/key.json
+           volumeMounts:
+
+
+--- Diff for /k8s/properties.yaml ---
+--- a//k8s/properties.yaml
++++ b//k8s/properties.yaml
+@@ -11,3 +11,13 @@
+     updateCedPadRuc.out.folder.path=gs://gcs-cer-suite-core-files/eyes/arsap/bkp
+     updateCedPadRuc.sleeptime=30000
+     eyes.ups.file.name=gs://gcs-cer-suite-core-files/eyes-server
++    updateMoto.in.folder.path=gs://gcs-cer-suite-core-files/eyes/arsap/prc
++    updateMoto.out.folder.path=gs://gcs-cer-suite-core-files/eyes/arsap/bkp
++    updateMoto.sleeptime=30000
++    sendCartaMoto.in.folder.path=gs://gcs-cer-suite-core-files/eyes/xmlcvm/out
++    sendCartaMoto.out.folder.path=gs://gcs-cer-suite-core-files/eyes/xmlcvm/bkp
++    sendCartaMoto.sleeptime=30000
++    sendCartaMoto.retries=3
++    sendCartaMoto.server.serverIp=10.11.1.16
++    sendCartaMoto.server.port=22
++    sendCartaMoto.server.remoteDir=/poscer/suitemotos
+
+
+--- Diff for /k8s/secret.yaml ---
+--- a//k8s/secret.yaml
++++ b//k8s/secret.yaml
+@@ -17,3 +17,15 @@
+   SPRING_DATASOURCE_CENTRAL_URL: "amRiYzpzcWxzZXJ2ZXI6Ly9DUzNEV1NBUk1DMUNPUk86MTQzMztkYXRhYmFzZU5hbWU9QVJUU19FQztlbmNyeXB0PWZhbHNl"
+   SPRING_DATASOURCE_CENTRAL_USERNAME: "YWxsaWFuY2Vz"
+   SPRING_DATASOURCE_CENTRAL_PASSWORD: "QUxMQ18wMTgw"
++
++  # datasource CVMT_EC — SendCartaMotoProcess
++  # jdbc:sqlserver://CS3DWSARML1CORO:1433;databaseName=CVMT_EC;encrypt=false → base64
++  CVMT_DB_URL: "amRiYzpzcWxzZXJ2ZXI6Ly9DUzNEV1NBUk1MMUNPUk86MTQzMztkYXRhYmFzZU5hbWU9Q1ZNVF9FQztlbmNyeXB0PWZhbHNl"
++  CVMT_DB_USERNAME: "YWxsaWFuY2Vz"
++  CVMT_DB_PASSWORD: "QUxMQ18wMTgw"
++
++  # Credenciales SFTP — SendCartaMotoProcess (servidor poscer)
++  # poscer → base64
++  SFTP_CARTA_MOTO_USERNAME: "cG9zY2Vy"
++  # sE!8Nu-yG!4tE-X- → base64
++  SFTP_CARTA_MOTO_PASSWORD: "c0UhOE51LXlHITR0RS1YLQ=="
+
+
+--- Diff for /pom.xml ---
+--- a//pom.xml
++++ b//pom.xml
+@@ -56,6 +56,13 @@
+             <groupId>com.elrosado</groupId>
+             <artifactId>jlib-storage</artifactId>
+             <version>1.0.1</version>
++        </dependency>
++
++        <!-- Cliente SFTP para SendCartaMotoProcess â reemplaza JSch legado -->
++        <dependency>
++            <groupId>com.hierynomus</groupId>
++            <artifactId>sshj</artifactId>
++            <version>0.38.0</version>
+         </dependency>
+ 
+         <dependency>
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/exception/MotoProcessingException.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/exception/MotoProcessingException.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/exception/MotoProcessingException.java
+@@ -0,0 +1,17 @@
++package com.elrosado.cersuitecloudlocalcore.domain.exception;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.MotoProcessingStage;
++
++public class MotoProcessingException extends RuntimeException {
++
++    private final MotoProcessingStage stage;
++
++    public MotoProcessingException(MotoProcessingStage stage, String message, Throwable cause) {
++        super(message, cause);
++        this.stage = stage;
++    }
++
++    public MotoProcessingStage stage() {
++        return stage;
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/exception/SendCartaMotoException.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/exception/SendCartaMotoException.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/exception/SendCartaMotoException.java
+@@ -0,0 +1,20 @@
++package com.elrosado.cersuitecloudlocalcore.domain.exception;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.SendCartaMotoStage;
++
++/**
++ * ExcepciÃ³n tipada para fallos en el proceso de envÃ­o de cartas moto.
++ */
++public class SendCartaMotoException extends RuntimeException {
++
++    private final SendCartaMotoStage stage;
++
++    public SendCartaMotoException(SendCartaMotoStage stage, String message, Throwable cause) {
++        super(message, cause);
++        this.stage = stage;
++    }
++
++    public SendCartaMotoStage stage() {
++        return stage;
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/CartaMoto.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/CartaMoto.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/CartaMoto.java
+@@ -0,0 +1,21 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++import java.time.LocalDateTime;
++
++/**
++ * Registro de carta moto pendiente de envÃ­o al servidor SFTP remoto.
++ * Origen: tabla CM_CARTAS de la base de datos CVMT_EC.
++ */
++public record CartaMoto(
++        int idCarta,
++        int idTrn,
++        LocalDateTime fechaCreacion,
++        int estado,
++        String srlNbr,
++        int ccOperador,
++        int desClave,
++        LocalDateTime fechaEnvio,
++        String nombArchXml,
++        int codCanton
++) {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/CartaMotoEstado.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/CartaMotoEstado.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/CartaMotoEstado.java
+@@ -0,0 +1,21 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++/**
++ * Estados de ciclo de vida de una carta moto en CM_CARTAS.
++ */
++public enum CartaMotoEstado {
++
++    PENDING(0),
++    TO_SEND(1),
++    SENT(2);
++
++    private final int value;
++
++    CartaMotoEstado(int value) {
++        this.value = value;
++    }
++
++    public int value() {
++        return value;
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/MotoErrorRecord.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/MotoErrorRecord.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/MotoErrorRecord.java
+@@ -0,0 +1,29 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++import java.time.Instant;
++
++public record MotoErrorRecord(
++        String processName,
++        String processType,
++        String executionId,
++        String storeCode,
++        String fileName,
++        String bucket,
++        String gcsPath,
++        String stage,
++        String operation,
++        String errorType,
++        String errorCode,
++        String errorMessage,
++        String stackTrace,
++        int retry,
++        int maxRetries,
++        boolean stopRetries,
++        String status,
++        Instant createdAt,
++        Instant updatedAt,
++        String hostname,
++        String podName,
++        String schedulerExecutionId
++) {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/MotoFile.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/MotoFile.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/MotoFile.java
+@@ -0,0 +1,9 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++public record MotoFile(
++        GcsObjectReference location,
++        String fileName,
++        int storeCode,
++        int sequenceNumber
++) {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/MotoProcessingResult.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/MotoProcessingResult.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/MotoProcessingResult.java
+@@ -0,0 +1,12 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++public record MotoProcessingResult(long linesInserted, long linesUpdated, long linesSkipped) {
++
++    public MotoProcessingResult plus(MotoProcessingResult other) {
++        return new MotoProcessingResult(
++                linesInserted + other.linesInserted(),
++                linesUpdated + other.linesUpdated(),
++                linesSkipped + other.linesSkipped()
++        );
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/MotoProcessingStage.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/MotoProcessingStage.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/MotoProcessingStage.java
+@@ -0,0 +1,12 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++public enum MotoProcessingStage {
++    GCS_LIST,
++    GCS_READ,
++    PARSING,
++    DATABASE_READ,
++    DATABASE_WRITE,
++    GCS_MOVE_TO_BACKUP,
++    GCS_MOVE_TO_ERROR,
++    UNKNOWN
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/MotoRecord.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/MotoRecord.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/MotoRecord.java
+@@ -0,0 +1,32 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++public record MotoRecord(
++        String mandante,
++        String material,
++        String motor,
++        String serie,
++        String numSRI,
++        String chasis,
++        String anoFabricacion,
++        String clase,
++        String color,
++        String cilindraje,
++        String capAsiento,
++        String numCPN,
++        String tieneNumCPN,
++        String fechaCPN,
++        String subcategoria,
++        String tipoCombustible,
++        String tipoCarroceria,
++        String numCKD,
++        String marca,
++        String modelo,
++        String paisOrigen,
++        String tonelaje,
++        String centro,
++        String status,
++        String ejes,
++        String ruedas,
++        String potencia
++) {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/MotoState.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/MotoState.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/MotoState.java
+@@ -0,0 +1,7 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++public enum MotoState {
++    NEW,
++    EXISTS,
++    SOLD
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SendCartaMotoStage.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SendCartaMotoStage.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SendCartaMotoStage.java
+@@ -0,0 +1,12 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++/**
++ * Etapas de procesamiento del proceso SendCartaMoto para diagnÃ³stico de errores.
++ */
++public enum SendCartaMotoStage {
++    GCS_DOWNLOAD,
++    SFTP_TRANSFER,
++    GCS_MOVE_TO_BACKUP,
++    DATABASE_UPDATE,
++    UNKNOWN
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/SendCartaMotoUseCase.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/SendCartaMotoUseCase.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/SendCartaMotoUseCase.java
+@@ -0,0 +1,9 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.in;
++
++/**
++ * Caso de uso: procesar y enviar cartas moto pendientes al servidor SFTP.
++ */
++public interface SendCartaMotoUseCase {
++
++    void sendPendingCartas();
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/UpdateMotoUseCase.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/UpdateMotoUseCase.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/UpdateMotoUseCase.java
+@@ -0,0 +1,6 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.in;
++
++public interface UpdateMotoUseCase {
++
++    void processPendingFiles();
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/CartaMotoQueryPort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/CartaMotoQueryPort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/CartaMotoQueryPort.java
+@@ -0,0 +1,13 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.CartaMoto;
++
++import java.util.List;
++
++/**
++ * Puerto de consulta de cartas moto pendientes de envÃ­o.
++ */
++public interface CartaMotoQueryPort {
++
++    List<CartaMoto> findPendingToSend();
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/CartaMotoStoragePort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/CartaMotoStoragePort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/CartaMotoStoragePort.java
+@@ -0,0 +1,13 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++
++/**
++ * Puerto de almacenamiento GCS para archivos XML de cartas moto.
++ */
++public interface CartaMotoStoragePort {
++
++    byte[] downloadXml(String fileName);
++
++    GcsObjectReference moveToBackup(String fileName);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/CartaMotoTransferPort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/CartaMotoTransferPort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/CartaMotoTransferPort.java
+@@ -0,0 +1,9 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++/**
++ * Puerto de transferencia SFTP de archivos XML de cartas moto.
++ */
++public interface CartaMotoTransferPort {
++
++    void transferFile(String fileName, byte[] content);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/CartaMotoUpdatePort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/CartaMotoUpdatePort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/CartaMotoUpdatePort.java
+@@ -0,0 +1,9 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++/**
++ * Puerto de actualizaciÃ³n de estado de carta moto en la base de datos.
++ */
++public interface CartaMotoUpdatePort {
++
++    void markAsSent(int idCarta);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/MotoErrorTrackerPort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/MotoErrorTrackerPort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/MotoErrorTrackerPort.java
+@@ -0,0 +1,8 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.MotoErrorRecord;
++
++public interface MotoErrorTrackerPort {
++
++    void recordError(MotoErrorRecord errorRecord);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/MotoPersistencePort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/MotoPersistencePort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/MotoPersistencePort.java
+@@ -0,0 +1,11 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.MotoProcessingResult;
++import com.elrosado.cersuitecloudlocalcore.domain.model.MotoRecord;
++
++import java.util.List;
++
++public interface MotoPersistencePort {
++
++    MotoProcessingResult processAndSaveBatch(List<MotoRecord> batch);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/MotoStoragePort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/MotoStoragePort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/MotoStoragePort.java
+@@ -0,0 +1,18 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.MotoFile;
++
++import java.io.BufferedReader;
++import java.util.List;
++
++public interface MotoStoragePort {
++
++    List<MotoFile> listPendingFiles();
++
++    BufferedReader openReader(MotoFile file);
++
++    GcsObjectReference moveToBackup(MotoFile file);
++
++    GcsObjectReference moveToError(MotoFile file);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SendCartaMotoSchedulerAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SendCartaMotoSchedulerAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SendCartaMotoSchedulerAdapter.java
+@@ -0,0 +1,31 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.scheduler;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.SendCartaMotoUseCase;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.scheduling.annotation.Scheduled;
++import org.springframework.stereotype.Component;
++
++@Component
++public class SendCartaMotoSchedulerAdapter {
++
++    private static final Logger log = LoggerFactory.getLogger(SendCartaMotoSchedulerAdapter.class);
++
++    private final SendCartaMotoUseCase sendCartaMotoUseCase;
++
++    public SendCartaMotoSchedulerAdapter(SendCartaMotoUseCase sendCartaMotoUseCase) {
++        this.sendCartaMotoUseCase = sendCartaMotoUseCase;
++    }
++
++    @Scheduled(fixedDelayString = "${sendCartaMoto.sleeptime:30000}")
++    public void execute() {
++        try {
++            sendCartaMotoUseCase.sendPendingCartas();
++        } catch (Exception e) {
++            log.atError()
++                    .setMessage("Error no controlado en scheduler de SendCartaMoto")
++                    .setCause(e)
++                    .log();
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/UpdateMotoSchedulerAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/UpdateMotoSchedulerAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/UpdateMotoSchedulerAdapter.java
+@@ -0,0 +1,31 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.scheduler;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.UpdateMotoUseCase;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.scheduling.annotation.Scheduled;
++import org.springframework.stereotype.Component;
++
++@Component
++public class UpdateMotoSchedulerAdapter {
++
++    private static final Logger log = LoggerFactory.getLogger(UpdateMotoSchedulerAdapter.class);
++
++    private final UpdateMotoUseCase updateMotoUseCase;
++
++    public UpdateMotoSchedulerAdapter(UpdateMotoUseCase updateMotoUseCase) {
++        this.updateMotoUseCase = updateMotoUseCase;
++    }
++
++    @Scheduled(fixedDelayString = "${updateMoto.sleeptime:30000}")
++    public void execute() {
++        try {
++            updateMotoUseCase.processPendingFiles();
++        } catch (Exception e) {
++            log.atError()
++                    .setMessage("Unhandled error in UpdateMoto scheduler")
++                    .setCause(e)
++                    .log();
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbCartaMotoAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbCartaMotoAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbCartaMotoAdapter.java
+@@ -0,0 +1,52 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.CartaMoto;
++import com.elrosado.cersuitecloudlocalcore.domain.model.CartaMotoEstado;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.CartaMotoQueryPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.CartaMotoUpdatePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.cvmt.repository.JpaCartaMotoRepository;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Component;
++import org.springframework.transaction.annotation.Transactional;
++
++import java.util.List;
++
++@Component
++public class DbCartaMotoAdapter implements CartaMotoQueryPort, CartaMotoUpdatePort {
++
++    private static final Logger log = LoggerFactory.getLogger(DbCartaMotoAdapter.class);
++
++    private final JpaCartaMotoRepository repository;
++
++    public DbCartaMotoAdapter(JpaCartaMotoRepository repository) {
++        this.repository = repository;
++    }
++
++    @Override
++    @Transactional(transactionManager = "cvmtTransactionManager", readOnly = true)
++    public List<CartaMoto> findPendingToSend() {
++        return repository.findByEstado(CartaMotoEstado.TO_SEND.value()).stream()
++                .map(entity -> entity.toDomain())
++                .toList();
++    }
++
++    @Override
++    @Transactional(transactionManager = "cvmtTransactionManager")
++    public void markAsSent(int idCarta) {
++        repository.findById(idCarta).ifPresentOrElse(
++                entity -> {
++                    entity.markAsSent();
++                    repository.save(entity);
++                    log.atDebug()
++                            .setMessage("Carta moto marcada como enviada en CVMT_EC")
++                            .addKeyValue("idCarta", idCarta)
++                            .log();
++                },
++                () -> log.atWarn()
++                        .setMessage("Carta moto no encontrada para actualizar estado")
++                        .addKeyValue("idCarta", idCarta)
++                        .log()
++        );
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbUpdateMotoAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbUpdateMotoAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbUpdateMotoAdapter.java
+@@ -0,0 +1,87 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.MotoProcessingResult;
++import com.elrosado.cersuitecloudlocalcore.domain.model.MotoRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.MotoPersistencePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.ItemEntity;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.MotoEntity;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository.ItemJpaRepository;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository.MotoJpaRepository;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Component;
++import org.springframework.transaction.annotation.Transactional;
++
++import java.util.List;
++import java.util.Optional;
++
++@Component
++public class DbUpdateMotoAdapter implements MotoPersistencePort {
++
++    private static final Logger log = LoggerFactory.getLogger(DbUpdateMotoAdapter.class);
++
++    private final MotoJpaRepository motoRepository;
++    private final ItemJpaRepository itemRepository;
++
++    public DbUpdateMotoAdapter(
++            MotoJpaRepository motoRepository,
++            ItemJpaRepository itemRepository) {
++        this.motoRepository = motoRepository;
++        this.itemRepository = itemRepository;
++    }
++
++    @Override
++    @Transactional(transactionManager = "artsEcTransactionManager")
++    public MotoProcessingResult processAndSaveBatch(List<MotoRecord> batch) {
++        long inserted = 0;
++        long updated = 0;
++
++        for (MotoRecord record : batch) {
++            String serie = record.serie();
++            Optional<MotoEntity> existing = motoRepository.findBySerie(serie);
++
++            if (existing.isPresent()) {
++                MotoEntity entity = existing.get();
++                entity.updateFrom(record);
++                motoRepository.save(entity);
++                updated++;
++                log.atDebug()
++                        .setMessage("MOTO record updated")
++                        .addKeyValue("serie", serie)
++                        .log();
++            } else {
++                Integer itemId = resolveItemId(record.material());
++                MotoEntity entity = MotoEntity.fromDomain(record, itemId);
++                motoRepository.save(entity);
++                inserted++;
++                if (itemId == null) {
++                    log.atWarn()
++                            .setMessage("MOTO inserted without itemId â SAP code not found in AS_ITM")
++                            .addKeyValue("serie", serie)
++                            .addKeyValue("material", record.material())
++                            .log();
++                } else {
++                    log.atDebug()
++                            .setMessage("MOTO record inserted")
++                            .addKeyValue("serie", serie)
++                            .addKeyValue("itemId", itemId)
++                            .log();
++                }
++            }
++        }
++
++        return new MotoProcessingResult(inserted, updated, 0);
++    }
++
++    private Integer resolveItemId(String material) {
++        if (material == null || material.isBlank()) return null;
++        try {
++            long cdSap = Long.parseLong(material.trim());
++            return itemRepository.findByCdSap(cdSap)
++                    .map(ItemEntity::getIdItm)
++                    .orElse(null);
++        } catch (NumberFormatException e) {
++            return null;
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/cvmt/entity/CartaMotoEntity.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/cvmt/entity/CartaMotoEntity.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/cvmt/entity/CartaMotoEntity.java
+@@ -0,0 +1,87 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.cvmt.entity;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.CartaMoto;
++import com.elrosado.cersuitecloudlocalcore.domain.model.CartaMotoEstado;
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.GeneratedValue;
++import jakarta.persistence.GenerationType;
++import jakarta.persistence.Id;
++import jakarta.persistence.Table;
++
++import java.time.LocalDateTime;
++
++/**
++ * Entidad JPA para la tabla CM_CARTAS en CVMT_EC.
++ * DDL: .migration/SEND_MOTO_SQL/CM_CARTAS.sql
++ */
++@Entity
++@Table(name = "CM_CARTAS", schema = "dbo")
++public class CartaMotoEntity {
++
++    @Id
++    @GeneratedValue(strategy = GenerationType.IDENTITY)
++    @Column(name = "ID_CARTA")
++    private Integer idCarta;
++
++    @Column(name = "ID_TRN")
++    private Integer idTrn;
++
++    @Column(name = "FECHA_C")
++    private LocalDateTime fechaCreacion;
++
++    @Column(name = "ESTADO", nullable = false)
++    private int estado;
++
++    @Column(name = "SRL_NBR", length = 20)
++    private String srlNbr;
++
++    @Column(name = "CC_OPERADOR")
++    private Integer ccOperador;
++
++    @Column(name = "DES_CLAVE")
++    private Integer desClave;
++
++    @Column(name = "FECHA_E")
++    private LocalDateTime fechaEnvio;
++
++    @Column(name = "NOMBXML", length = 200)
++    private String nombXml;
++
++    @Column(name = "COD_CANTON")
++    private Integer codCanton;
++
++    protected CartaMotoEntity() {
++    }
++
++    public Integer getIdCarta() { return idCarta; }
++    public Integer getIdTrn() { return idTrn; }
++    public LocalDateTime getFechaCreacion() { return fechaCreacion; }
++    public int getEstado() { return estado; }
++    public String getSrlNbr() { return srlNbr; }
++    public Integer getCcOperador() { return ccOperador; }
++    public Integer getDesClave() { return desClave; }
++    public LocalDateTime getFechaEnvio() { return fechaEnvio; }
++    public String getNombXml() { return nombXml; }
++    public Integer getCodCanton() { return codCanton; }
++
++    public void markAsSent() {
++        this.estado = CartaMotoEstado.SENT.value();
++        this.fechaEnvio = LocalDateTime.now();
++    }
++
++    public CartaMoto toDomain() {
++        return new CartaMoto(
++                idCarta != null ? idCarta : 0,
++                idTrn != null ? idTrn : 0,
++                fechaCreacion,
++                estado,
++                srlNbr,
++                ccOperador != null ? ccOperador : 0,
++                desClave != null ? desClave : 0,
++                fechaEnvio,
++                nombXml,
++                codCanton != null ? codCanton : 0
++        );
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/cvmt/repository/JpaCartaMotoRepository.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/cvmt/repository/JpaCartaMotoRepository.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/cvmt/repository/JpaCartaMotoRepository.java
+@@ -0,0 +1,14 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.cvmt.repository;
++
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.cvmt.entity.CartaMotoEntity;
++import org.springframework.data.jpa.repository.JpaRepository;
++
++import java.util.List;
++
++/**
++ * Repositorio JPA para CM_CARTAS en CVMT_EC.
++ */
++public interface JpaCartaMotoRepository extends JpaRepository<CartaMotoEntity, Integer> {
++
++    List<CartaMotoEntity> findByEstado(int estado);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/ItemEntity.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/ItemEntity.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/ItemEntity.java
+@@ -0,0 +1,27 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.GeneratedValue;
++import jakarta.persistence.GenerationType;
++import jakarta.persistence.Id;
++import jakarta.persistence.Table;
++
++@Entity
++@Table(name = "AS_ITM", schema = "dbo")
++public class ItemEntity {
++
++    @Id
++    @GeneratedValue(strategy = GenerationType.IDENTITY)
++    @Column(name = "ID_ITM")
++    private Integer idItm;
++
++    @Column(name = "CD_SAP")
++    private Long cdSap;
++
++    protected ItemEntity() {
++    }
++
++    public Integer getIdItm() { return idItm; }
++    public Long getCdSap() { return cdSap; }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/MotoEntity.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/MotoEntity.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/MotoEntity.java
+@@ -0,0 +1,185 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.MotoRecord;
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.GeneratedValue;
++import jakarta.persistence.GenerationType;
++import jakarta.persistence.Id;
++import jakarta.persistence.Table;
++
++@Entity
++@Table(name = "CO_MOTO_CER", schema = "dbo")
++public class MotoEntity {
++
++    @Id
++    @GeneratedValue(strategy = GenerationType.IDENTITY)
++    @Column(name = "ID_MOTO")
++    private Integer idMoto;
++
++    @Column(name = "MANDANTE", length = 3)
++    private String mandante;
++
++    @Column(name = "MATERIAL", length = 18)
++    private String material;
++
++    @Column(name = "MOTOR", length = 20)
++    private String motor;
++
++    @Column(name = "SRL_NBR", length = 20)
++    private String serie;
++
++    @Column(name = "NUM_SRI", length = 20)
++    private String numSRI;
++
++    @Column(name = "CHASIS", length = 20)
++    private String chasis;
++
++    @Column(name = "ANO_MOD", length = 4)
++    private String anoFabricacion;
++
++    @Column(name = "CLASE", length = 15)
++    private String clase;
++
++    @Column(name = "COLOR", length = 15)
++    private String color;
++
++    @Column(name = "CILINDRAJE", length = 10)
++    private String cilindraje;
++
++    @Column(name = "CAPACIDAD", length = 3)
++    private String capAsiento;
++
++    @Column(name = "CPN", length = 20)
++    private String numCPN;
++
++    @Column(name = "GRAVAMEN", length = 1)
++    private String tieneNumCPN;
++
++    @Column(name = "FECHA_CPN", length = 8)
++    private String fechaCPN;
++
++    @Column(name = "SUBCATEGORIA", length = 10)
++    private String subcategoria;
++
++    @Column(name = "COMBUSTIBLE", length = 15)
++    private String tipoCombustible;
++
++    @Column(name = "CARROCERIA", length = 15)
++    private String tipoCarroceria;
++
++    @Column(name = "CKD", length = 20)
++    private String numCKD;
++
++    @Column(name = "MARCA", length = 20)
++    private String marca;
++
++    @Column(name = "MODELO", length = 18)
++    private String modelo;
++
++    @Column(name = "PAIS_ORIG", length = 20)
++    private String paisOrigen;
++
++    @Column(name = "TONELAJE", length = 20)
++    private String tonelaje;
++
++    @Column(name = "CENTRO", length = 4)
++    private String centro;
++
++    @Column(name = "STATUS", length = 1)
++    private String status;
++
++    @Column(name = "EJES", length = 1)
++    private String ejes;
++
++    @Column(name = "RUEDAS", length = 1)
++    private String ruedas;
++
++    @Column(name = "POTENCIA", length = 20)
++    private String potencia;
++
++    @Column(name = "ID_ITM")
++    private Integer itemId;
++
++    protected MotoEntity() {
++    }
++
++    public static MotoEntity fromDomain(MotoRecord record, Integer itemId) {
++        MotoEntity entity = new MotoEntity();
++        entity.itemId = itemId;
++        copyFields(entity, record);
++        return entity;
++    }
++
++    public void updateFrom(MotoRecord record) {
++        copyFields(this, record);
++    }
++
++    private static void copyFields(MotoEntity entity, MotoRecord record) {
++        entity.mandante = trim(record.mandante());
++        entity.material = trim(record.material());
++        entity.motor = trim(record.motor());
++        entity.serie = trim(record.serie());
++        entity.numSRI = trim(record.numSRI());
++        entity.chasis = trim(record.chasis());
++        entity.anoFabricacion = trim(record.anoFabricacion());
++        entity.clase = trim(record.clase());
++        entity.color = trim(record.color());
++        entity.cilindraje = trim(record.cilindraje());
++        entity.capAsiento = trim(record.capAsiento());
++        entity.numCPN = trim(record.numCPN());
++        entity.tieneNumCPN = trim(record.tieneNumCPN());
++        entity.fechaCPN = trim(record.fechaCPN());
++        entity.subcategoria = trim(record.subcategoria());
++        entity.tipoCombustible = trim(record.tipoCombustible());
++        entity.tipoCarroceria = trim(record.tipoCarroceria());
++        entity.numCKD = trim(record.numCKD());
++        entity.marca = trim(record.marca());
++        entity.modelo = trim(record.modelo());
++        entity.paisOrigen = trim(record.paisOrigen());
++        entity.tonelaje = trim(record.tonelaje());
++        entity.centro = trim(record.centro());
++        entity.status = trim(record.status());
++        entity.ejes = blank(record.ejes()) ? "2" : trim(record.ejes());
++        entity.ruedas = blank(record.ruedas()) ? "2" : trim(record.ruedas());
++        entity.potencia = trim(record.potencia());
++    }
++
++    private static String trim(String value) {
++        return value == null ? null : value.trim();
++    }
++
++    private static boolean blank(String value) {
++        return value == null || value.isBlank();
++    }
++
++    public Integer getIdMoto() { return idMoto; }
++    public String getMandante() { return mandante; }
++    public String getMaterial() { return material; }
++    public String getMotor() { return motor; }
++    public String getSerie() { return serie; }
++    public String getNumSRI() { return numSRI; }
++    public String getChasis() { return chasis; }
++    public String getAnoFabricacion() { return anoFabricacion; }
++    public String getClase() { return clase; }
++    public String getColor() { return color; }
++    public String getCilindraje() { return cilindraje; }
++    public String getCapAsiento() { return capAsiento; }
++    public String getNumCPN() { return numCPN; }
++    public String getTieneNumCPN() { return tieneNumCPN; }
++    public String getFechaCPN() { return fechaCPN; }
++    public String getSubcategoria() { return subcategoria; }
++    public String getTipoCombustible() { return tipoCombustible; }
++    public String getTipoCarroceria() { return tipoCarroceria; }
++    public String getNumCKD() { return numCKD; }
++    public String getMarca() { return marca; }
++    public String getModelo() { return modelo; }
++    public String getPaisOrigen() { return paisOrigen; }
++    public String getTonelaje() { return tonelaje; }
++    public String getCentro() { return centro; }
++    public String getStatus() { return status; }
++    public String getEjes() { return ejes; }
++    public String getRuedas() { return ruedas; }
++    public String getPotencia() { return potencia; }
++    public Integer getItemId() { return itemId; }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/MotoTransactionEntity.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/MotoTransactionEntity.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/MotoTransactionEntity.java
+@@ -0,0 +1,31 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.EmbeddedId;
++import jakarta.persistence.Entity;
++import jakarta.persistence.Table;
++
++@Entity
++@Table(name = "TR_LTM_MOTO_DT", schema = "dbo")
++public class MotoTransactionEntity {
++
++    @EmbeddedId
++    private MotoTransactionId id;
++
++    @Column(name = "SRL_NBR", length = 20)
++    private String srlNbr;
++
++    @Column(name = "FL_VD")
++    private Integer flVd;
++
++    @Column(name = "FL_RV")
++    private Integer flRv;
++
++    protected MotoTransactionEntity() {
++    }
++
++    public MotoTransactionId getId() { return id; }
++    public String getSrlNbr() { return srlNbr; }
++    public Integer getFlVd() { return flVd; }
++    public Integer getFlRv() { return flRv; }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/MotoTransactionId.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/MotoTransactionId.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/MotoTransactionId.java
+@@ -0,0 +1,36 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Embeddable;
++
++import java.io.Serial;
++import java.io.Serializable;
++import java.util.Objects;
++
++@Embeddable
++public class MotoTransactionId implements Serializable {
++
++    @Serial
++    private static final long serialVersionUID = 1L;
++
++    @Column(name = "ID_TRN", nullable = false)
++    private Integer idTrn;
++
++    @Column(name = "AI_LN_ITM", nullable = false)
++    private Integer aiLnItm;
++
++    protected MotoTransactionId() {
++    }
++
++    @Override
++    public boolean equals(Object o) {
++        if (this == o) return true;
++        if (!(o instanceof MotoTransactionId that)) return false;
++        return Objects.equals(idTrn, that.idTrn) && Objects.equals(aiLnItm, that.aiLnItm);
++    }
++
++    @Override
++    public int hashCode() {
++        return Objects.hash(idTrn, aiLnItm);
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/ItemJpaRepository.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/ItemJpaRepository.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/ItemJpaRepository.java
+@@ -0,0 +1,11 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository;
++
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.ItemEntity;
++import org.springframework.data.jpa.repository.JpaRepository;
++
++import java.util.Optional;
++
++public interface ItemJpaRepository extends JpaRepository<ItemEntity, Integer> {
++
++    Optional<ItemEntity> findByCdSap(Long cdSap);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/MotoJpaRepository.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/MotoJpaRepository.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/MotoJpaRepository.java
+@@ -0,0 +1,11 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository;
++
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.MotoEntity;
++import org.springframework.data.jpa.repository.JpaRepository;
++
++import java.util.Optional;
++
++public interface MotoJpaRepository extends JpaRepository<MotoEntity, Integer> {
++
++    Optional<MotoEntity> findBySerie(String serie);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/MotoTransactionJpaRepository.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/MotoTransactionJpaRepository.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/MotoTransactionJpaRepository.java
+@@ -0,0 +1,19 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository;
++
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.MotoTransactionEntity;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.MotoTransactionId;
++import org.springframework.data.jpa.repository.JpaRepository;
++import org.springframework.data.jpa.repository.Query;
++import org.springframework.data.repository.query.Param;
++
++public interface MotoTransactionJpaRepository extends JpaRepository<MotoTransactionEntity, MotoTransactionId> {
++
++    @Query(value = """
++            SELECT COUNT(1) FROM TR_LTM_MOTO_DT M
++            JOIN TR_TRN T ON M.ID_TRN = T.ID_TRN
++            WHERE T.FL_CNCL = 0 AND T.FL_VD = 0
++              AND M.FL_VD = 0 AND M.FL_RV = 0
++              AND M.SRL_NBR = :serialNum
++            """, nativeQuery = true)
++    int countActiveBySerie(@Param("serialNum") String serialNum);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/saadmin/entity/StoreEntity.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/saadmin/entity/StoreEntity.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/saadmin/entity/StoreEntity.java
+@@ -0,0 +1,47 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.saadmin.entity;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.GeneratedValue;
++import jakarta.persistence.GenerationType;
++import jakarta.persistence.Id;
++import jakarta.persistence.Table;
++
++@Entity
++@Table(name = "MN_TIENDA", schema = "dbo")
++public class StoreEntity {
++
++    @Id
++    @GeneratedValue(strategy = GenerationType.IDENTITY)
++    @Column(name = "COD_TIENDA")
++    private Integer codTienda;
++
++    @Column(name = "DES_CLAVE", nullable = false)
++    private int desClave;
++
++    @Column(name = "DES_TIENDA", length = 200)
++    private String desTienda;
++
++    @Column(name = "IP", length = 15)
++    private String ip;
++
++    @Column(name = "IND_ACTIVO", nullable = false)
++    private int indActivo;
++
++    @Column(name = "FL_LCL_SRVR", nullable = false)
++    private int flLclSrvr;
++
++    @Column(name = "MULTI_LOCAL", nullable = false)
++    private int multiLocal;
++
++    protected StoreEntity() {
++    }
++
++    public Integer getCodTienda() { return codTienda; }
++    public int getDesClave() { return desClave; }
++    public String getDesTienda() { return desTienda; }
++    public String getIp() { return ip; }
++    public int getIndActivo() { return indActivo; }
++    public int getFlLclSrvr() { return flLclSrvr; }
++    public int getMultiLocal() { return multiLocal; }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/saadmin/repository/StoreJpaRepository.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/saadmin/repository/StoreJpaRepository.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/saadmin/repository/StoreJpaRepository.java
+@@ -0,0 +1,15 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.saadmin.repository;
++
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.saadmin.entity.StoreEntity;
++import org.springframework.data.jpa.repository.JpaRepository;
++
++import java.util.List;
++
++public interface StoreJpaRepository extends JpaRepository<StoreEntity, Integer> {
++
++    List<StoreEntity> findByIndActivoAndMultiLocal(int indActivo, int multiLocal);
++
++    List<StoreEntity> findByIndActivoAndFlLclSrvr(int indActivo, int flLclSrvr);
++
++    List<StoreEntity> findByIndActivoAndMultiLocalAndFlLclSrvr(int indActivo, int multiLocal, int flLclSrvr);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/MotoProcessErrorFirestoreAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/MotoProcessErrorFirestoreAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/MotoProcessErrorFirestoreAdapter.java
+@@ -0,0 +1,72 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.firestore;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.MotoErrorRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.MotoErrorTrackerPort;
++import com.google.cloud.Timestamp;
++import com.google.cloud.firestore.Firestore;
++import org.springframework.beans.factory.annotation.Value;
++import org.springframework.stereotype.Component;
++
++import java.util.LinkedHashMap;
++import java.util.Map;
++import java.util.concurrent.ExecutionException;
++
++@Component
++public class MotoProcessErrorFirestoreAdapter implements MotoErrorTrackerPort {
++
++    private final Firestore firestore;
++
++    @Value("${app.gcp.firestore.collection-process-error:process_error}")
++    private String COLLECTION;
++
++    public MotoProcessErrorFirestoreAdapter(Firestore firestore) {
++        this.firestore = firestore;
++    }
++
++    @Override
++    public void recordError(MotoErrorRecord errorRecord) {
++        Map<String, Object> document = new LinkedHashMap<>();
++        document.put("processName", errorRecord.processName());
++        document.put("processType", errorRecord.processType());
++        document.put("executionId", errorRecord.executionId());
++        document.put("storeCode", errorRecord.storeCode());
++        document.put("fileName", errorRecord.fileName());
++        document.put("bucket", errorRecord.bucket());
++        document.put("gcsPath", errorRecord.gcsPath());
++        document.put("stage", errorRecord.stage());
++        document.put("operation", valueOrDefault(errorRecord.operation()));
++        document.put("errorType", valueOrDefault(errorRecord.errorType()));
++        document.put("errorCode", valueOrDefault(errorRecord.errorCode()));
++        document.put("errorMessage", valueOrDefault(errorRecord.errorMessage()));
++        document.put("stackTrace", valueOrDefault(errorRecord.stackTrace()));
++        document.put("retry", errorRecord.retry());
++        document.put("maxRetries", errorRecord.maxRetries());
++        document.put("stopRetries", errorRecord.stopRetries());
++        document.put("status", errorRecord.status());
++        document.put("createdAt", toTimestamp(errorRecord.createdAt()));
++        document.put("updatedAt", toTimestamp(errorRecord.updatedAt()));
++        document.put("hostname", valueOrDefault(errorRecord.hostname()));
++        document.put("podName", valueOrDefault(errorRecord.podName()));
++        document.put("schedulerExecutionId", valueOrDefault(errorRecord.schedulerExecutionId()));
++
++        try {
++            firestore.collection(COLLECTION)
++                    .document(errorRecord.executionId())
++                    .set(document)
++                    .get();
++        } catch (InterruptedException e) {
++            Thread.currentThread().interrupt();
++            throw new IllegalStateException("Firestore MOTO error registration interrupted", e);
++        } catch (ExecutionException e) {
++            throw new IllegalStateException("Error registering Firestore MOTO error", e.getCause());
++        }
++    }
++
++    private Timestamp toTimestamp(java.time.Instant instant) {
++        return Timestamp.ofTimeSecondsAndNanos(instant.getEpochSecond(), instant.getNano());
++    }
++
++    private String valueOrDefault(String value) {
++        return value == null ? "" : value;
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsCartaMotoStorageAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsCartaMotoStorageAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsCartaMotoStorageAdapter.java
+@@ -0,0 +1,76 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.storage;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.CartaMotoStoragePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.LegacySendCartaMotoProperties;
++import com.google.cloud.storage.Blob;
++import com.google.cloud.storage.BlobId;
++import com.google.cloud.storage.BlobInfo;
++import com.google.cloud.storage.Storage;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Component;
++
++@Component
++public class GcsCartaMotoStorageAdapter implements CartaMotoStoragePort {
++
++    private static final Logger log = LoggerFactory.getLogger(GcsCartaMotoStorageAdapter.class);
++
++    private final Storage storage;
++    private final LegacySendCartaMotoProperties legacyProperties;
++
++    public GcsCartaMotoStorageAdapter(Storage storage, LegacySendCartaMotoProperties legacyProperties) {
++        this.storage = storage;
++        this.legacyProperties = legacyProperties;
++    }
++
++    @Override
++    public byte[] downloadXml(String fileName) {
++        GcsObjectReference inputFolder = GcsObjectReference.fromUri(legacyProperties.inputUri());
++        BlobId blobId = BlobId.of(inputFolder.bucket(), inputFolder.objectName() + "/" + fileName);
++
++        Blob blob = storage.get(blobId);
++        if (blob == null) {
++            throw new IllegalArgumentException("Archivo XML no encontrado en GCS: " + blobId);
++        }
++
++        byte[] content = blob.getContent();
++        log.atDebug()
++                .setMessage("Archivo XML descargado de GCS")
++                .addKeyValue("fileName", fileName)
++                .addKeyValue("bytes", content.length)
++                .log();
++        return content;
++    }
++
++    @Override
++    public GcsObjectReference moveToBackup(String fileName) {
++        GcsObjectReference inputFolder = GcsObjectReference.fromUri(legacyProperties.inputUri());
++        GcsObjectReference backupFolder = GcsObjectReference.fromUri(legacyProperties.backupUri());
++        GcsObjectReference target = backupFolder.resolve(fileName);
++
++        BlobId sourceId = BlobId.of(inputFolder.bucket(), inputFolder.objectName() + "/" + fileName);
++        BlobId targetId = BlobId.of(target.bucket(), target.objectName());
++
++        storage.delete(targetId);
++        storage.copy(Storage.CopyRequest.newBuilder()
++                .setSource(sourceId)
++                .setTarget(BlobInfo.newBuilder(targetId).build())
++                .build()).getResult();
++
++        boolean deleted = storage.delete(sourceId);
++        if (!deleted) {
++            log.atWarn()
++                    .setMessage("Objeto fuente no eliminado tras mover a backup en GCS")
++                    .addKeyValue("source", inputFolder.toUri() + "/" + fileName)
++                    .log();
++        }
++
++        log.atDebug()
++                .setMessage("Archivo XML movido a backup en GCS")
++                .addKeyValue("fileName", fileName)
++                .addKeyValue("backupUri", target.toUri())
++                .log();
++        return target;
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsUpdateMotoStorageAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsUpdateMotoStorageAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsUpdateMotoStorageAdapter.java
+@@ -0,0 +1,141 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.storage;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.MotoFile;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.MotoStoragePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.LegacyUpdateMotoProperties;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.UpdateMotoProperties;
++import com.google.cloud.storage.Blob;
++import com.google.cloud.storage.BlobId;
++import com.google.cloud.storage.BlobInfo;
++import com.google.cloud.storage.Storage;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Component;
++
++import java.io.BufferedReader;
++import java.io.InputStreamReader;
++import java.nio.channels.Channels;
++import java.nio.charset.StandardCharsets;
++import java.util.Comparator;
++import java.util.List;
++import java.util.Optional;
++import java.util.regex.Matcher;
++import java.util.regex.Pattern;
++import java.util.stream.StreamSupport;
++
++@Component
++public class GcsUpdateMotoStorageAdapter implements MotoStoragePort {
++
++    private static final Logger log = LoggerFactory.getLogger(GcsUpdateMotoStorageAdapter.class);
++
++    // Matches MOLOTE{sequence}.{storeCode} â e.g. MOLOTE517.100, MOLOTE001.001
++    private static final Pattern MOTO_FILE_PATTERN =
++            Pattern.compile("^MOLOTE(\\d+)\\.(\\d+)$", Pattern.CASE_INSENSITIVE);
++
++    private final Storage storage;
++    private final LegacyUpdateMotoProperties legacyProperties;
++    private final UpdateMotoProperties properties;
++
++    public GcsUpdateMotoStorageAdapter(
++            Storage storage,
++            LegacyUpdateMotoProperties legacyProperties,
++            UpdateMotoProperties properties) {
++        this.storage = storage;
++        this.legacyProperties = legacyProperties;
++        this.properties = properties;
++    }
++
++    @Override
++    public List<MotoFile> listPendingFiles() {
++        GcsObjectReference input = GcsObjectReference.fromUri(legacyProperties.inputUri());
++        String prefix = input.prefixWithSlash();
++
++        return StreamSupport.stream(
++                        storage.list(input.bucket(), Storage.BlobListOption.prefix(prefix))
++                                .iterateAll()
++                                .spliterator(), false)
++                .filter(blob -> !blob.isDirectory())
++                .flatMap(blob -> toMotoFile(input, prefix, blob).stream())
++                .sorted(Comparator
++                        .comparingInt(MotoFile::storeCode)
++                        .thenComparingInt(MotoFile::sequenceNumber))
++                .toList();
++    }
++
++    @Override
++    public BufferedReader openReader(MotoFile file) {
++        Blob blob = storage.get(BlobId.of(file.location().bucket(), file.location().objectName()));
++        if (blob == null) {
++            throw new IllegalArgumentException("GCS object not found: " + file.location().toUri());
++        }
++        return new BufferedReader(new InputStreamReader(
++                Channels.newInputStream(blob.reader()),
++                StandardCharsets.UTF_8));
++    }
++
++    @Override
++    public GcsObjectReference moveToBackup(MotoFile file) {
++        String storeCodeStr = String.format("%03d", file.storeCode());
++        GcsObjectReference targetFolder = GcsObjectReference.fromUri(
++                legacyProperties.backupUri() + "/" + storeCodeStr);
++        return move(file, targetFolder);
++    }
++
++    @Override
++    public GcsObjectReference moveToError(MotoFile file) {
++        String storeCodeStr = String.format("%03d", file.storeCode());
++        GcsObjectReference targetFolder = GcsObjectReference.fromUri(
++                properties.gcs().errorUri() + "/" + storeCodeStr);
++        return move(file, targetFolder);
++    }
++
++    private Optional<MotoFile> toMotoFile(GcsObjectReference input, String prefix, Blob blob) {
++        String objectName = blob.getName();
++        if (!objectName.startsWith(prefix)) return Optional.empty();
++
++        String relativeName = objectName.substring(prefix.length());
++        if (relativeName.isBlank() || relativeName.contains("/")) return Optional.empty();
++
++        Matcher matcher = MOTO_FILE_PATTERN.matcher(relativeName);
++        if (!matcher.matches()) return Optional.empty();
++
++        try {
++            int sequence = Integer.parseInt(matcher.group(1));
++            int storeCode = Integer.parseInt(matcher.group(2));
++            return Optional.of(new MotoFile(
++                    new GcsObjectReference(input.bucket(), objectName),
++                    relativeName,
++                    storeCode,
++                    sequence
++            ));
++        } catch (NumberFormatException e) {
++            log.atWarn()
++                    .setMessage("Invalid MOTO filename format; skipped")
++                    .addKeyValue("fileName", relativeName)
++                    .log();
++            return Optional.empty();
++        }
++    }
++
++    private GcsObjectReference move(MotoFile file, GcsObjectReference targetFolder) {
++        GcsObjectReference target = targetFolder.resolve(file.fileName());
++        BlobId sourceId = BlobId.of(file.location().bucket(), file.location().objectName());
++        BlobId targetId = BlobId.of(target.bucket(), target.objectName());
++
++        storage.delete(targetId);
++        storage.copy(Storage.CopyRequest.newBuilder()
++                .setSource(sourceId)
++                .setTarget(BlobInfo.newBuilder(targetId).build())
++                .build()).getResult();
++
++        boolean deleted = storage.delete(sourceId);
++        if (!deleted) {
++            log.atWarn()
++                    .setMessage("Source object not deleted after GCS move")
++                    .addKeyValue("sourceObject", file.location().toUri())
++                    .log();
++        }
++        return target;
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/transfer/SftpCartaMotoTransferAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/transfer/SftpCartaMotoTransferAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/transfer/SftpCartaMotoTransferAdapter.java
+@@ -0,0 +1,100 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.transfer;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.CartaMotoTransferPort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.LegacySendCartaMotoProperties;
++import net.schmizz.sshj.SSHClient;
++import net.schmizz.sshj.sftp.SFTPClient;
++import net.schmizz.sshj.transport.verification.PromiscuousVerifier;
++import net.schmizz.sshj.xfer.InMemorySourceFile;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Component;
++
++import java.io.ByteArrayInputStream;
++import java.io.IOException;
++import java.io.InputStream;
++
++/**
++ * Adaptador SFTP para transferencia de archivos XML de cartas moto.
++ * Reemplaza JSch (legado) con SSHJ para compatibilidad Java 25 y API mÃ¡s limpia.
++ * La verificaciÃ³n de host usa PromiscuousVerifier equivalente al legado StrictHostKeyChecking=no.
++ */
++@Component
++public class SftpCartaMotoTransferAdapter implements CartaMotoTransferPort {
++
++    private static final Logger log = LoggerFactory.getLogger(SftpCartaMotoTransferAdapter.class);
++
++    private final LegacySendCartaMotoProperties legacyProperties;
++
++    public SftpCartaMotoTransferAdapter(LegacySendCartaMotoProperties legacyProperties) {
++        this.legacyProperties = legacyProperties;
++    }
++
++    @Override
++    public void transferFile(String fileName, byte[] content) {
++        String serverIp = legacyProperties.server().serverIp();
++        int port = legacyProperties.server().port();
++        String remoteDir = legacyProperties.server().remoteDir();
++        String username = legacyProperties.username();
++        String password = legacyProperties.password();
++        String remotePath = remoteDir + "/" + fileName;
++
++        log.atDebug()
++                .setMessage("Iniciando transferencia SFTP de carta moto")
++                .addKeyValue("fileName", fileName)
++                .addKeyValue("server", serverIp + ":" + port)
++                .addKeyValue("remotePath", remotePath)
++                .log();
++
++        try (SSHClient ssh = buildSshClient(serverIp, port, username, password);
++             SFTPClient sftp = ssh.newSFTPClient()) {
++
++            sftp.put(new ByteArraySourceFile(fileName, content), remotePath);
++
++            log.atDebug()
++                    .setMessage("Archivo carta moto transferido por SFTP exitosamente")
++                    .addKeyValue("fileName", fileName)
++                    .addKeyValue("remotePath", remotePath)
++                    .log();
++
++        } catch (IOException e) {
++            throw new IllegalStateException(
++                    "Error transfiriendo carta moto por SFTP: " + fileName, e);
++        }
++    }
++
++    private SSHClient buildSshClient(String serverIp, int port, String username, String password)
++            throws IOException {
++        SSHClient ssh = new SSHClient();
++        ssh.addHostKeyVerifier(new PromiscuousVerifier());
++        ssh.connect(serverIp, port);
++        ssh.authPassword(username, password);
++        return ssh;
++    }
++
++    private static final class ByteArraySourceFile extends InMemorySourceFile {
++
++        private final String name;
++        private final byte[] bytes;
++
++        ByteArraySourceFile(String name, byte[] bytes) {
++            this.name = name;
++            this.bytes = bytes;
++        }
++
++        @Override
++        public String getName() {
++            return name;
++        }
++
++        @Override
++        public long getLength() {
++            return bytes.length;
++        }
++
++        @Override
++        public InputStream getInputStream() {
++            return new ByteArrayInputStream(bytes);
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/CvmtDataSourceConfig.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/CvmtDataSourceConfig.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/CvmtDataSourceConfig.java
+@@ -0,0 +1,17 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.context.annotation.Configuration;
++import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
++
++/**
++ * Activa los repositorios Spring Data JPA del datasource CVMT_EC.
++ * Cubre entidades de carta moto (CM_CARTAS) en la base de datos de billing de motos.
++ */
++@Configuration
++@EnableJpaRepositories(
++        basePackages = "com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.cvmt.repository",
++        entityManagerFactoryRef = "cvmtEntityManagerFactory",
++        transactionManagerRef = "cvmtTransactionManager"
++)
++public class CvmtDataSourceConfig {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LegacySendCartaMotoProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LegacySendCartaMotoProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LegacySendCartaMotoProperties.java
+@@ -0,0 +1,78 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.boot.context.properties.ConfigurationProperties;
++
++/**
++ * Propiedades heredadas de ArmsServerConf.properties para SendCartaMotoProcess.
++ * Registradas en k8s/properties.yaml; migraciÃ³n futura a Redis para parÃ¡metros de Saadmin.
++ */
++@ConfigurationProperties(prefix = "sendCartaMoto")
++public record LegacySendCartaMotoProperties(
++        LegacyRoute in,
++        LegacyRoute out,
++        long sleeptime,
++        int retries,
++        String username,
++        String password,
++        LegacyServer server
++) {
++
++    public LegacySendCartaMotoProperties {
++        if (in == null) {
++            in = new LegacyRoute(new LegacyFolder(""));
++        }
++        if (out == null) {
++            out = new LegacyRoute(new LegacyFolder(""));
++        }
++        if (sleeptime <= 0) {
++            sleeptime = 30_000L;
++        }
++        if (retries <= 0) {
++            retries = 3;
++        }
++        if (username == null) {
++            username = "";
++        }
++        if (password == null) {
++            password = "";
++        }
++        if (server == null) {
++            server = new LegacyServer("", 22, "");
++        }
++    }
++
++    public String inputUri() {
++        return in.folder().path();
++    }
++
++    public String backupUri() {
++        return out.folder().path();
++    }
++
++    public record LegacyRoute(LegacyFolder folder) {
++        public LegacyRoute {
++            if (folder == null) {
++                folder = new LegacyFolder("");
++            }
++        }
++    }
++
++    public record LegacyFolder(String path) {
++        public LegacyFolder {
++            if (path == null) {
++                path = "";
++            }
++        }
++    }
++
++    public record LegacyServer(String serverIp, int port, String remoteDir) {
++        public LegacyServer {
++            if (serverIp == null) {
++                serverIp = "";
++            }
++            if (remoteDir == null) {
++                remoteDir = "";
++            }
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LegacyUpdateMotoProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LegacyUpdateMotoProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LegacyUpdateMotoProperties.java
+@@ -0,0 +1,47 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.boot.context.properties.ConfigurationProperties;
++
++@ConfigurationProperties(prefix = "update-moto")
++public record LegacyUpdateMotoProperties(
++        LegacyRoute in,
++        LegacyRoute out,
++        long sleeptime
++) {
++
++    public LegacyUpdateMotoProperties {
++        if (in == null) {
++            in = new LegacyRoute(new LegacyFolder(""));
++        }
++        if (out == null) {
++            out = new LegacyRoute(new LegacyFolder(""));
++        }
++        if (sleeptime <= 0) {
++            sleeptime = 30_000L;
++        }
++    }
++
++    public String inputUri() {
++        return in.folder().path();
++    }
++
++    public String backupUri() {
++        return out.folder().path();
++    }
++
++    public record LegacyRoute(LegacyFolder folder) {
++        public LegacyRoute {
++            if (folder == null) {
++                folder = new LegacyFolder("");
++            }
++        }
++    }
++
++    public record LegacyFolder(String path) {
++        public LegacyFolder {
++            if (path == null) {
++                path = "";
++            }
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SaadminDataSourceConfig.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SaadminDataSourceConfig.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SaadminDataSourceConfig.java
+@@ -0,0 +1,13 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.context.annotation.Configuration;
++import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
++
++@Configuration
++@EnableJpaRepositories(
++        basePackages = "com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.saadmin.repository",
++        entityManagerFactoryRef = "saadminEntityManagerFactory",
++        transactionManagerRef = "saadminTransactionManager"
++)
++public class SaadminDataSourceConfig {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java
+@@ -12,7 +12,11 @@
+ @EnableConfigurationProperties({
+         ReproProperties.class,
+         UpdateCedPadRucProperties.class,
+-        LegacyUpdateCedPadRucProperties.class
++        LegacyUpdateCedPadRucProperties.class,
++        UpdateMotoProperties.class,
++        LegacyUpdateMotoProperties.class,
++        SendCartaMotoProperties.class,
++        LegacySendCartaMotoProperties.class
+ })
+ public class SchedulingConfig {
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SendCartaMotoProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SendCartaMotoProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SendCartaMotoProperties.java
+@@ -0,0 +1,14 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.boot.context.properties.ConfigurationProperties;
++
++/**
++ * Propiedades de control del proceso SendCartaMoto en el ecosistema cloud.
++ */
++@ConfigurationProperties(prefix = "app.send-carta-moto")
++public record SendCartaMotoProperties(boolean enabled) {
++
++    public SendCartaMotoProperties {
++        // enabled default false: requiere activaciÃ³n explÃ­cita por ConfigMap/ambiente
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/StoreRegistry.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/StoreRegistry.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/StoreRegistry.java
+@@ -0,0 +1,72 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.saadmin.entity.StoreEntity;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.saadmin.repository.StoreJpaRepository;
++import jakarta.annotation.PostConstruct;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Component;
++
++import java.util.Collections;
++import java.util.List;
++import java.util.Optional;
++
++@Component
++public class StoreRegistry {
++
++    private static final Logger log = LoggerFactory.getLogger(StoreRegistry.class);
++
++    private final StoreJpaRepository storeRepository;
++
++    private volatile List<StoreEntity> activeMultiLocalStores = List.of();
++
++    public StoreRegistry(StoreJpaRepository storeRepository) {
++        this.storeRepository = storeRepository;
++    }
++
++    @PostConstruct
++    public void load() {
++        try {
++            activeMultiLocalStores = storeRepository.findByIndActivoAndMultiLocal(1, 1);
++
++            if (activeMultiLocalStores.isEmpty()) {
++                log.atWarn()
++                        .setMessage("No active multi-local stores found in MN_TIENDA â UpdateMoto scheduler will be skipped")
++                        .log();
++            } else {
++                log.atInfo()
++                        .setMessage("StoreRegistry loaded")
++                        .addKeyValue("stores", activeMultiLocalStores.size())
++                        .addKeyValue("storeCodes", activeMultiLocalStores.stream()
++                                .map(s -> String.valueOf(s.getDesClave()))
++                                .toList())
++                        .log();
++            }
++        } catch (Exception e) {
++            log.atWarn()
++                    .setMessage("Failed to load StoreRegistry from SAADMIN â UpdateMoto scheduler will be skipped")
++                    .setCause(e)
++                    .log();
++        }
++    }
++
++    public List<StoreEntity> getActiveMultiLocalStores() {
++        return Collections.unmodifiableList(activeMultiLocalStores);
++    }
++
++    public List<StoreEntity> getActiveLocalServerStores() {
++        return activeMultiLocalStores.stream()
++                .filter(s -> s.getFlLclSrvr() == 1)
++                .toList();
++    }
++
++    public boolean isMultiLocalEnabled() {
++        return !activeMultiLocalStores.isEmpty();
++    }
++
++    public Optional<StoreEntity> findByDesClave(int desClave) {
++        return activeMultiLocalStores.stream()
++                .filter(s -> s.getDesClave() == desClave)
++                .findFirst();
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/UpdateMotoProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/UpdateMotoProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/UpdateMotoProperties.java
+@@ -0,0 +1,23 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.boot.context.properties.ConfigurationProperties;
++
++@ConfigurationProperties(prefix = "app.update-moto")
++public record UpdateMotoProperties(
++        boolean enabled,
++        int batchSize,
++        GcsProperties gcs
++) {
++
++    public UpdateMotoProperties {
++        if (batchSize <= 0) {
++            batchSize = 100;
++        }
++        if (gcs == null) {
++            gcs = new GcsProperties("");
++        }
++    }
++
++    public record GcsProperties(String errorUri) {
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/MotoFileParser.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/MotoFileParser.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/MotoFileParser.java
+@@ -0,0 +1,68 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.MotoRecord;
++import org.springframework.stereotype.Component;
++
++@Component
++public class MotoFileParser {
++
++    private static final int MIN_LINE_LENGTH = 320;
++    private static final String COMBUSTIBLE_ELECTRICO = "ELECTRICO";
++
++    private final TextNormalizer textNormalizer;
++
++    public MotoFileParser(TextNormalizer textNormalizer) {
++        this.textNormalizer = textNormalizer;
++    }
++
++    public MotoRecord parseLine(String line, long lineNumber) {
++        if (line == null || line.length() < MIN_LINE_LENGTH) {
++            int length = line == null ? 0 : line.length();
++            throw new IllegalArgumentException(
++                    "Line " + lineNumber + " too short: expected >= " + MIN_LINE_LENGTH + ", got " + length);
++        }
++
++        String tipoCombustible = textNormalizer.normalize(line.substring(187, 202).trim());
++
++        String ejes = line.length() > 320 ? line.substring(320, 321).trim() : "";
++        if (ejes.isBlank()) ejes = "2";
++
++        String ruedas = line.length() > 321 ? line.substring(321, 322).trim() : "";
++        if (ruedas.isBlank()) ruedas = "2";
++
++        String potencia = "";
++        if (COMBUSTIBLE_ELECTRICO.equals(tipoCombustible) && line.length() > 322) {
++            potencia = line.substring(322, Math.min(342, line.length())).trim();
++        }
++
++        return new MotoRecord(
++                line.substring(0, 3).trim(),
++                line.substring(3, 21).trim(),
++                line.substring(21, 41).trim(),
++                line.substring(41, 61).trim(),
++                line.substring(61, 81).trim(),
++                line.substring(81, 101).trim(),
++                line.substring(101, 105).trim(),
++                line.substring(105, 120).trim(),
++                line.substring(120, 135).trim(),
++                line.substring(135, 145).trim(),
++                line.substring(145, 148).trim(),
++                line.substring(148, 168).trim(),
++                line.substring(168, 169).trim(),
++                line.substring(169, 177).trim(),
++                line.substring(177, 187).trim(),
++                tipoCombustible,
++                line.substring(202, 217).trim(),
++                line.substring(217, 237).trim(),
++                line.substring(237, 257).trim(),
++                line.substring(257, 275).trim(),
++                line.substring(275, 295).trim(),
++                line.substring(295, 315).trim(),
++                line.substring(315, 319).trim(),
++                line.substring(319, 320).trim(),
++                ejes,
++                ruedas,
++                potencia
++        );
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/SendCartaMotoService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/SendCartaMotoService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/SendCartaMotoService.java
+@@ -0,0 +1,212 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.exception.SendCartaMotoException;
++import com.elrosado.cersuitecloudlocalcore.domain.model.CartaMoto;
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SendCartaMotoStage;
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.SendCartaMotoUseCase;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.CartaMotoQueryPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.CartaMotoStoragePort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.CartaMotoTransferPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.CartaMotoUpdatePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.LegacySendCartaMotoProperties;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.SendCartaMotoProperties;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.StoreRegistry;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Service;
++
++import java.util.List;
++
++@Service
++public class SendCartaMotoService implements SendCartaMotoUseCase {
++
++    private static final Logger log = LoggerFactory.getLogger(SendCartaMotoService.class);
++    private static final int STACKTRACE_MAX_LINES = 8;
++
++    private final CartaMotoQueryPort queryPort;
++    private final CartaMotoUpdatePort updatePort;
++    private final CartaMotoStoragePort storagePort;
++    private final CartaMotoTransferPort transferPort;
++    private final SendCartaMotoProperties properties;
++    private final LegacySendCartaMotoProperties legacyProperties;
++    private final StoreRegistry storeRegistry;
++
++    public SendCartaMotoService(
++            CartaMotoQueryPort queryPort,
++            CartaMotoUpdatePort updatePort,
++            CartaMotoStoragePort storagePort,
++            CartaMotoTransferPort transferPort,
++            SendCartaMotoProperties properties,
++            LegacySendCartaMotoProperties legacyProperties,
++            StoreRegistry storeRegistry) {
++        this.queryPort = queryPort;
++        this.updatePort = updatePort;
++        this.storagePort = storagePort;
++        this.transferPort = transferPort;
++        this.properties = properties;
++        this.legacyProperties = legacyProperties;
++        this.storeRegistry = storeRegistry;
++    }
++
++    @Override
++    public void sendPendingCartas() {
++        if (!properties.enabled()) {
++            log.atDebug().setMessage("SendCartaMoto deshabilitado").log();
++            return;
++        }
++
++        if (!storeRegistry.isMultiLocalEnabled()) {
++            log.atWarn().setMessage("SendCartaMoto omitido â sin tiendas multi-local activas en MN_TIENDA").log();
++            return;
++        }
++
++        List<CartaMoto> pending;
++        try {
++            pending = queryPort.findPendingToSend();
++        } catch (RuntimeException e) {
++            throw new SendCartaMotoException(
++                    SendCartaMotoStage.DATABASE_UPDATE,
++                    "Error consultando cartas moto pendientes en CVMT_EC",
++                    e);
++        }
++
++        if (pending.isEmpty()) {
++            log.atDebug().setMessage("Sin cartas moto pendientes de envÃ­o").log();
++            return;
++        }
++
++        log.atInfo()
++                .setMessage("Cartas moto pendientes de envÃ­o encontradas")
++                .addKeyValue("total", pending.size())
++                .log();
++
++        pending.forEach(this::processWithRetry);
++    }
++
++    private void processWithRetry(CartaMoto carta) {
++        int maxRetries = legacyProperties.retries();
++        String fileName = carta.nombArchXml();
++
++        if (storeRegistry.findByDesClave(carta.desClave()).isEmpty()) {
++            log.atWarn()
++                    .setMessage("Tienda de carta moto no activa en registro multi-local â omitida")
++                    .addKeyValue("idCarta", carta.idCarta())
++                    .addKeyValue("desClave", carta.desClave())
++                    .addKeyValue("fileName", fileName)
++                    .log();
++            return;
++        }
++
++        for (int attempt = 1; attempt <= maxRetries; attempt++) {
++            try {
++                sendCarta(carta);
++                log.atInfo()
++                        .setMessage("Carta moto enviada exitosamente")
++                        .addKeyValue("idCarta", carta.idCarta())
++                        .addKeyValue("fileName", fileName)
++                        .addKeyValue("desClave", carta.desClave())
++                        .log();
++                return;
++
++            } catch (Exception e) {
++                SendCartaMotoStage stage = resolveStage(e);
++                if (attempt < maxRetries) {
++                    log.atWarn()
++                            .setMessage("Error enviando carta moto; reintentando")
++                            .addKeyValue("idCarta", carta.idCarta())
++                            .addKeyValue("fileName", fileName)
++                            .addKeyValue("attempt", attempt)
++                            .addKeyValue("stage", stage)
++                            .setCause(e)
++                            .log();
++                } else {
++                    log.atError()
++                            .setMessage("Carta moto no pudo enviarse tras todos los intentos")
++                            .addKeyValue("idCarta", carta.idCarta())
++                            .addKeyValue("fileName", fileName)
++                            .addKeyValue("stage", stage)
++                            .addKeyValue("maxRetries", maxRetries)
++                            .addKeyValue("stackTrace", summarizeStackTrace(e))
++                            .setCause(e)
++                            .log();
++                }
++            }
++        }
++    }
++
++    private void sendCarta(CartaMoto carta) {
++        String fileName = carta.nombArchXml();
++
++        byte[] content = downloadFromGcs(fileName);
++        transferViaSftp(fileName, content);
++        moveToBackup(fileName);
++        markAsSent(carta.idCarta());
++    }
++
++    private byte[] downloadFromGcs(String fileName) {
++        try {
++            return storagePort.downloadXml(fileName);
++        } catch (RuntimeException e) {
++            throw new SendCartaMotoException(
++                    SendCartaMotoStage.GCS_DOWNLOAD,
++                    "Error descargando XML de carta moto desde GCS: " + fileName,
++                    e);
++        }
++    }
++
++    private void transferViaSftp(String fileName, byte[] content) {
++        try {
++            transferPort.transferFile(fileName, content);
++        } catch (RuntimeException e) {
++            throw new SendCartaMotoException(
++                    SendCartaMotoStage.SFTP_TRANSFER,
++                    "Error transfiriendo carta moto por SFTP: " + fileName,
++                    e);
++        }
++    }
++
++    private void moveToBackup(String fileName) {
++        try {
++            GcsObjectReference backup = storagePort.moveToBackup(fileName);
++            log.atDebug()
++                    .setMessage("Carta moto movida a backup")
++                    .addKeyValue("fileName", fileName)
++                    .addKeyValue("backupUri", backup.toUri())
++                    .log();
++        } catch (RuntimeException e) {
++            throw new SendCartaMotoException(
++                    SendCartaMotoStage.GCS_MOVE_TO_BACKUP,
++                    "Error moviendo carta moto a backup en GCS: " + fileName,
++                    e);
++        }
++    }
++
++    private void markAsSent(int idCarta) {
++        try {
++            updatePort.markAsSent(idCarta);
++        } catch (RuntimeException e) {
++            throw new SendCartaMotoException(
++                    SendCartaMotoStage.DATABASE_UPDATE,
++                    "Error actualizando estado de carta moto en CVMT_EC: " + idCarta,
++                    e);
++        }
++    }
++
++    private SendCartaMotoStage resolveStage(Exception error) {
++        if (error instanceof SendCartaMotoException ex) {
++            return ex.stage();
++        }
++        return SendCartaMotoStage.UNKNOWN;
++    }
++
++    private String summarizeStackTrace(Exception error) {
++        StringBuilder summary = new StringBuilder(error.toString());
++        StackTraceElement[] stackTrace = error.getStackTrace();
++        int max = Math.min(stackTrace.length, STACKTRACE_MAX_LINES);
++        for (int i = 0; i < max; i++) {
++            summary.append(System.lineSeparator()).append("at ").append(stackTrace[i]);
++        }
++        return summary.toString();
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/TextNormalizer.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/TextNormalizer.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/TextNormalizer.java
+@@ -0,0 +1,18 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import org.springframework.stereotype.Component;
++
++@Component
++public class TextNormalizer {
++
++    public String normalize(String input) {
++        if (input == null) return null;
++        return input
++                .replace('Ã', 'A').replace('Ã¡', 'a')
++                .replace('Ã', 'E').replace('Ã©', 'e')
++                .replace('Ã', 'I').replace('Ã­', 'i')
++                .replace('Ã', 'O').replace('Ã³', 'o')
++                .replace('Ã', 'U').replace('Ãº', 'u')
++                .replace('Ã', 'U').replace('Ã¼', 'u');
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/UpdateMotoService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/UpdateMotoService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/UpdateMotoService.java
+@@ -0,0 +1,401 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.exception.MotoProcessingException;
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.MotoErrorRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.model.MotoFile;
++import com.elrosado.cersuitecloudlocalcore.domain.model.MotoProcessingResult;
++import com.elrosado.cersuitecloudlocalcore.domain.model.MotoProcessingStage;
++import com.elrosado.cersuitecloudlocalcore.domain.model.MotoRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.UpdateMotoUseCase;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.MotoErrorTrackerPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.MotoPersistencePort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.MotoStoragePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.StoreRegistry;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.UpdateMotoProperties;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.beans.factory.annotation.Qualifier;
++import org.springframework.core.task.AsyncTaskExecutor;
++import org.springframework.stereotype.Service;
++
++import java.io.BufferedReader;
++import java.io.IOException;
++import java.time.Instant;
++import java.util.ArrayList;
++import java.util.List;
++import java.util.Map;
++import java.util.UUID;
++import java.util.concurrent.CompletableFuture;
++import java.util.stream.Collectors;
++
++@Service
++public class UpdateMotoService implements UpdateMotoUseCase {
++
++    private static final Logger log = LoggerFactory.getLogger(UpdateMotoService.class);
++    private static final int MAX_ATTEMPTS = 3;
++    private static final int STACKTRACE_MAX_LINES = 8;
++    private static final String PROCESS_NAME = "UpdateMotoProcess";
++    private static final String PROCESS_TYPE = "SCHEDULER";
++
++    private final MotoStoragePort storagePort;
++    private final MotoPersistencePort persistencePort;
++    private final MotoErrorTrackerPort errorTrackerPort;
++    private final MotoFileParser parser;
++    private final UpdateMotoProperties properties;
++    private final StoreRegistry storeRegistry;
++    private final AsyncTaskExecutor virtualThreadTaskExecutor;
++
++    public UpdateMotoService(
++            MotoStoragePort storagePort,
++            MotoPersistencePort persistencePort,
++            MotoErrorTrackerPort errorTrackerPort,
++            MotoFileParser parser,
++            UpdateMotoProperties properties,
++            StoreRegistry storeRegistry,
++            @Qualifier("virtualThreadTaskExecutor") AsyncTaskExecutor virtualThreadTaskExecutor) {
++        this.storagePort = storagePort;
++        this.persistencePort = persistencePort;
++        this.errorTrackerPort = errorTrackerPort;
++        this.parser = parser;
++        this.properties = properties;
++        this.storeRegistry = storeRegistry;
++        this.virtualThreadTaskExecutor = virtualThreadTaskExecutor;
++    }
++
++    @Override
++    public void processPendingFiles() {
++        if (!properties.enabled()) {
++            log.atDebug().setMessage("UpdateMoto disabled").log();
++            return;
++        }
++
++        if (!storeRegistry.isMultiLocalEnabled()) {
++            log.atWarn().setMessage("UpdateMoto skipped â no active multi-local stores in MN_TIENDA").log();
++            return;
++        }
++
++        List<MotoFile> pendingFiles;
++        try {
++            pendingFiles = storagePort.listPendingFiles();
++        } catch (RuntimeException e) {
++            throw new MotoProcessingException(
++                    MotoProcessingStage.GCS_LIST,
++                    "Error listing MOTO files in GCS",
++                    e);
++        }
++
++        if (pendingFiles.isEmpty()) {
++            log.atDebug().setMessage("No pending MOTO files").log();
++            return;
++        }
++
++        // Group by storeCode; within each group files are already ordered by sequenceNumber
++        Map<Integer, List<MotoFile>> filesByStore = pendingFiles.stream()
++                .collect(Collectors.groupingBy(MotoFile::storeCode));
++
++        log.atInfo()
++                .setMessage("Pending MOTO files â launching per-store processing")
++                .addKeyValue("totalFiles", pendingFiles.size())
++                .addKeyValue("storeCount", filesByStore.size())
++                .log();
++
++        // One virtual thread per store; files processed sequentially within each store
++        List<CompletableFuture<Void>> futures = filesByStore.entrySet().stream()
++                .map(entry -> CompletableFuture
++                        .runAsync(() -> processStoreFiles(entry.getKey(), entry.getValue()),
++                                virtualThreadTaskExecutor)
++                        .exceptionally(ex -> {
++                            log.atError()
++                                    .setMessage("Unhandled error in MOTO store thread")
++                                    .addKeyValue("storeCode", entry.getKey())
++                                    .setCause(ex)
++                                    .log();
++                            return null;
++                        }))
++                .toList();
++
++        CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).join();
++    }
++
++    private void processStoreFiles(int storeCode, List<MotoFile> files) {
++        if (storeRegistry.findByDesClave(storeCode).isEmpty()) {
++            log.atWarn()
++                    .setMessage("MOTO files for store not in registry â moving to error")
++                    .addKeyValue("storeCode", String.format("%03d", storeCode))
++                    .addKeyValue("fileCount", files.size())
++                    .log();
++            files.forEach(file -> moveUnknownStoreToError(file, storeCode));
++            return;
++        }
++
++        log.atInfo()
++                .setMessage("Processing MOTO files for store")
++                .addKeyValue("storeCode", String.format("%03d", storeCode))
++                .addKeyValue("fileCount", files.size())
++                .log();
++
++        files.forEach(this::processWithRetry);
++    }
++
++    private void processWithRetry(MotoFile file) {
++        String processId = UUID.randomUUID().toString();
++        Instant executionDate = Instant.now();
++
++        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
++            try {
++                MotoProcessingResult result = processFile(file);
++                GcsObjectReference backupObject = moveToBackup(file);
++
++                log.atInfo()
++                        .setMessage("MOTO file processed")
++                        .addKeyValue("processId", processId)
++                        .addKeyValue("storeCode", String.format("%03d", file.storeCode()))
++                        .addKeyValue("fileName", file.fileName())
++                        .addKeyValue("linesInserted", result.linesInserted())
++                        .addKeyValue("linesUpdated", result.linesUpdated())
++                        .addKeyValue("backupObject", backupObject.toUri())
++                        .log();
++                return;
++
++            } catch (Exception e) {
++                MotoProcessingStage stage = resolveStage(e);
++                if (attempt < MAX_ATTEMPTS) {
++                    log.atWarn()
++                            .setMessage("Error processing MOTO file; will retry")
++                            .addKeyValue("processId", processId)
++                            .addKeyValue("storeCode", String.format("%03d", file.storeCode()))
++                            .addKeyValue("fileName", file.fileName())
++                            .addKeyValue("attempt", attempt)
++                            .addKeyValue("stage", stage)
++                            .setCause(e)
++                            .log();
++                    continue;
++                }
++
++                handleFinalFailure(file, processId, executionDate, stage, e);
++            }
++        }
++    }
++
++    private void moveUnknownStoreToError(MotoFile file, int storeCode) {
++        String processId = UUID.randomUUID().toString();
++        Instant now = Instant.now();
++        String storeCodeStr = String.format("%03d", storeCode);
++
++        GcsObjectReference errorObject;
++        try {
++            errorObject = storagePort.moveToError(file);
++        } catch (RuntimeException e) {
++            log.atError()
++                    .setMessage("Failed to move unknown-store MOTO file to error bucket")
++                    .addKeyValue("storeCode", storeCodeStr)
++                    .addKeyValue("fileName", file.fileName())
++                    .setCause(e)
++                    .log();
++            return;
++        }
++
++        try {
++            errorTrackerPort.recordError(new MotoErrorRecord(
++                    PROCESS_NAME,
++                    PROCESS_TYPE,
++                    processId,
++                    storeCodeStr,
++                    file.fileName(),
++                    file.location().bucket(),
++                    file.location().toUri(),
++                    MotoProcessingStage.UNKNOWN.name(),
++                    "",
++                    "UnknownStoreCode",
++                    "",
++                    "Store code " + storeCodeStr + " not found in active multi-local registry",
++                    "",
++                    0,
++                    0,
++                    true,
++                    "UNKNOWN_STORE",
++                    now,
++                    now,
++                    System.getenv().getOrDefault("HOSTNAME", ""),
++                    System.getenv().getOrDefault("POD_NAME", ""),
++                    processId
++            ));
++        } catch (RuntimeException e) {
++            log.atError()
++                    .setMessage("Unknown-store MOTO file moved to error without Firestore record")
++                    .addKeyValue("storeCode", storeCodeStr)
++                    .addKeyValue("errorObject", errorObject.toUri())
++                    .setCause(e)
++                    .log();
++        }
++
++        log.atWarn()
++                .setMessage("Unknown-store MOTO file moved to error")
++                .addKeyValue("storeCode", storeCodeStr)
++                .addKeyValue("fileName", file.fileName())
++                .addKeyValue("errorObject", errorObject.toUri())
++                .log();
++    }
++
++    private MotoProcessingResult processFile(MotoFile file) {
++        MotoProcessingResult totalResult = new MotoProcessingResult(0, 0, 0);
++        List<MotoRecord> batch = new ArrayList<>(properties.batchSize());
++        long lineNumber = 0;
++
++        try (BufferedReader reader = openReader(file)) {
++            String line;
++            while ((line = reader.readLine()) != null) {
++                lineNumber++;
++                MotoRecord record = parseLine(line, lineNumber);
++                batch.add(record);
++
++                if (batch.size() >= properties.batchSize()) {
++                    totalResult = totalResult.plus(saveBatch(batch));
++                    batch.clear();
++                }
++            }
++            if (!batch.isEmpty()) {
++                totalResult = totalResult.plus(saveBatch(batch));
++            }
++        } catch (IOException e) {
++            throw new MotoProcessingException(
++                    MotoProcessingStage.GCS_READ,
++                    "Error reading MOTO file from GCS",
++                    e);
++        }
++
++        return totalResult;
++    }
++
++    private BufferedReader openReader(MotoFile file) {
++        try {
++            return storagePort.openReader(file);
++        } catch (RuntimeException e) {
++            throw new MotoProcessingException(
++                    MotoProcessingStage.GCS_READ,
++                    "Error opening MOTO file from GCS",
++                    e);
++        }
++    }
++
++    private MotoRecord parseLine(String line, long lineNumber) {
++        try {
++            return parser.parseLine(line, lineNumber);
++        } catch (RuntimeException e) {
++            throw new MotoProcessingException(
++                    MotoProcessingStage.PARSING,
++                    "Error parsing line " + lineNumber,
++                    e);
++        }
++    }
++
++    private MotoProcessingResult saveBatch(List<MotoRecord> batch) {
++        try {
++            return persistencePort.processAndSaveBatch(List.copyOf(batch));
++        } catch (RuntimeException e) {
++            throw new MotoProcessingException(
++                    MotoProcessingStage.DATABASE_WRITE,
++                    "Error persisting MOTO batch",
++                    e);
++        }
++    }
++
++    private GcsObjectReference moveToBackup(MotoFile file) {
++        try {
++            return storagePort.moveToBackup(file);
++        } catch (RuntimeException e) {
++            throw new MotoProcessingException(
++                    MotoProcessingStage.GCS_MOVE_TO_BACKUP,
++                    "Error moving processed MOTO file to backup GCS",
++                    e);
++        }
++    }
++
++    private void handleFinalFailure(
++            MotoFile file,
++            String processId,
++            Instant executionDate,
++            MotoProcessingStage stage,
++            Exception error) {
++        GcsObjectReference errorObject;
++        try {
++            errorObject = storagePort.moveToError(file);
++        } catch (RuntimeException moveError) {
++            log.atError()
++                    .setMessage("Could not move MOTO file to error bucket")
++                    .addKeyValue("processId", processId)
++                    .addKeyValue("storeCode", String.format("%03d", file.storeCode()))
++                    .addKeyValue("fileName", file.fileName())
++                    .addKeyValue("stage", MotoProcessingStage.GCS_MOVE_TO_ERROR)
++                    .setCause(moveError)
++                    .log();
++            return;
++        }
++
++        Instant now = Instant.now();
++        String storeCodeStr = String.format("%03d", file.storeCode());
++        try {
++            errorTrackerPort.recordError(new MotoErrorRecord(
++                    PROCESS_NAME,
++                    PROCESS_TYPE,
++                    processId,
++                    storeCodeStr,
++                    file.fileName(),
++                    file.location().bucket(),
++                    file.location().toUri(),
++                    stage.name(),
++                    "",
++                    error.getClass().getSimpleName(),
++                    "",
++                    error.getMessage(),
++                    summarizeStackTrace(error),
++                    MAX_ATTEMPTS,
++                    MAX_ATTEMPTS,
++                    true,
++                    "EXHAUSTED",
++                    executionDate,
++                    now,
++                    System.getenv().getOrDefault("HOSTNAME", ""),
++                    System.getenv().getOrDefault("POD_NAME", ""),
++                    processId
++            ));
++        } catch (RuntimeException trackingError) {
++            log.atError()
++                    .setMessage("MOTO file moved to error without Firestore record")
++                    .addKeyValue("processId", processId)
++                    .addKeyValue("storeCode", storeCodeStr)
++                    .addKeyValue("fileName", file.fileName())
++                    .addKeyValue("errorObject", errorObject.toUri())
++                    .setCause(trackingError)
++                    .log();
++        }
++
++        log.atError()
++                .setMessage("MOTO file sent to error bucket")
++                .addKeyValue("processId", processId)
++                .addKeyValue("storeCode", storeCodeStr)
++                .addKeyValue("fileName", file.fileName())
++                .addKeyValue("stage", stage)
++                .addKeyValue("errorObject", errorObject.toUri())
++                .setCause(error)
++                .log();
++    }
++
++    private MotoProcessingStage resolveStage(Exception error) {
++        if (error instanceof MotoProcessingException processingException) {
++            return processingException.stage();
++        }
++        return MotoProcessingStage.UNKNOWN;
++    }
++
++    private String summarizeStackTrace(Exception error) {
++        StringBuilder summary = new StringBuilder(error.toString());
++        StackTraceElement[] stackTrace = error.getStackTrace();
++        int max = Math.min(stackTrace.length, STACKTRACE_MAX_LINES);
++        for (int i = 0; i < max; i++) {
++            summary.append(System.lineSeparator()).append("at ").append(stackTrace[i]);
++        }
++        return summary.toString();
++    }
++}
+
+
+--- Diff for /src/main/resources/application-dev.yml ---
+--- a//src/main/resources/application-dev.yml
++++ b//src/main/resources/application-dev.yml
+@@ -42,8 +42,31 @@
+       password: ${SPRING_DATASOURCE_CENTRAL_PASSWORD}
+       entity-packages:
+         - com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.central
++    saadmin:
++      url: ${SAADMIN_DB_URL}
++      username: ${SAADMIN_DB_USERNAME}
++      password: ${SAADMIN_DB_PASSWORD}
++      entity-packages:
++        - com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.saadmin.entity
++    cvmt:
++      url: ${CVMT_DB_URL}
++      username: ${CVMT_DB_USERNAME}
++      password: ${CVMT_DB_PASSWORD}
++      entity-packages:
++        - com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.cvmt.entity
++
++sendCartaMoto:
++  username: ${SFTP_CARTA_MOTO_USERNAME}
++  password: ${SFTP_CARTA_MOTO_PASSWORD}
+ 
+ app:
++  send-carta-moto:
++    enabled: ${SEND_CARTA_MOTO_ENABLED:true}
++  update-moto:
++    enabled: ${UPDATE_MOTO_ENABLED:true}
++    batch-size: ${UPDATE_MOTO_BATCH_SIZE:100}
++    gcs:
++      error-uri: ${UPDATE_MOTO_ERROR_URI}
+   update-ced-pad-ruc:
+     enabled: ${UPDATE_CED_PAD_RUC_ENABLED:true}
+     batch-size: ${UPDATE_CED_PAD_RUC_BATCH_SIZE:500}
+
+
+--- Diff for /src/main/resources/application-local.yml ---
+--- a//src/main/resources/application-local.yml
++++ b//src/main/resources/application-local.yml
+@@ -67,8 +67,31 @@
+       password: ALLC_0180
+       entity-packages:
+         - com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.central
++    saadmin:
++      url: jdbc:sqlserver://10.2.7.23:1433;databaseName=SAADMIN;encrypt=false
++      username: alliances
++      password: ALLC_0180
++      entity-packages:
++        - com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.saadmin.entity
++    cvmt:
++      url: jdbc:sqlserver://10.2.7.23:1433;databaseName=CVMT_EC;encrypt=false
++      username: alliances
++      password: ALLC_0180
++      entity-packages:
++        - com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.cvmt.entity
++
++sendCartaMoto:
++  username: ${SFTP_CARTA_MOTO_USERNAME:poscer}
++  password: ${SFTP_CARTA_MOTO_PASSWORD:}
+ 
+ app:
++  send-carta-moto:
++    enabled: false
++  update-moto:
++    enabled: false
++    batch-size: 100
++    gcs:
++      error-uri: gs://gcs-cer-suite-core-files/eyes/arsap/error
+   update-ced-pad-ruc:
+     enabled: false
+     batch-size: 500
+
+
+--- Diff for /src/main/resources/application-prod.yml ---
+--- a//src/main/resources/application-prod.yml
++++ b//src/main/resources/application-prod.yml
+@@ -48,8 +48,19 @@
+       password: ${SPRING_DATASOURCE_CENTRAL_PASSWORD}
+       entity-packages:
+         - com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.central
++    saadmin:
++      url: ${SAADMIN_DB_URL}
++      username: ${SAADMIN_DB_USERNAME}
++      password: ${SAADMIN_DB_PASSWORD}
++      entity-packages:
++        - com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.saadmin.entity
+ 
+ app:
++  update-moto:
++    enabled: ${UPDATE_MOTO_ENABLED:true}
++    batch-size: ${UPDATE_MOTO_BATCH_SIZE:100}
++    gcs:
++      error-uri: ${UPDATE_MOTO_ERROR_URI}
+   update-ced-pad-ruc:
+     enabled: ${UPDATE_CED_PAD_RUC_ENABLED:true}
+     batch-size: ${UPDATE_CED_PAD_RUC_BATCH_SIZE:500}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SendCartaMotoSchedulerAdapterTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SendCartaMotoSchedulerAdapterTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SendCartaMotoSchedulerAdapterTest.java
+@@ -0,0 +1,37 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.scheduler;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.SendCartaMotoUseCase;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.InjectMocks;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import static org.mockito.Mockito.doThrow;
++import static org.mockito.Mockito.verify;
++
++@ExtendWith(MockitoExtension.class)
++class SendCartaMotoSchedulerAdapterTest {
++
++    @Mock
++    SendCartaMotoUseCase useCase;
++
++    @InjectMocks
++    SendCartaMotoSchedulerAdapter scheduler;
++
++    @Test
++    void execute_invocaCasoDeUso() {
++        scheduler.execute();
++
++        verify(useCase).sendPendingCartas();
++    }
++
++    @Test
++    void execute_errorEnUseCase_noPropagaExcepcion() {
++        doThrow(new IllegalStateException("SFTP unavailable")).when(useCase).sendPendingCartas();
++
++        scheduler.execute();
++
++        verify(useCase).sendPendingCartas();
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/SendCartaMotoServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/SendCartaMotoServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/SendCartaMotoServiceTest.java
+@@ -0,0 +1,232 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.exception.SendCartaMotoException;
++import com.elrosado.cersuitecloudlocalcore.domain.model.CartaMoto;
++import com.elrosado.cersuitecloudlocalcore.domain.model.CartaMotoEstado;
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SendCartaMotoStage;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.CartaMotoQueryPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.CartaMotoStoragePort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.CartaMotoTransferPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.CartaMotoUpdatePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.LegacySendCartaMotoProperties;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.SendCartaMotoProperties;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.StoreRegistry;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.time.LocalDateTime;
++import java.util.List;
++import java.util.Optional;
++
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.ArgumentMatchers.anyInt;
++import static org.mockito.ArgumentMatchers.anyString;
++import static org.mockito.ArgumentMatchers.eq;
++import static org.mockito.Mockito.doThrow;
++import static org.mockito.Mockito.lenient;
++import static org.mockito.Mockito.mock;
++import static org.mockito.Mockito.never;
++import static org.mockito.Mockito.times;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.verifyNoInteractions;
++import static org.mockito.Mockito.when;
++
++@ExtendWith(MockitoExtension.class)
++class SendCartaMotoServiceTest {
++
++    @Mock CartaMotoQueryPort queryPort;
++    @Mock CartaMotoUpdatePort updatePort;
++    @Mock CartaMotoStoragePort storagePort;
++    @Mock CartaMotoTransferPort transferPort;
++    @Mock StoreRegistry storeRegistry;
++
++    SendCartaMotoService service;
++
++    @BeforeEach
++    void setUp() {
++        LegacySendCartaMotoProperties legacyProps = new LegacySendCartaMotoProperties(
++                new LegacySendCartaMotoProperties.LegacyRoute(
++                        new LegacySendCartaMotoProperties.LegacyFolder("gs://bucket/eyes/xmlcvm/out")),
++                new LegacySendCartaMotoProperties.LegacyRoute(
++                        new LegacySendCartaMotoProperties.LegacyFolder("gs://bucket/eyes/xmlcvm/bkp")),
++                30_000L,
++                3,
++                "poscer",
++                "secret",
++                new LegacySendCartaMotoProperties.LegacyServer("10.11.1.16", 22, "/poscer/suitemotos")
++        );
++
++        service = new SendCartaMotoService(
++                queryPort,
++                updatePort,
++                storagePort,
++                transferPort,
++                new SendCartaMotoProperties(true),
++                legacyProps,
++                storeRegistry
++        );
++
++        lenient().when(storeRegistry.isMultiLocalEnabled()).thenReturn(true);
++        lenient().when(storeRegistry.findByDesClave(anyInt())).thenReturn(Optional.of(mock(com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.saadmin.entity.StoreEntity.class)));
++    }
++
++    @Test
++    void sendPendingCartas_deshabilitado_noConsultaDB() {
++        service = new SendCartaMotoService(
++                queryPort, updatePort, storagePort, transferPort,
++                new SendCartaMotoProperties(false),
++                buildDefaultLegacyProps(),
++                storeRegistry
++        );
++
++        service.sendPendingCartas();
++
++        verifyNoInteractions(queryPort);
++    }
++
++    @Test
++    void sendPendingCartas_sinTiendasMultiLocal_noConsultaDB() {
++        when(storeRegistry.isMultiLocalEnabled()).thenReturn(false);
++
++        service.sendPendingCartas();
++
++        verifyNoInteractions(queryPort);
++    }
++
++    @Test
++    void sendPendingCartas_sinPendientes_noTransfiere() {
++        when(queryPort.findPendingToSend()).thenReturn(List.of());
++
++        service.sendPendingCartas();
++
++        verifyNoInteractions(transferPort);
++        verifyNoInteractions(storagePort);
++        verifyNoInteractions(updatePort);
++    }
++
++    @Test
++    void sendPendingCartas_unaCarta_flujoCompleto() {
++        CartaMoto carta = carta(2153, 100, "mo100081004000650162.xml");
++        byte[] content = "<ventas/>".getBytes();
++        GcsObjectReference backup = new GcsObjectReference("bucket", "eyes/xmlcvm/bkp/mo100081004000650162.xml");
++
++        when(queryPort.findPendingToSend()).thenReturn(List.of(carta));
++        when(storagePort.downloadXml("mo100081004000650162.xml")).thenReturn(content);
++        when(storagePort.moveToBackup("mo100081004000650162.xml")).thenReturn(backup);
++
++        service.sendPendingCartas();
++
++        verify(storagePort).downloadXml("mo100081004000650162.xml");
++        verify(transferPort).transferFile("mo100081004000650162.xml", content);
++        verify(storagePort).moveToBackup("mo100081004000650162.xml");
++        verify(updatePort).markAsSent(2153);
++    }
++
++    @Test
++    void sendPendingCartas_tiendaNoActiva_omiteCarta() {
++        CartaMoto carta = carta(2153, 999, "mo999.xml");
++        when(queryPort.findPendingToSend()).thenReturn(List.of(carta));
++        when(storeRegistry.findByDesClave(999)).thenReturn(Optional.empty());
++
++        service.sendPendingCartas();
++
++        verifyNoInteractions(storagePort);
++        verifyNoInteractions(transferPort);
++        verifyNoInteractions(updatePort);
++    }
++
++    @Test
++    void sendPendingCartas_errorSftp_reintentaHastaMaxRetries() {
++        CartaMoto carta = carta(2153, 100, "mo100.xml");
++        when(queryPort.findPendingToSend()).thenReturn(List.of(carta));
++        when(storagePort.downloadXml(anyString())).thenReturn("<ventas/>".getBytes());
++        doThrow(new IllegalStateException("connection refused"))
++                .when(transferPort).transferFile(anyString(), any());
++
++        service.sendPendingCartas();
++
++        // 3 retries configurados
++        verify(storagePort, times(3)).downloadXml("mo100.xml");
++        verify(transferPort, times(3)).transferFile(eq("mo100.xml"), any());
++        verify(storagePort, never()).moveToBackup(anyString());
++        verify(updatePort, never()).markAsSent(anyInt());
++    }
++
++    @Test
++    void sendPendingCartas_errorGcsDownload_reintentaHastaMaxRetries() {
++        CartaMoto carta = carta(2153, 100, "mo100.xml");
++        when(queryPort.findPendingToSend()).thenReturn(List.of(carta));
++        doThrow(new IllegalArgumentException("GCS not found"))
++                .when(storagePort).downloadXml(anyString());
++
++        service.sendPendingCartas();
++
++        verify(storagePort, times(3)).downloadXml("mo100.xml");
++        verifyNoInteractions(transferPort);
++        verify(updatePort, never()).markAsSent(anyInt());
++    }
++
++    @Test
++    void sendPendingCartas_errorEnPrimerIntentoExitoEnSegundo_marcaEnviada() {
++        CartaMoto carta = carta(2153, 100, "mo100.xml");
++        byte[] content = "<ventas/>".getBytes();
++        GcsObjectReference backup = new GcsObjectReference("bucket", "eyes/xmlcvm/bkp/mo100.xml");
++
++        when(queryPort.findPendingToSend()).thenReturn(List.of(carta));
++        when(storagePort.downloadXml("mo100.xml")).thenReturn(content);
++        when(storagePort.moveToBackup("mo100.xml")).thenReturn(backup);
++        doThrow(new IllegalStateException("SFTP timeout"))
++                .doNothing()
++                .when(transferPort).transferFile(eq("mo100.xml"), any());
++
++        service.sendPendingCartas();
++
++        verify(transferPort, times(2)).transferFile(eq("mo100.xml"), any());
++        verify(updatePort).markAsSent(2153);
++    }
++
++    @Test
++    void sendPendingCartas_variasCartas_procesaTodas() {
++        CartaMoto carta1 = carta(1, 100, "mo_a.xml");
++        CartaMoto carta2 = carta(2, 200, "mo_b.xml");
++        byte[] content = "<ventas/>".getBytes();
++
++        when(queryPort.findPendingToSend()).thenReturn(List.of(carta1, carta2));
++        when(storagePort.downloadXml(anyString())).thenReturn(content);
++        when(storagePort.moveToBackup("mo_a.xml"))
++                .thenReturn(new GcsObjectReference("b", "bkp/mo_a.xml"));
++        when(storagePort.moveToBackup("mo_b.xml"))
++                .thenReturn(new GcsObjectReference("b", "bkp/mo_b.xml"));
++
++        service.sendPendingCartas();
++
++        verify(updatePort).markAsSent(1);
++        verify(updatePort).markAsSent(2);
++    }
++
++    // ââ helpers ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
++
++    private CartaMoto carta(int idCarta, int desClave, String nombArchXml) {
++        return new CartaMoto(
++                idCarta, 3574659, LocalDateTime.now(),
++                CartaMotoEstado.TO_SEND.value(),
++                "BN157QMJM2302623", 106728,
++                desClave, null, nombArchXml, 10901
++        );
++    }
++
++    private LegacySendCartaMotoProperties buildDefaultLegacyProps() {
++        return new LegacySendCartaMotoProperties(
++                new LegacySendCartaMotoProperties.LegacyRoute(
++                        new LegacySendCartaMotoProperties.LegacyFolder("gs://bucket/in")),
++                new LegacySendCartaMotoProperties.LegacyRoute(
++                        new LegacySendCartaMotoProperties.LegacyFolder("gs://bucket/bkp")),
++                30_000L, 3, "user", "pass",
++                new LegacySendCartaMotoProperties.LegacyServer("10.0.0.1", 22, "/remote")
++        );
++    }
++}
+
+

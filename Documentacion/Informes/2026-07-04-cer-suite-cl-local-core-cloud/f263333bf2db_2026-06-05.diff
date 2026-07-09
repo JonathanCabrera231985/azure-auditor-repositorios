@@ -1,0 +1,93 @@
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/TslFrameParserService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/TslFrameParserService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/TslFrameParserService.java
+@@ -1223,6 +1223,8 @@
+ 
+             // Aplicar INDITAX de 99|06|41 f[5] para sobreescribir taxType (VERIF-03)
+             // Mapeo: "0"â"0", "1"â"A", "2"â"B", "3"â"C", "4"â"D" (TSLConstants.INDICATAX_*)
++            // Paridad F2: si el registro 99|06|41 no tiene f[5] (INDITAX ausente), el legacy
++            // limpia taxType a "" por list.size()<=5 â split() sin -1 descarta trailing empty.
+             Map<String, ArrayDeque<String>> indiQueues = new LinkedHashMap<>();
+             for (Map.Entry<String, ArrayDeque<String>> e : indiTaxQueues.entrySet()) {
+                 indiQueues.put(e.getKey(), new ArrayDeque<>(e.getValue()));
+@@ -1234,6 +1236,8 @@
+                     String resolved = resolveIndiTax(indiQueue.poll());
+                     if (resolved != null) {
+                         lineItems.set(i, item.withTaxType(resolved));
++                    } else {
++                        lineItems.set(i, item.withTaxType(""));
+                     }
+                 }
+             }
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorService.java
+@@ -176,16 +176,16 @@
+         // LineItems: Tax
+         appendTaxItems(doc, rt, tx.taxes(), seq);
+ 
+-        // Datos de factura (solo si cliente no es consumidor final)
++        // Secciones de cierre â orden exacto del legacy
++        rt.appendChild(buildTotals(doc, tx));
++
++        // Datos de factura (solo si cliente no es consumidor final) â va despuÃ©s de Totals
+         if (!h.customerId().isBlank() && !h.isConsumidorFinal()) {
+             rt.appendChild(buildInvoiceData(doc, tx));
+         }
+         if (tx.isDevolucion()) {
+             rt.appendChild(buildNotaCredito(doc, tx));
+         }
+-
+-        // Secciones de cierre â orden exacto del legacy
+-        rt.appendChild(buildTotals(doc, tx));
+ 
+         if (!tx.managerOverrides().isEmpty()) {
+             rt.appendChild(buildManagerOverrides(doc, tx.managerOverrides()));
+@@ -440,11 +440,23 @@
+     private Element buildInvoiceData(Document doc, SaleTransaction tx) {
+         Element inv = elem(doc, "InvoiceData");
+         child(doc, inv, "CustomerID",   tx.header().customerId());
++        // customerType: cÃ³digo numÃ©rico del tipo de documento (1=Pasaporte,2=RUC,3=CÃ©dula)
++        // El legacy serializa el campo Java customerType sin alias XStream â elemento en minÃºscula
++        child(doc, inv, "customerType", resolveCustomerTypeCode(tx.header().customerIdType()));
+         child(doc, inv, "CustomerName", tx.customerName());
+         child(doc, inv, "Address",      tx.invoiceAddress());
+         child(doc, inv, "Telephone",    tx.invoiceTelephone());
+         child(doc, inv, "flagReg",      "1");
+         return inv;
++    }
++
++    private String resolveCustomerTypeCode(String customerIdType) {
++        return switch (customerIdType) {
++            case "PASAPORTE" -> "1";
++            case "RUC"       -> "2";
++            case "CEDULA"    -> "3";
++            default          -> customerIdType;
++        };
+     }
+ 
+     private Element buildNotaCredito(Document doc, SaleTransaction tx) {
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorServiceTest.java
+@@ -438,7 +438,14 @@
+ 
+         assertTrue(xml.contains("<InvoiceData>"), "<InvoiceData> debe estar presente");
+         assertEquals("0917400731", text(doc, "CustomerID"));
++        assertEquals("3",          text(doc, "customerType")); // CEDULA â cÃ³digo numÃ©rico legacy
+         assertEquals("FUENTES ALEJANDRO MARIA ISABEL", text(doc, "CustomerName"));
++
++        // <InvoiceData> debe aparecer despuÃ©s de </Totals> (paridad con legacy XStreamConfig2)
++        int totalsEnd    = xml.indexOf("</Totals>");
++        int invoiceStart = xml.indexOf("<InvoiceData>");
++        assertTrue(totalsEnd > 0 && invoiceStart > totalsEnd,
++                "<InvoiceData> debe estar despuÃ©s de </Totals>");
+     }
+ 
+     // -----------------------------------------------------------------------
+
+

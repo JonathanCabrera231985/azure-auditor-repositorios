@@ -1,0 +1,156 @@
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/domain/model/xml/InvoiceData.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/domain/model/xml/InvoiceData.java
++++ b//src/main/java/com/elrosado/distributor_cloud/domain/model/xml/InvoiceData.java
+@@ -19,7 +19,8 @@
+     @JacksonXmlProperty(localName = "CustomerID")
+     private String customerId;
+ 
+-    @JacksonXmlProperty(localName = "CustomerType")
++    // El TLOG envÃ­a el tag en minÃºscula (<customerType>), no "CustomerType"
++    @JacksonXmlProperty(localName = "customerType")
+     private String customerType;
+ 
+     @JacksonXmlProperty(localName = "SubTotal")
+@@ -34,24 +35,14 @@
+     @JacksonXmlProperty(localName = "CustomerName")
+     private String nameCustomer;
+ 
+-    @JacksonXmlProperty(localName = "CustomerIdentification")
+-    private String identificacionCustomer;
+-
+-    @JacksonXmlProperty(localName = "TipoDoc")
+-    private Integer tipoDoc;
+-
+-    @JacksonXmlProperty(localName = "CustomerCode")
+-    private String customerCode;
+-
+-    @JacksonXmlProperty(localName = "CustomerTipoRuc")
+-    private String customerTipoRuc;
+-
+-    @JacksonXmlProperty(localName = "CustomerRegInter")
+-    private String customerRegInter;
+-
+-    @JacksonXmlProperty(localName = "CustomerDireccion")
++    // En el TLOG la direcciÃ³n y el telÃ©fono vienen en <Address> y <Telephone> (igual que el legacy)
++    @JacksonXmlProperty(localName = "Address")
+     private String customerDireccion;
+ 
+-    @JacksonXmlProperty(localName = "CustomerTelefono")
++    @JacksonXmlProperty(localName = "Telephone")
+     private String customerTelefono;
++
++    // FlagReg del legacy: 1 = esquema nuevo (registro idempotente). Se conserva por trazabilidad del TLOG.
++    @JacksonXmlProperty(localName = "flagReg")
++    private Integer flagReg;
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/domain/model/xml/RetailTransaction.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/domain/model/xml/RetailTransaction.java
++++ b//src/main/java/com/elrosado/distributor_cloud/domain/model/xml/RetailTransaction.java
+@@ -172,4 +172,8 @@
+     @JacksonXmlElementWrapper(useWrapping = false)
+     @JacksonXmlProperty(localName = "AnulacionRecaudacion")
+     private List<AnulacionRecaudacion> anulacionRecaudacionData;
++
++    @JacksonXmlElementWrapper(localName = "VentaMayoreoItems")
++    @JacksonXmlProperty(localName = "VentaMayoreoItem")
++    private List<VentaMayoreoItem> itemsVentaMayoreo;
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/domain/model/xml/VentaMayoreoItem.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/domain/model/xml/VentaMayoreoItem.java
++++ b//src/main/java/com/elrosado/distributor_cloud/domain/model/xml/VentaMayoreoItem.java
+@@ -0,0 +1,22 @@
++package com.elrosado.distributor_cloud.domain.model.xml;
++
++import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
++import com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlProperty;
++import lombok.Data;
++import lombok.NoArgsConstructor;
++
++/**
++ * RelaciÃ³n de un Ã­tem de venta al por mayor: asocia el Ã­tem origen (sequenceNumber)
++ * con el Ã­tem de mayoreo generado (sequenceNumberMay). Se persiste en CO_ITM_SLS_MAY.
++ */
++@JsonIgnoreProperties(ignoreUnknown = true)
++@Data
++@NoArgsConstructor
++public class VentaMayoreoItem {
++
++    @JacksonXmlProperty(localName = "SequenceNumber")
++    private Integer sequenceNumber;
++
++    @JacksonXmlProperty(localName = "sequenceNumberMay")
++    private Integer sequenceNumberMay;
++}
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/CustomerAdapter.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/CustomerAdapter.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/CustomerAdapter.java
+@@ -27,11 +27,12 @@
+     @Override
+     @Transactional("artsEcTransactionManager")
+     public void registerIfAbsent(InvoiceData invoiceData, Integer transactionId) {
+-        if (invoiceData == null || invoiceData.getIdentificacionCustomer() == null) {
++        if (invoiceData == null || invoiceData.getCustomerId() == null) {
+             return;
+         }
+ 
+-        String identificacion = invoiceData.getIdentificacionCustomer();
++        // El TLOG usa CustomerID como cÃ©dula/RUC del cliente (mismo campo que ID_CPR/ID_CST en TR_INVC)
++        String identificacion = invoiceData.getCustomerId();
+         String customerType = invoiceData.getCustomerType();
+ 
+         if ("1".equals(customerType)) {
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/TransactionPersistenceAdapter.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/TransactionPersistenceAdapter.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/TransactionPersistenceAdapter.java
+@@ -102,6 +102,7 @@
+     private final CoPtsPrmDtaRepository coPtsPrmDtaRepository;
+     private final CoTktDtRepository coTktDtRepository;
+     private final CoDeducibleRepository coDeducibleRepository;
++    private final CoItmSlsMayRepository coItmSlsMayRepository;
+ 
+     @Override
+     @Transactional("artsEcTransactionManager")
+@@ -873,6 +874,17 @@
+         if (rtl.getDeducibleData() != null) {
+             saveDeducible(idTrn, rtl.getDeducibleData());
+         }
++        if (rtl.getItemsVentaMayoreo() != null) {
++            rtl.getItemsVentaMayoreo().forEach(vm -> saveVentaMayoreo(idTrn, vm));
++        }
++    }
++
++    /** Persiste en CO_ITM_SLS_MAY la relaciÃ³n Ã­tem origen â Ã­tem de mayoreo (equiv. cascada itemsVentaMayoreo del legacy). */
++    private void saveVentaMayoreo(Integer idTrn, VentaMayoreoItem vm) {
++        if (vm.getSequenceNumber() == null || vm.getSequenceNumberMay() == null) return;
++        CoItmSlsMayEntity entity = new CoItmSlsMayEntity();
++        entity.setId(new TrnSeqPromoId(idTrn, vm.getSequenceNumber(), vm.getSequenceNumberMay()));
++        coItmSlsMayRepository.save(entity);
+     }
+ 
+     private void savePreferredCustomer(Integer idTrn, PreferredCustomerData data) {
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/artsec/repository/CoItmSlsMayRepository.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/artsec/repository/CoItmSlsMayRepository.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/adapter/out/db/artsec/repository/CoItmSlsMayRepository.java
+@@ -1,8 +1,8 @@
+ package com.elrosado.distributor_cloud.infrastructure.adapter.out.db.artsec.repository;
+ 
+ import com.elrosado.distributor_cloud.infrastructure.adapter.out.db.artsec.entity.CoItmSlsMayEntity;
+-import com.elrosado.distributor_cloud.infrastructure.adapter.out.db.artsec.entity.embedded.TrnSeqId;
++import com.elrosado.distributor_cloud.infrastructure.adapter.out.db.artsec.entity.embedded.TrnSeqPromoId;
+ import org.springframework.data.jpa.repository.JpaRepository;
+ 
+-public interface CoItmSlsMayRepository extends JpaRepository<CoItmSlsMayEntity, TrnSeqId> {
++public interface CoItmSlsMayRepository extends JpaRepository<CoItmSlsMayEntity, TrnSeqPromoId> {
+ }
+
+

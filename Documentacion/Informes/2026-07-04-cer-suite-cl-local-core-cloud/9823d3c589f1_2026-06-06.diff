@@ -1,0 +1,17 @@
+--- Diff for /k8s/deployment.yaml ---
+--- a//k8s/deployment.yaml
++++ b//k8s/deployment.yaml
+@@ -37,11 +37,6 @@
+             - configMapRef:
+                 name: cer-suite-local-core-config
+           env:
+-            - name: JWT_SECRET_KEY
+-              valueFrom:
+-                secretKeyRef:
+-                  name: cer-suite-local-core-secret
+-                  key: JWT_SECRET_KEY
+             - name: SPRING_THREADS_VIRTUAL_ENABLED
+               value: "true"
+             # 2. Credenciales y Cadenas de Conexión desde el Secret
+
+

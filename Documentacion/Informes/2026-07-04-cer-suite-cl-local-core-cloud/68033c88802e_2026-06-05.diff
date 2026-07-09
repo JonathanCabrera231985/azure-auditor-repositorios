@@ -1,0 +1,1168 @@
+--- Diff for /CLAUDE.md ---
+--- a//CLAUDE.md
++++ b//CLAUDE.md
+@@ -5,6 +5,25 @@
+ ## Project Overview
+ 
+ **SuiteCloud – Ventas** (artifact: `cer-suite-cloud-local-core`) — asynchronous component of the SuiteCloud ecosystem. Migrates Java 8 legacy retail POS backend (ArmsServerLocal) to Java 25 + Spring Boot 4.0.6 on GCP Cloud Run. Receives TSL (Terminal Sales Log) transaction frames from Point-of-Sale terminals via Pub/Sub, parses them, generates XML, and distributes to downstream systems (Firestore, Pub/Sub, Cloud SQL).
++
++## Template Base
++
++This project follows the structure and conventions of `D:\SIPECOM\repository-git\cer-gcp\template-microservice`. When adding new features, cross-reference that template for:
++
++- **Package layout**: `infrastructure/adapter/in/web/{controller,dto}`, `infrastructure/security/`, `infrastructure/config/`
++- **REST API pattern**: versioned endpoints at `/api/v1/`, GET + POST dual endpoints, `@RequestParam` for GET, `@RequestBody` for POST, OpenAPI annotations (`@Tag`, `@Operation`, `@ApiResponse`, `@Schema`)
++- **Security**: `SecurityConfig` (stateless JWT, CSRF disabled), `JwtTokenProvider` (jjwt 0.12.x), `JwtAuthenticationFilter` — public paths: `/api/v1/auth/**`, `/actuator/**`, `/api-docs/**`, `/swagger-ui/**`
++- **Logging**: `LoggingEnrichmentFilter` injects `correlation_id` into MDC from `X-Correlation-ID` header for GCP structured log traceability
++- **OpenAPI**: `springdoc-openapi-starter-webmvc-ui:2.8.5`; UI at `/swagger-ui.html`, docs at `/api-docs`
++- **Build/deploy**: `build.sh` (Podman), `skaffold.yaml` (v4beta11), `docker/dev/Dockerfile` (dev profile), `k8s/namespace.yaml` (`ns-cer-suite-dev`)
++- **Profiles**: `local` (machine dev + local SQL), `dev` (GCP dev env vars), `prod` (GCP prod env vars)
++- **GcpConfig**: placeholder `@Configuration` for explicit GCP beans beyond auto-config
++
++Template deviations specific to this project:
++- Services live in `service/` (not `application/service/`) — large parser/generator do not fit the application-layer pattern
++- No `ScheduledTaskAdapter` — this service has no scheduled jobs
++- No `EncryptionUtils` — uses Cloud KMS via `KmsDecryptionAdapter` / `NoOpKmsDecryptionAdapter`
++- Primary inbound adapter is `PubSubSalesAdapter` (async), not an HTTP controller
+ 
+ ## Build & Test Commands
+ 
+
+
+--- Diff for /build.sh ---
+--- a//build.sh
++++ b//build.sh
+@@ -0,0 +1,21 @@
++#!/bin/bash
++set -e
++
++ARTIFACT_ID=$(mvn help:evaluate -Dexpression=project.artifactId -q -DforceStdout)
++VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
++REGISTRY="localhost:30500"
++
++IMAGE_NAME="${REGISTRY}/${ARTIFACT_ID}:${VERSION}"
++LATEST_NAME="${REGISTRY}/${ARTIFACT_ID}:latest"
++
++# Skaffold inyecta $IMAGE cuando orquesta el build
++if [ -n "$IMAGE" ]; then
++    IMAGE_NAME="$IMAGE"
++    LATEST_NAME="${IMAGE%%:*}:latest"
++fi
++
++echo "Building image: ${IMAGE_NAME}"
++podman build -t "${IMAGE_NAME}" -t "${LATEST_NAME}" .
++
++podman push --tls-verify=false "${IMAGE_NAME}"
++podman push --tls-verify=false "${LATEST_NAME}"
+
+
+--- Diff for /docker/dev/Dockerfile ---
+--- a//docker/dev/Dockerfile
++++ b//docker/dev/Dockerfile
+@@ -0,0 +1,36 @@
++# ==========================================
++# Etapa 1: Compilación de la Aplicación
++# ==========================================
++FROM maven:3.9.9-eclipse-temurin-25-noble AS builder
++WORKDIR /workspace
++
++COPY pom.xml .
++RUN mvn dependency:go-offline -B
++
++COPY src ./src
++RUN mvn package -DskipTests -B
++
++# ==========================================
++# Etapa 2: Imagen de Ejecución para Desarrollo
++# ==========================================
++FROM eclipse-temurin:25-jre-noble
++
++ENV JAVA_OPTS="-XX:+UseG1GC \
++               -XX:MaxRAMPercentage=75.0 \
++               -XX:MinRAMPercentage=50.0 \
++               --enable-preview" \
++    SPRING_PROFILES_ACTIVE=dev
++
++WORKDIR /app
++
++RUN groupadd -g 1001 spring && \
++    useradd -r -u 1001 -g spring spring && \
++    chown -R spring:spring /app
++
++COPY --from=builder --chown=spring:spring /workspace/target/*.jar app.jar
++
++USER spring:spring
++
++EXPOSE 8080
++
++ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
+
+
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -1,24 +1,21 @@
+-apiVersion:v1
++apiVersion: v1
+ kind: ConfigMap
+ metadata:
+-  name: modern-gcp-microservice-config
++  name: cer-suite-local-core-config
+   namespace: default
+   labels:
+-    app: modern-gcp-microservice
++    app: cer-suite-local-core
+ data:
+   # Identificación de Proyecto en Google Cloud Platform
+-  GCP_PROJECT_ID: "nombre-proyecto-gcp-prod"
+-  
+-  # Parámetros del Bucket de almacenamiento físico en Google Cloud Storage
+-  GCP_STORAGE_BUCKET_NAME: "bucket-archivos-transacciones-prod"
++  GCP_PROJECT_ID: "modern-suite-cloud-per-b55b0"
+   
+   # Parámetros de Tópicos y Suscripciones en GCP Pub/Sub
+-  GCP_PUBSUB_TOPIC_TRANSACTIONS: "topic-transacciones-procesadas"
+-  GCP_PUBSUB_SUB_TRANSACTIONS: "sub-transacciones-procesadas"
+-  
+-  # Intervalo de procesamiento para los schedulers que reemplazan a los demonios (en ms)
+-  APP_SCHEDULING_INTERVAL_MS: "60000"
+-  
++  GCP_PUBSUB_SUB_VENTAS: "retail.local.ventas.request.v1-sub"
++  GCP_PUBSUB_TOPIC_VENTAS: "retail.local.ventas.request.v1"
++  GCP_PUBSUB_TOPIC_DISTRIBUTOR: "retail.local.distributor.request.v1"
++  GCP_FIRESTORE_COLLECTION: "frames"
++
+   # Nivel de logging global y de frameworks
+   LOGGING_LEVEL_ROOT: "INFO"
+   LOGGING_LEVEL_APPLICATION: "DEBUG"
++
+
+
+--- Diff for /k8s/deployment.yaml ---
+--- a//k8s/deployment.yaml
++++ b//k8s/deployment.yaml
+@@ -1,112 +1,100 @@
+-apiVersion:apps/v1
++apiVersion: apps/v1
+ kind: Deployment
+ metadata:
+-  name: modern-gcp-microservice-deployment
+-  namespace: default
++  name: cer-suite-local-core-deployment
++  namespace: ns-cer-suite-dev
+   labels:
+-    app: modern-gcp-microservice
++    app: cer-suite-local-core
+ spec:
+-  replicas: 2
++  replicas: 1
+   selector:
+     matchLabels:
+-      app: modern-gcp-microservice
++      app: cer-suite-local-core
+   template:
+     metadata:
+       labels:
+-        app: modern-gcp-microservice
++        app: cer-suite-local-core
+     spec:
+       securityContext:
+         runAsNonRoot: true
+-        runAsUser: 1001
+-        runAsGroup: 1001
+-        fsGroup: 1001
+-
++        runAsUser: 10001
++        fsGroup: 10001
+       containers:
+-        - name: microservice
+-          image: gcr.io/nombre-proyecto-gcp-prod/modern-gcp-microservice:latest
+-          imagePullPolicy: IfNotPresent
+-          
++        - name: cer-suite-local-core
++          image: localhost:30500/cer-suite-local-core:latest
++          imagePullPolicy: Always
+           ports:
+             - containerPort: 8080
+               name: http
+-          
+           resources:
++            limits:
++              cpu: "1"
++              memory: 512Mi
+             requests:
+-              memory: "512Mi"
+-              cpu: "500m"
+-            limits:
+-              memory: "1024Mi"
+-              cpu: "1000m"
+-
++              cpu: 500m
++              memory: 256Mi
++          envFrom:
++            - configMapRef:
++                name: cer-suite-local-core-config
++          env:
++            - name: JWT_SECRET_KEY
++              valueFrom:
++                secretKeyRef:
++                  name: cer-suite-local-core-secret
++                  key: JWT_SECRET_KEY
++            - name: SPRING_THREADS_VIRTUAL_ENABLED
++              value: "true"
++            # 2. Credenciales y Cadenas de Conexión desde el Secret
++            - name: SPRING_DATASOURCE_URL
++              valueFrom:
++                secretKeyRef:
++                  name: cer-suite-local-core-secret
++                  key: SPRING_DATASOURCE_URL
++            - name: SPRING_DATASOURCE_USERNAME
++              valueFrom:
++                secretKeyRef:
++                  name: cer-suite-local-core-secret
++                  key: SPRING_DATASOURCE_USERNAME
++            - name: SPRING_DATASOURCE_PASSWORD
++              valueFrom:
++                secretKeyRef:
++                  name: cer-suite-local-core-secret
++                  key: SPRING_DATASOURCE_PASSWORD
++            - name: SPRING_DATASOURCE_DEVS_URL
++              valueFrom:
++                secretKeyRef:
++                  name: cer-suite-local-core-secret
++                  key: SPRING_DATASOURCE_DEVS_URL
++            - name: GOOGLE_APPLICATION_CREDENTIALS
++              value: /var/secrets/google/key.json
++          volumeMounts:
++            - name: gcp-credentials
++              mountPath: /var/secrets/google
++              readOnly: true
++          securityContext:
++            allowPrivilegeEscalation: false
++            readOnlyRootFilesystem: false
++            capabilities:
++              drop:
++                - ALL
++          startupProbe:
++            httpGet:
++              path: /actuator/health/liveness
++              port: 8080
++            initialDelaySeconds: 60
++            periodSeconds: 30
++            failureThreshold: 30
+           livenessProbe:
+             httpGet:
+               path: /actuator/health/liveness
+               port: 8080
+-            initialDelaySeconds: 30
+-            periodSeconds: 10
+-            timeoutSeconds: 3
+-            failureThreshold: 3
+-
++            initialDelaySeconds: 60
++            periodSeconds: 30
++            failureThreshold: 5
+           readinessProbe:
+             httpGet:
+               path: /actuator/health/readiness
+               port: 8080
+-            initialDelaySeconds: 20
+-            periodSeconds: 5
+-            timeoutSeconds: 2
+-            failureThreshold: 2
+-
+-          env:
+-            # 1. Variables de Configuración desde el ConfigMap
+-            - name: GCP_PROJECT_ID
+-              valueFrom:
+-                configMapKeyRef:
+-                  name: modern-gcp-microservice-config
+-                  key: GCP_PROJECT_ID
+-            - name: GCP_STORAGE_BUCKET_NAME
+-              valueFrom:
+-                configMapKeyRef:
+-                  name: modern-gcp-microservice-config
+-                  key: GCP_STORAGE_BUCKET_NAME
+-            - name: GCP_PUBSUB_TOPIC_TRANSACTIONS
+-              valueFrom:
+-                configMapKeyRef:
+-                  name: modern-gcp-microservice-config
+-                  key: GCP_PUBSUB_TOPIC_TRANSACTIONS
+-            - name: GCP_PUBSUB_SUB_TRANSACTIONS
+-              valueFrom:
+-                configMapKeyRef:
+-                  name: modern-gcp-microservice-config
+-                  key: GCP_PUBSUB_SUB_TRANSACTIONS
+-            - name: APP_SCHEDULING_INTERVAL_MS
+-              valueFrom:
+-                configMapKeyRef:
+-                  name: modern-gcp-microservice-config
+-                  key: APP_SCHEDULING_INTERVAL_MS
+-            - name: LOGGING_LEVEL_ROOT
+-              valueFrom:
+-                configMapKeyRef:
+-                  name: modern-gcp-microservice-config
+-                  key: LOGGING_LEVEL_ROOT
+-            - name: LOGGING_LEVEL_APPLICATION
+-              valueFrom:
+-                configMapKeyRef:
+-                  name: modern-gcp-microservice-config
+-                  key: LOGGING_LEVEL_APPLICATION
+-
+-            # 2. Credenciales y Cadenas de Conexión desde el Secret
+-            - name: SPRING_DATASOURCE_URL
+-              valueFrom:
+-                secretKeyRef:
+-                  name: modern-gcp-microservice-secret
+-                  key: DB_CONNECTION_STRING
+-            - name: SPRING_DATASOURCE_USERNAME
+-              valueFrom:
+-                secretKeyRef:
+-                  name: modern-gcp-microservice-secret
+-                  key: DB_USERNAME
+-            - name: SPRING_DATASOURCE_PASSWORD
+-              valueFrom:
+-                secretKeyRef:
+-                  name: modern-gcp-microservice-secret
+-                  key: DB_PASSWORD
++            initialDelaySeconds: 60
++            periodSeconds: 30
++            failureThreshold: 5
+
+
+--- Diff for /k8s/namespace.yaml ---
+--- a//k8s/namespace.yaml
++++ b//k8s/namespace.yaml
+@@ -0,0 +1,4 @@
++apiVersion: v1
++kind: Namespace
++metadata:
++  name: ns-cer-suite-dev
+
+
+--- Diff for /k8s/secret-gcp.yaml ---
+--- a//k8s/secret-gcp.yaml
++++ b//k8s/secret-gcp.yaml
+@@ -0,0 +1,8 @@
++apiVersion: v1
++kind: Secret
++metadata:
++  name: gcp-credentials
++  namespace: ns-cer-suite-dev
++type: Opaque
++data:
++  key.json: "ewogICJ0eXBlIjogInNlcnZpY2VfYWNjb3VudCIsCiAgInByb2plY3RfaWQiOiAibW9kZXJuLXN1aXRlLWNsb3VkLXBlci1iNTViMCIsCiAgInByaXZhdGVfa2V5X2lkIjogIjAxZmRmMzYyYmEzMmU2OWNhZjYyMDMzMWYyY2ZjYTIyY2IxMGZlZDYiLAogICJwcml2YXRlX2tleSI6ICItLS0tLUJFR0lOIFBSSVZBVEUgS0VZLS0tLS1cbk1JSUV2Z0lCQURBTkJna3Foa2lHOXcwQkFRRUZBQVNDQktnd2dnU2tBZ0VBQW9JQkFRRFRpckNKRmJoQkUrNytcbkEwMFVMTWYwNFVEWUswclBYai9pZFNoL3IwVHg5ZVpqckhHNlNJajlZd2tiRGFoMC9QMUVXRmk4N1EzVDEzNlVcbkd5VUhGNU92QUorTUFQSUtPMXVMU0ZHU00xdk9aeFM2N2Fwa0pSdFRURDFTSFVxTEtoUUZlUStrUjAzNnFDdnNcbmF4MjZyMzdKWk4yR1JyT3lQZW5jRHI5OTRoaWp2eXpPZDk5WC9mMkV5NXI1RFE0OXQ2QVdUQTQ1N2ZBcDA0RlFcbnV6cWt5ZWsvT09LRDdTOVdIcGlzMCt5cjVRU1BqSVVJNWdPWnRsbTlKRmlnVnY1ZUNIcVdTdEZEVnNmZnJyVjZcbjZPSkZDQkFMU25xdzBwNzUvUHFwQ25uWmp4cm1vZkoyZm52eFlZK1IycGRQUDRjY0xqUDZTaStYZk1hdzB4cC9cbi9EYjRKdEZqQWdNQkFBRUNnZ0VBVTRXQk1RYlIwbVAvNnV1N3ZaajJzK0ZSM0dldmFGT1NqcU5xUTR1Y2dabndcbmhtOGFFZzQ4aENyYmVBSjYvZ0c3TDRaZ051dXpsMjRRYklLUktvMHRBcDRRNEZLcFBjLzAwM2ZRdVJRdERiL1dcblIvMjVWa1B1VjRPVS9IeFRKOElMMktOVlFTdmtCbkRxc3JRU0wxakdDdGNYdmNIaGhpRDYyaWM2aFFYRmE3VEJcbjc5VmJvSkFVRnVuSFJJczg1b2MxQ0pVZ0JuS2hhb3duV00xZGhKVmdSNmVXdVg3Y096b2hLY1RRckREaUpCWHRcbmw4WS9SdjJEdTVTa29EYzF4T3hFbzkzY2F1OTFEcUxSdGtMTnU1OE5WMHdWdUFBYmVPWXpiWTV6alZ1a0RmVDZcbjBlNDVoSkdoNElxUlh4Z01XcUxOTU5udGR1MEhjM1lxNHZyaEN6dWEwUUtCZ1FEM0xianJ0RmpXdTRXNEFvSjhcbjZrRXBpUWk4ek9JVU1vUDVtQjZBWGo4a01KcWhYYko4dmc1VXp3Y011ZE4vMHNRaVI3WitDMjBjZERacWl4bWlcbmYwQWgycWg1M2lXcEg3Sk02SmQrNGViRHV3bU5hYmpQeG9vNWlGVGV1Vmp1cUNKZmdrQTQ4SlhOaUpjTmdaTTZcbmk4WmdlK2JaVEJLdExwUmhyamVNbS9oVk1RS0JnUURiRjJHWXhkMWp4NmdlSFA5VG95SmZWL3JUdmlncE9RMXVcbnV3T2xsL2pJUGhWc1dUMU9xZDVKL2ROcmdPNHd2SnFmR1NRRDJDYzZhakZUMzdvcWR6RXB1UFovZE1rS1R4b2VcbnlPcEs4M0cwQTVXZXlWMmRiVE0wZlJ4M3lIZ012THJDWTdWTkdmdTkrbVk3RnNIZ20ra0RPbnpSMTJyM2I0QWpcbnMrTWJqUU82MHdLQmdRREl2VEU0K3paSzdmQWpDS2JBbTk1ZnhSSjdna2o0N2kyUVBxSkd6a09wT0cvY0xTUVBcbmVxcFk1ZWxyeEY2bnFKdncyeHl5TU1Wa0hsMHpHZFN2eTNoaUJocGRIclNuTFQ2NGh3ekIxdVI2Z1NPNDNPdGlcbmtuTWZWa0RXd09BZ3NodDRSV2V5MW5CU2cyTnBiSm9OS2dicHhMWXVNMEhYczhSOXIrY2RJbTREZ1FLQmdDYk9cblJXTWg2TXk3bUhOOC8xeDVFS1dDbDlMWlk1T3BuMDkxb0hlOEt6eU1nbzdtWDQySFdQQVNIVmgxUmJzc0xOYnhcblJRZkpTV2wzVmJWZGMwUUNTSnJ6UC9YallaaUoyajZKcDdZTzJKemg1YVp5VkRxR0ZRTy9CVVBTSmpGYlhGa0NcbkFDTGY3MDcvQXd5RVEyTGRPckJ2czV3WFk4TGY1UHB0NmxQKzdpSXhBb0dCQU9ob0V4SEFLbWt6TnpjNWtwTW9cbnJJSXNSRWdBTHNtRW5MZ1JVZ3dJaEw4Mjh1Mzh5ZktsSWNZeDkvYzFhR1hqWU5MOWdBRkh6RGc2N09mODBESkZcbnByNWIyQUw5Y09lWWozZVJoOW0xQnZqNEswTXc4eEh0VFBaalhKbHZyTXVCRyt2NUhrNXpXc0M3MmcycUUxYnlcbk9CUzdmQVJadGdMVVlDY3pXMDA1ZzFtcVxuLS0tLS1FTkQgUFJJVkFURSBLRVktLS0tLVxuIiwKICAiY2xpZW50X2VtYWlsIjogImZpcmViYXNlLWFkbWluc2RrLWZic3ZjQG1vZGVybi1zdWl0ZS1jbG91ZC1wZXItYjU1YjAuaWFtLmdzZXJ2aWNlYWNjb3VudC5jb20iLAogICJjbGllbnRfaWQiOiAiMTExODE5OTg2MTI1MjE2MTQ0NDE1IiwKICAiYXV0aF91cmkiOiAiaHR0cHM6Ly9hY2NvdW50cy5nb29nbGUuY29tL28vb2F1dGgyL2F1dGgiLAogICJ0b2tlbl91cmkiOiAiaHR0cHM6Ly9vYXV0aDIuZ29vZ2xlYXBpcy5jb20vdG9rZW4iLAogICJhdXRoX3Byb3ZpZGVyX3g1MDlfY2VydF91cmwiOiAiaHR0cHM6Ly93d3cuZ29vZ2xlYXBpcy5jb20vb2F1dGgyL3YxL2NlcnRzIiwKICAiY2xpZW50X3g1MDlfY2VydF91cmwiOiAiaHR0cHM6Ly93d3cuZ29vZ2xlYXBpcy5jb20vcm9ib3QvdjEvbWV0YWRhdGEveDUwOS9maXJlYmFzZS1hZG1pbnNkay1mYnN2YyU0MG1vZGVybi1zdWl0ZS1jbG91ZC1wZXItYjU1YjAuaWFtLmdzZXJ2aWNlYWNjb3VudC5jb20iLAogICJ1bml2ZXJzZV9kb21haW4iOiAiZ29vZ2xlYXBpcy5jb20iCn0="
+
+
+--- Diff for /k8s/secret.yaml ---
+--- a//k8s/secret.yaml
++++ b//k8s/secret.yaml
+@@ -1,20 +1,17 @@
+-apiVersion:v1
++apiVersion: v1
+ kind: Secret
+ metadata:
+-  name: modern-gcp-microservice-secret
++  name: cer-suite-local-core-secret
+   namespace: default
+   labels:
+-    app: modern-gcp-microservice
++    app: cer-suite-local-core
+ type: Opaque
+ data:
+   # Cadena de conexión completa JDBC codificada en Base64
+-  # Ejemplo: jdbc:postgresql://10.0.0.4:5432/db_transacciones
+-  DB_CONNECTION_STRING: "amRiYzpwb3N0Z3Jlc3FsOi8vMTAuMC4wLjQ6NTQzMi9kYl90cmFuc2FjY2lvbmVz"
++  #datasource ARTS_EC
++  SPRING_DATASOURCE_URL: "amRiYzpzcWxzZXJ2ZXI6Ly9DUzNEV1NBUk1MMUNPUk86MTQzMztkYXRhYmFzZU5hbWU9QVJUU19FQztlbmNyeXB0PWZhbHNl"
++  SPRING_DATASOURCE_USERNAME: "YWxsaWFuY2Vz"
++  SPRING_DATASOURCE_PASSWORD: "QUxMQ18wMTgw"
+ 
+-  # Nombre de usuario de la base de datos en Base64
+-  # Ejemplo: db_app_user
+-  DB_USERNAME: "ZGJfYXBwX3VzZXI="
+-
+-  # Contraseña de la base de datos en Base64
+-  # Ejemplo: P@ssw0rdProd2026!
+-  DB_PASSWORD: "UEBzc3cwcmRQcm9kMjAyNiE="
++  #datasource DEVS_EC
++  SPRING_DATASOURCE_DEVS_URL: "amRiYzpzcWxzZXJ2ZXI6Ly9DUzNEV1NBUk1MMUNPUk86MTQzMztkYXRhYmFzZU5hbWU9REVWU19FQztlbmNyeXB0PWZhbHNl"
+
+
+--- Diff for /k8s/service.yaml ---
+--- a//k8s/service.yaml
++++ b//k8s/service.yaml
+@@ -1,4 +1,4 @@
+-apiVersion:v1
++apiVersion: v1
+ kind: Service
+ metadata:
+   name: modern-gcp-microservice-service
+
+
+--- Diff for /logs/app.log ---
+--- a//logs/app.log
++++ b//logs/app.log
+@@ -0,0 +1,86 @@
++2026-06-05 18:43:14.051 [main] INFO  c.e.c.CerSuiteCloudLocalCoreCloudApplication - Starting CerSuiteCloudLocalCoreCloudApplication using Java 25.0.3 with PID 29680 (D:\SIPECOM\repository-git\cer-gcp\cer-suite-cloud-local-core-cloud\target\classes started by ricar in D:\SIPECOM\repository-git\cer-gcp\cer-suite-cloud-local-core-cloud)
++2026-06-05 18:43:14.053 [main] DEBUG c.e.c.CerSuiteCloudLocalCoreCloudApplication - Running with Spring Boot v4.0.6, Spring v7.0.7
++2026-06-05 18:43:14.054 [main] INFO  c.e.c.CerSuiteCloudLocalCoreCloudApplication - The following 1 profile is active: "local"
++2026-06-05 18:43:14.898 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Bootstrapping Spring Data Firestore-reactive repositories in DEFAULT mode.
++2026-06-05 18:43:15.027 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 122 ms. Found 0 Firestore-reactive repository interfaces.
++2026-06-05 18:43:15.302 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Bootstrapping Spring Data JPA repositories in DEFAULT mode.
++2026-06-05 18:43:15.360 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 53 ms. Found 5 JPA repository interfaces.
++2026-06-05 18:43:15.947 [main] INFO  o.s.boot.tomcat.TomcatWebServer - Tomcat initialized with port 8091 (http)
++2026-06-05 18:43:15.959 [main] INFO  o.a.catalina.core.StandardService - Starting service [Tomcat]
++2026-06-05 18:43:15.960 [main] INFO  o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/11.0.21]
++2026-06-05 18:43:16.044 [main] INFO  o.s.b.w.c.s.WebApplicationContextInitializer - Root WebApplicationContext: initialization completed in 1947 ms
++2026-06-05 18:43:16.392 [main] INFO  org.hibernate.orm.jpa - HHH008540: Processing PersistenceUnitInfo [name: default]
++2026-06-05 18:43:16.443 [main] INFO  org.hibernate.orm.core - HHH000001: Hibernate ORM core version 7.2.12.Final
++2026-06-05 18:43:16.806 [main] INFO  o.s.o.j.p.SpringPersistenceUnitInfo - No LoadTimeWeaver setup: ignoring JPA class transformer
++2026-06-05 18:43:16.839 [main] INFO  com.zaxxer.hikari.HikariDataSource - hikari-arts-ec - Starting...
++2026-06-05 18:43:18.011 [main] INFO  com.zaxxer.hikari.pool.HikariPool - hikari-arts-ec - Added connection ConnectionID:1 ClientConnectionId: 52d48757-4074-454b-a0cf-ede78727d23e
++2026-06-05 18:43:18.013 [main] INFO  com.zaxxer.hikari.HikariDataSource - hikari-arts-ec - Start completed.
++2026-06-05 18:43:18.187 [main] WARN  org.hibernate.orm.deprecation - HHH90000025: SQLServerDialect does not need to be specified explicitly using 'hibernate.dialect' (remove the property setting and it will be selected by default)
++2026-06-05 18:43:18.348 [main] INFO  o.hibernate.orm.connections.pooling - HHH10001005: Database info:
++	Database JDBC URL [jdbc:sqlserver://10.2.7.23:1433;concatNullYieldsNull=ON;quotedIdentifier=ON;connectRetryInterval=10;connectRetryCount=1;maxResultBuffer=-1;sendTemporalDataTypesAsStringForBulkCopy=true;delayLoadingLobs=true;useFmtOnly=false;vectorTypeSupport=v1;cacheBulkCopyMetadata=false;bulkCopyForBatchInsertAllowEncryptedValueModifications=false;bulkCopyForBatchInsertTableLock=false;bulkCopyForBatchInsertKeepNulls=false;bulkCopyForBatchInsertKeepIdentity=false;bulkCopyForBatchInsertFireTriggers=false;bulkCopyForBatchInsertCheckConstraints=false;bulkCopyForBatchInsertBatchSize=0;useBulkCopyForBatchInsert=false;cancelQueryTimeout=-1;sslProtocol=TLS;calcBigDecimalPrecision=false;useDefaultJaasConfig=false;jaasConfigurationName=SQLJDBCDriver;statementPoolingCacheSize=0;serverPreparedStatementDiscardThreshold=10;enablePrepareOnFirstPreparedStatementCall=false;fips=false;socketTimeout=0;authentication=NotSpecified;authenticationScheme=nativeAuthentication;xopenStates=false;datetimeParameterType=datetime2;sendTimeAsDatetime=true;replication=false;trustStoreType=JKS;trustServerCertificate=false;TransparentNetworkIPResolution=true;iPAddressPreference=IPv4First;serverNameAsACE=false;sendStringParametersAsUnicode=true;selectMethod=direct;responseBuffering=adaptive;queryTimeout=-1;packetSize=8000;multiSubnetFailover=false;loginTimeout=30;lockTimeout=-1;lastUpdateCount=true;useDefaultGSSCredential=false;prepareMethod=prepexec;encrypt=false;disableStatementPooling=true;databaseName=ARTS_EC;columnEncryptionSetting=Disabled;applicationName=Microsoft JDBC Driver for SQL Server;applicationIntent=readwrite;]
++	Database driver: Microsoft JDBC Driver 13.2 for SQL Server
++	Database dialect: SQLServerDialect
++	Database version: 12.0
++	Default catalog/schema: ARTS_EC/dbo
++	Autocommit mode: undefined/unknown
++	Isolation level: READ_COMMITTED [default READ_COMMITTED]
++	JDBC fetch size: 128
++	Pool: DataSourceConnectionProvider
++	Minimum pool size: undefined/unknown
++	Maximum pool size: undefined/unknown
++2026-06-05 18:43:19.070 [main] INFO  org.hibernate.orm.core - HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
++2026-06-05 18:43:19.074 [main] INFO  org.hibernate.orm.jdbc.batch - HHH100501: Automatic JDBC statement batching enabled (maximum batch size 50)
++2026-06-05 18:43:19.077 [main] INFO  o.s.o.j.LocalContainerEntityManagerFactoryBean - Initialized JPA EntityManagerFactory for persistence unit 'default'
++2026-06-05 18:43:19.099 [main] INFO  c.g.c.s.a.c.GcpContextAutoConfiguration - The default project ID is modern-suite-cloud-per-b55b0
++2026-06-05 18:43:19.138 [main] INFO  c.g.c.s.c.DefaultCredentialsProvider - Default credentials provider for service account firebase-adminsdk-fbsvc@modern-suite-cloud-per-b55b0.iam.gserviceaccount.com
++2026-06-05 18:43:19.138 [main] INFO  c.g.c.s.c.DefaultCredentialsProvider - Scopes in use by default credentials: [https://www.googleapis.com/auth/pubsub, https://www.googleapis.com/auth/spanner.admin, https://www.googleapis.com/auth/spanner.data, https://www.googleapis.com/auth/datastore, https://www.googleapis.com/auth/sqlservice.admin, https://www.googleapis.com/auth/devstorage.read_only, https://www.googleapis.com/auth/devstorage.read_write, https://www.googleapis.com/auth/cloudruntimeconfig, https://www.googleapis.com/auth/trace.append, https://www.googleapis.com/auth/cloud-platform, https://www.googleapis.com/auth/cloud-vision, https://www.googleapis.com/auth/bigquery, https://www.googleapis.com/auth/monitoring.write]
++2026-06-05 18:43:19.903 [main] INFO  o.s.d.j.r.q.QueryEnhancerFactories - Hibernate is in classpath; If applicable, HQL parser will be used.
++2026-06-05 18:43:20.781 [main] WARN  o.s.b.s.a.UserDetailsServiceAutoConfiguration - 
++
++Using generated security password: f84208fd-37aa-4f8f-bd73-60f984f80191
++
++This generated password is for development use only. Your security configuration must be updated before running your application in production.
++
++2026-06-05 18:43:20.793 [main] INFO  o.s.s.c.a.a.c.InitializeUserDetailsBeanManagerConfigurer$InitializeUserDetailsManagerConfigurer - Global AuthenticationManager configured with UserDetailsService bean with name inMemoryUserDetailsManager
++2026-06-05 18:43:21.666 [main] INFO  o.s.b.a.e.web.EndpointLinksResolver - Exposing 3 endpoints beneath base path '/actuator'
++2026-06-05 18:43:21.734 [main] INFO  o.s.boot.tomcat.TomcatWebServer - Tomcat started on port 8091 (http) with context path '/'
++2026-06-05 18:43:21.744 [main] INFO  c.e.c.CerSuiteCloudLocalCoreCloudApplication - Started CerSuiteCloudLocalCoreCloudApplication in 8.269 seconds (process running for 9.146)
++2026-06-05 18:43:21.751 [main] INFO  c.e.c.i.a.i.event.PubSubSalesAdapter - Registering Sales Pub/Sub subscriber via sharedlibs startListening
++2026-06-05 18:43:21.753 [main] INFO  c.e.j.services.MessageSubscriber - Iniciando listener de Pub/Sub
++2026-06-05 18:43:21.764 [main] INFO  c.e.j.services.MessageSubscriber - Listener activo
++2026-06-05 18:43:22.057 [RMI TCP Connection(1)-10.1.9.111] INFO  o.a.c.c.C.[Tomcat].[localhost].[/] - Initializing Spring DispatcherServlet 'dispatcherServlet'
++2026-06-05 18:43:22.057 [RMI TCP Connection(1)-10.1.9.111] INFO  o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
++2026-06-05 18:43:22.059 [RMI TCP Connection(1)-10.1.9.111] INFO  o.s.web.servlet.DispatcherServlet - Completed initialization in 2 ms
++2026-06-05 18:43:39.302 [SpringApplicationShutdownHook] INFO  o.s.boot.tomcat.GracefulShutdown - Commencing graceful shutdown. Waiting for active requests to complete
++2026-06-05 18:43:39.310 [tomcat-shutdown] INFO  o.s.boot.tomcat.GracefulShutdown - Graceful shutdown complete
++2026-06-05 18:43:39.319 [SpringApplicationShutdownHook] INFO  c.e.j.services.MessageSubscriber - Deteniendo listeners de Pub/Sub
++2026-06-05 18:43:39.323 [SpringApplicationShutdownHook] INFO  c.e.j.services.MessageSubscriber - Todos los listeners de Pub/Sub detenidos
++2026-06-05 18:43:39.324 [SpringApplicationShutdownHook] INFO  o.s.o.j.LocalContainerEntityManagerFactoryBean - Closing JPA EntityManagerFactory for persistence unit 'default'
++2026-06-05 18:43:39.326 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - hikari-arts-ec - Shutdown initiated...
++2026-06-05 18:43:39.327 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - hikari-arts-ec - Shutdown completed.
++2026-06-05 18:43:42.945 [main] INFO  c.e.c.CerSuiteCloudLocalCoreCloudApplication - Starting CerSuiteCloudLocalCoreCloudApplication using Java 25.0.3 with PID 38464 (D:\SIPECOM\repository-git\cer-gcp\cer-suite-cloud-local-core-cloud\target\classes started by ricar in D:\SIPECOM\repository-git\cer-gcp\cer-suite-cloud-local-core-cloud)
++2026-06-05 18:43:42.946 [main] DEBUG c.e.c.CerSuiteCloudLocalCoreCloudApplication - Running with Spring Boot v4.0.6, Spring v7.0.7
++2026-06-05 18:43:42.946 [main] INFO  c.e.c.CerSuiteCloudLocalCoreCloudApplication - The following 1 profile is active: "local"
++2026-06-05 18:43:43.776 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Bootstrapping Spring Data Firestore-reactive repositories in DEFAULT mode.
++2026-06-05 18:43:43.946 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 162 ms. Found 0 Firestore-reactive repository interfaces.
++2026-06-05 18:43:44.281 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Bootstrapping Spring Data JPA repositories in DEFAULT mode.
++2026-06-05 18:43:44.371 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 80 ms. Found 5 JPA repository interfaces.
++2026-06-05 18:43:44.966 [main] INFO  o.s.boot.tomcat.TomcatWebServer - Tomcat initialized with port 8091 (http)
++2026-06-05 18:43:45.054 [main] INFO  o.s.b.w.c.s.WebApplicationContextInitializer - Root WebApplicationContext: initialization completed in 2076 ms
++2026-06-05 18:43:45.465 [main] INFO  org.hibernate.orm.jpa - HHH008540: Processing PersistenceUnitInfo [name: default]
++2026-06-05 18:43:45.517 [main] INFO  org.hibernate.orm.core - HHH000001: Hibernate ORM core version 7.2.12.Final
++2026-06-05 18:43:45.937 [main] INFO  o.s.o.j.p.SpringPersistenceUnitInfo - No LoadTimeWeaver setup: ignoring JPA class transformer
++2026-06-05 18:43:45.961 [main] INFO  com.zaxxer.hikari.HikariDataSource - hikari-arts-ec - Starting...
++2026-06-05 18:43:48.702 [main] INFO  c.e.c.CerSuiteCloudLocalCoreCloudApplication - Starting CerSuiteCloudLocalCoreCloudApplication using Java 25.0.3 with PID 28048 (D:\SIPECOM\repository-git\cer-gcp\cer-suite-cloud-local-core-cloud\target\classes started by ricar in D:\SIPECOM\repository-git\cer-gcp\cer-suite-cloud-local-core-cloud)
++2026-06-05 18:43:48.704 [main] DEBUG c.e.c.CerSuiteCloudLocalCoreCloudApplication - Running with Spring Boot v4.0.6, Spring v7.0.7
++2026-06-05 18:43:48.704 [main] INFO  c.e.c.CerSuiteCloudLocalCoreCloudApplication - The following 1 profile is active: "local"
++2026-06-05 18:43:49.491 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Bootstrapping Spring Data Firestore-reactive repositories in DEFAULT mode.
++2026-06-05 18:43:49.604 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 107 ms. Found 0 Firestore-reactive repository interfaces.
++2026-06-05 18:43:49.789 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Bootstrapping Spring Data JPA repositories in DEFAULT mode.
++2026-06-05 18:43:49.830 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 36 ms. Found 5 JPA repository interfaces.
++2026-06-05 18:43:50.471 [main] INFO  o.s.boot.tomcat.TomcatWebServer - Tomcat initialized with port 8091 (http)
++2026-06-05 18:43:50.542 [main] INFO  o.s.b.w.c.s.WebApplicationContextInitializer - Root WebApplicationContext: initialization completed in 1806 ms
++2026-06-05 18:43:50.847 [main] INFO  org.hibernate.orm.jpa - HHH008540: Processing PersistenceUnitInfo [name: default]
++2026-06-05 18:43:50.913 [main] INFO  org.hibernate.orm.core - HHH000001: Hibernate ORM core version 7.2.12.Final
++2026-06-05 18:43:51.447 [main] INFO  o.s.o.j.p.SpringPersistenceUnitInfo - No LoadTimeWeaver setup: ignoring JPA class transformer
++2026-06-05 18:43:51.476 [main] INFO  com.zaxxer.hikari.HikariDataSource - hikari-arts-ec - Starting...
+
+
+--- Diff for /pom.xml ---
+--- a//pom.xml
++++ b//pom.xml
+@@ -9,12 +9,10 @@
+         <relativePath/>
+     </parent>
+     <groupId>com.elrosado</groupId>
+-    <artifactId>cer-suite-cloud-local-core</artifactId>
++    <artifactId>cer-suite-local-core</artifactId>
+     <version>1.0.0</version>
+-    <name>cer-suite-cloud-local-core</name>
+-    <description>SuiteCloud â Procesamiento cloud-native. MigraciÃ³n de ArmsServerLocal (Java 8) a Java 25 + Spring Boot
+-        4 en GCP Cloud Run
+-    </description>
++    <name>cer-suite-local-core</name>
++    <description>SuiteCloud â Procesamiento cloud-native.</description>
+ 
+     <properties>
+         <java.version>25</java.version>
+@@ -46,12 +44,6 @@
+             <groupId>com.elrosado</groupId>
+             <artifactId>jlib-firestore</artifactId>
+             <version>1.0.0</version>
+-        </dependency>
+-
+-        <dependency>
+-            <groupId>com.elrosado</groupId>
+-            <artifactId>jlib-kms</artifactId>
+-            <version>1.0.1</version>
+         </dependency>
+ 
+         <dependency>
+@@ -122,6 +114,12 @@
+             <version>0.12.5</version>
+             <scope>runtime</scope>
+         </dependency>
++
++        <dependency>
++            <groupId>org.springdoc</groupId>
++            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
++            <version>2.8.5</version>
++        </dependency>
+     </dependencies>
+ 
+     <dependencyManagement>
+
+
+--- Diff for /skaffold.yaml ---
+--- a//skaffold.yaml
++++ b//skaffold.yaml
+@@ -0,0 +1,16 @@
++apiVersion: skaffold/v4beta11
++kind: Config
++build:
++  artifacts:
++    - image: localhost:30500/cer-suite-cloud-local-core
++      custom:
++        buildCommand: bash build.sh
++        dependencies:
++          paths:
++            - src
++            - pom.xml
++manifests:
++  rawYaml:
++    - k8s/*.yaml
++deploy:
++  kubectl: {}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/web/controller/AuthController.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/web/controller/AuthController.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/web/controller/AuthController.java
+@@ -0,0 +1,35 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.web.controller;
++
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.web.dto.AuthRequest;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.web.dto.AuthResponse;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.security.JwtTokenProvider;
++import io.swagger.v3.oas.annotations.Operation;
++import io.swagger.v3.oas.annotations.tags.Tag;
++import org.springframework.http.HttpStatus;
++import org.springframework.http.ResponseEntity;
++import org.springframework.web.bind.annotation.PostMapping;
++import org.springframework.web.bind.annotation.RequestBody;
++import org.springframework.web.bind.annotation.RequestMapping;
++import org.springframework.web.bind.annotation.RestController;
++
++@RestController
++@RequestMapping("/api/v1/auth")
++@Tag(name = "AutenticaciÃ³n", description = "ObtenciÃ³n de token JWT para acceso a la API")
++public class AuthController {
++
++    private final JwtTokenProvider jwtTokenProvider;
++
++    public AuthController(JwtTokenProvider jwtTokenProvider) {
++        this.jwtTokenProvider = jwtTokenProvider;
++    }
++
++    @PostMapping("/login")
++    @Operation(summary = "Obtiene token JWT", description = "Autentica credenciales y retorna un Bearer token")
++    public ResponseEntity<AuthResponse> login(@RequestBody AuthRequest request) {
++        // TODO: reemplazar por validaciÃ³n contra UserDetailsService real
++        if ("admin".equals(request.username()) && "password".equals(request.password())) {
++            return ResponseEntity.ok(new AuthResponse(jwtTokenProvider.createToken(request.username())));
++        }
++        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/web/controller/ConsultController.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/web/controller/ConsultController.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/web/controller/ConsultController.java
+@@ -0,0 +1,47 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.web.controller;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.ConsultUseCase;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.web.dto.ConsultResponse;
++import io.swagger.v3.oas.annotations.Operation;
++import io.swagger.v3.oas.annotations.tags.Tag;
++import org.springframework.http.ResponseEntity;
++import org.springframework.web.bind.annotation.GetMapping;
++import org.springframework.web.bind.annotation.PathVariable;
++import org.springframework.web.bind.annotation.RequestMapping;
++import org.springframework.web.bind.annotation.RestController;
++
++@RestController
++@RequestMapping("/api/v1/consult")
++@Tag(name = "Consultas", description = "Consultas sÃ­ncronas de datos de cliente (migra SP_ConsInfFactura y SP_ConsInfDEV_TICKET)")
++public class ConsultController {
++
++    private final ConsultUseCase consultUseCase;
++
++    public ConsultController(ConsultUseCase consultUseCase) {
++        this.consultUseCase = consultUseCase;
++    }
++
++    @GetMapping("/invoice/{invoiceNumber}")
++    @Operation(
++            summary = "Consulta cliente por factura",
++            description = "Migra SP_ConsInfFactura. Retorna tipo de identificaciÃ³n, nÃºmero y nombre del cliente."
++    )
++    public ResponseEntity<ConsultResponse> getByInvoice(@PathVariable String invoiceNumber) {
++        return consultUseCase.queryByInvoice(invoiceNumber)
++                .map(r -> ResponseEntity.ok(
++                        new ConsultResponse(String.valueOf(r.identificationType()), r.identification(), r.name())))
++                .orElse(ResponseEntity.notFound().build());
++    }
++
++    @GetMapping("/credit-note/{creditNote}")
++    @Operation(
++            summary = "Consulta cliente por nota de crÃ©dito",
++            description = "Migra SP_ConsInfDEV_TICKET. Retorna tipo de identificaciÃ³n, nÃºmero y nombre del cliente."
++    )
++    public ResponseEntity<ConsultResponse> getByCreditNote(@PathVariable String creditNote) {
++        return consultUseCase.queryByCreditNote(creditNote)
++                .map(r -> ResponseEntity.ok(
++                        new ConsultResponse(String.valueOf(r.identificationType()), r.identification(), r.name())))
++                .orElse(ResponseEntity.notFound().build());
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/web/dto/AuthRequest.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/web/dto/AuthRequest.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/web/dto/AuthRequest.java
+@@ -0,0 +1,3 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.web.dto;
++
++public record AuthRequest(String username, String password) {}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/web/dto/AuthResponse.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/web/dto/AuthResponse.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/web/dto/AuthResponse.java
+@@ -0,0 +1,3 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.web.dto;
++
++public record AuthResponse(String token) {}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/web/dto/ConsultResponse.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/web/dto/ConsultResponse.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/web/dto/ConsultResponse.java
+@@ -0,0 +1,12 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.web.dto;
++
++import io.swagger.v3.oas.annotations.media.Schema;
++
++public record ConsultResponse(
++        @Schema(description = "Tipo de identificaciÃ³n: C=CÃ©dula, R=RUC, P=Pasaporte")
++        String identificationType,
++        @Schema(description = "NÃºmero de identificaciÃ³n del cliente")
++        String identification,
++        @Schema(description = "Nombre completo del cliente")
++        String name
++) {}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/kms/KmsDecryptionAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/kms/KmsDecryptionAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/kms/KmsDecryptionAdapter.java
+@@ -1,34 +0,0 @@
+-package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.kms;
+-
+-import com.elrosado.cersuitecloudlocalcore.domain.port.out.KmsDecryptionPort;
+-import com.elrosado.jlib_kms.interfaces.IGoogleKmsService;
+-import org.slf4j.Logger;
+-import org.slf4j.LoggerFactory;
+-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+-import org.springframework.stereotype.Component;
+-
+-/**
+- * Adaptador de salida: descifrado de tramas con Cloud KMS via jlib-kms.
+- * Solo activo cuando app.gcp.kms.enabled=true (perfil prod).
+- */
+-@Component
+-@ConditionalOnProperty(name = "app.gcp.kms.enabled", havingValue = "true")
+-public class KmsDecryptionAdapter implements KmsDecryptionPort {
+-
+-    private static final Logger log = LoggerFactory.getLogger(KmsDecryptionAdapter.class);
+-
+-    private final IGoogleKmsService kmsService;
+-
+-    public KmsDecryptionAdapter(IGoogleKmsService kmsService) {
+-        this.kmsService = kmsService;
+-    }
+-
+-    @Override
+-    public String decrypt(String ciphertextBase64, String storeCode) {
+-        log.atDebug()
+-           .setMessage("Descifrando trama con KMS")
+-           .addKeyValue("storeCode", storeCode)
+-           .log();
+-        return kmsService.decrypt(ciphertextBase64);
+-    }
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/kms/NoOpKmsDecryptionAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/kms/NoOpKmsDecryptionAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/kms/NoOpKmsDecryptionAdapter.java
+@@ -1,27 +0,0 @@
+-package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.kms;
+-
+-import com.elrosado.cersuitecloudlocalcore.domain.port.out.KmsDecryptionPort;
+-import org.slf4j.Logger;
+-import org.slf4j.LoggerFactory;
+-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+-import org.springframework.stereotype.Component;
+-
+-import java.nio.charset.StandardCharsets;
+-import java.util.Base64;
+-
+-/**
+- * Adaptador no-op: decodifica base64 sin descifrar.
+- * Activo cuando app.gcp.kms.enabled=false (perfil local/dev).
+- */
+-@Component
+-@ConditionalOnProperty(name = "app.gcp.kms.enabled", havingValue = "false", matchIfMissing = true)
+-public class NoOpKmsDecryptionAdapter implements KmsDecryptionPort {
+-
+-    private static final Logger log = LoggerFactory.getLogger(NoOpKmsDecryptionAdapter.class);
+-
+-    @Override
+-    public String decrypt(String ciphertextBase64, String storeCode) {
+-        log.atDebug().setMessage("KMS deshabilitado â decodificando base64 sin descifrar").log();
+-        return new String(Base64.getDecoder().decode(ciphertextBase64), StandardCharsets.UTF_8);
+-    }
+-}
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/GcpConfig.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/GcpConfig.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/GcpConfig.java
+@@ -0,0 +1,12 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.context.annotation.Configuration;
++
++/**
++ * ConfiguraciÃ³n global de servicios GCP.
++ * Los beans de Pub/Sub y Firestore se auto-configuran via jlib-pubsub-logging y jlib-firestore.
++ * Agregar aquÃ­ cualquier bean adicional que requiera configuraciÃ³n explÃ­cita (Secret Manager, etc.).
++ */
++@Configuration
++public class GcpConfig {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LoggingEnrichmentFilter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LoggingEnrichmentFilter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LoggingEnrichmentFilter.java
+@@ -0,0 +1,40 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import jakarta.servlet.Filter;
++import jakarta.servlet.FilterChain;
++import jakarta.servlet.ServletException;
++import jakarta.servlet.ServletRequest;
++import jakarta.servlet.ServletResponse;
++import jakarta.servlet.http.HttpServletRequest;
++import org.slf4j.MDC;
++import org.springframework.stereotype.Component;
++
++import java.io.IOException;
++import java.util.UUID;
++
++/**
++ * Inyecta un correlation_id en el MDC para trazabilidad en logs estructurados GCP.
++ * Propaga el header X-Correlation-ID si viene en la peticiÃ³n; si no, genera un UUID nuevo.
++ * El valor queda disponible en cada lÃ­nea de log como campo estructurado.
++ */
++@Component
++public class LoggingEnrichmentFilter implements Filter {
++
++    private static final String CORRELATION_ID_HEADER = "X-Correlation-ID";
++    private static final String MDC_KEY               = "correlation_id";
++
++    @Override
++    public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
++            throws IOException, ServletException {
++        try {
++            String correlationId = null;
++            if (request instanceof HttpServletRequest httpReq) {
++                correlationId = httpReq.getHeader(CORRELATION_ID_HEADER);
++            }
++            MDC.put(MDC_KEY, correlationId != null ? correlationId : UUID.randomUUID().toString());
++            chain.doFilter(request, response);
++        } finally {
++            MDC.remove(MDC_KEY);
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SecurityConfig.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SecurityConfig.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SecurityConfig.java
+@@ -0,0 +1,36 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import com.elrosado.cersuitecloudlocalcore.infrastructure.security.JwtAuthenticationFilter;
++import org.springframework.context.annotation.Bean;
++import org.springframework.context.annotation.Configuration;
++import org.springframework.security.config.annotation.web.builders.HttpSecurity;
++import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
++import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
++import org.springframework.security.config.http.SessionCreationPolicy;
++import org.springframework.security.web.SecurityFilterChain;
++import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
++
++@Configuration
++@EnableWebSecurity
++public class SecurityConfig {
++
++    @Bean
++    public SecurityFilterChain filterChain(HttpSecurity http, JwtAuthenticationFilter jwtFilter)
++            throws Exception {
++        return http
++                .csrf(AbstractHttpConfigurer::disable)
++                .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
++                .authorizeHttpRequests(auth -> auth
++                        .requestMatchers(
++                                "/api/v1/auth/**",
++                                "/actuator/**",
++                                "/api-docs/**",
++                                "/swagger-ui/**",
++                                "/swagger-ui.html"
++                        ).permitAll()
++                        .anyRequest().authenticated()
++                )
++                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
++                .build();
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/security/JwtAuthenticationFilter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/security/JwtAuthenticationFilter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/security/JwtAuthenticationFilter.java
+@@ -0,0 +1,49 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.security;
++
++import jakarta.servlet.Filter;
++import jakarta.servlet.FilterChain;
++import jakarta.servlet.ServletException;
++import jakarta.servlet.ServletRequest;
++import jakarta.servlet.ServletResponse;
++import jakarta.servlet.http.HttpServletRequest;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
++import org.springframework.security.core.context.SecurityContextHolder;
++import org.springframework.stereotype.Component;
++
++import java.io.IOException;
++import java.util.List;
++
++@Component
++public class JwtAuthenticationFilter implements Filter {
++
++    private static final Logger log           = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
++    private static final String BEARER_PREFIX = "Bearer ";
++
++    private final JwtTokenProvider jwtTokenProvider;
++
++    public JwtAuthenticationFilter(JwtTokenProvider jwtTokenProvider) {
++        this.jwtTokenProvider = jwtTokenProvider;
++    }
++
++    @Override
++    public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
++            throws IOException, ServletException {
++        if (request instanceof HttpServletRequest httpReq) {
++            String authHeader = httpReq.getHeader("Authorization");
++            if (authHeader != null && authHeader.startsWith(BEARER_PREFIX)) {
++                String token = authHeader.substring(BEARER_PREFIX.length());
++                if (jwtTokenProvider.validateToken(token)) {
++                    String username = jwtTokenProvider.getUsername(token);
++                    SecurityContextHolder.getContext().setAuthentication(
++                            new UsernamePasswordAuthenticationToken(username, null, List.of())
++                    );
++                } else {
++                    log.atWarn().setMessage("Token JWT invÃ¡lido o expirado").log();
++                }
++            }
++        }
++        chain.doFilter(request, response);
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/security/JwtTokenProvider.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/security/JwtTokenProvider.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/security/JwtTokenProvider.java
+@@ -0,0 +1,51 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.security;
++
++import io.jsonwebtoken.JwtException;
++import io.jsonwebtoken.Jwts;
++import io.jsonwebtoken.security.Keys;
++import org.springframework.beans.factory.annotation.Value;
++import org.springframework.stereotype.Component;
++
++import javax.crypto.SecretKey;
++import java.util.Date;
++
++@Component
++public class JwtTokenProvider {
++
++    private final SecretKey key;
++    private final long validityInMilliseconds;
++
++    public JwtTokenProvider(
++            @Value("${jwt.secret:defaultsecretkey12345678901234567890}") String secret,
++            @Value("${jwt.expire-length:3600000}") long validityInMilliseconds) {
++        this.key = Keys.hmacShaKeyFor(secret.getBytes());
++        this.validityInMilliseconds = validityInMilliseconds;
++    }
++
++    public String createToken(String username) {
++        Date now      = new Date();
++        Date validity = new Date(now.getTime() + validityInMilliseconds);
++        return Jwts.builder()
++                .subject(username)
++                .issuedAt(now)
++                .expiration(validity)
++                .signWith(key)
++                .compact();
++    }
++
++    public boolean validateToken(String token) {
++        try {
++            Jwts.parser().verifyWith(key).build().parseSignedClaims(token);
++            return true;
++        } catch (JwtException | IllegalArgumentException e) {
++            return false;
++        }
++    }
++
++    public String getUsername(String token) {
++        return Jwts.parser().verifyWith(key).build()
++                .parseSignedClaims(token)
++                .getPayload()
++                .getSubject();
++    }
++}
+
+
+--- Diff for /src/main/resources/application-dev.yml ---
+--- a//src/main/resources/application-dev.yml
++++ b//src/main/resources/application-dev.yml
+@@ -0,0 +1,57 @@
++server:
++  port: 8080
++
++spring:
++  # Datasource primario: ARTS_EC (entorno GCP Dev)
++  datasource:
++    url: ${SPRING_DATASOURCE_URL}
++    username: ${SPRING_DATASOURCE_USERNAME}
++    password: ${SPRING_DATASOURCE_PASSWORD}
++    driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
++    hikari:
++      maximum-pool-size: 10
++      minimum-idle: 2
++      pool-name: hikari-arts-ec
++
++  datasource-devs:
++    url: ${SPRING_DATASOURCE_DEVS_URL}
++    username: ${SPRING_DATASOURCE_USERNAME}
++    password: ${SPRING_DATASOURCE_PASSWORD}
++    driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
++    hikari:
++      maximum-pool-size: 3
++      minimum-idle: 1
++      pool-name: hikari-devs-ec
++
++  jpa:
++    database-platform: org.hibernate.dialect.SQLServerDialect
++    show-sql: false
++
++  cloud:
++    gcp:
++      project-id: ${GCP_PROJECT_ID}
++      credentials:
++        location:
++      storage:
++        enabled: true
++      pubsub:
++        enabled: true
++
++logging:
++  level:
++    root: INFO
++    com.elrosado.cersuitecloudlocalcore: DEBUG
++    org.springframework: INFO
++    org.hibernate.SQL: WARN
++
++pubsub:
++  subscriptions:
++    - subscription-id: ${GCP_PUBSUB_SUB_VENTAS}
++      topic-id: ${GCP_PUBSUB_TOPIC_VENTAS}
++
++app:
++  gcp:
++    pubsub:
++      topic-distributor: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR}
++    firestore:
++      collection: ${GCP_FIRESTORE_COLLECTION:frames}
+
+
+--- Diff for /src/main/resources/application-local.yml ---
+--- a//src/main/resources/application-local.yml
++++ b//src/main/resources/application-local.yml
+@@ -1,7 +1,6 @@
++server:
++  port: 8091
+ spring:
+-  autoconfigure:
+-    exclude:
+-      - com.elrosado.jlib_kms.config.KmsAutoConfiguration
+ 
+   # Datasource primario: ARTS_EC
+   # Tablas: PA_STR_RTL, TR_INVC, CO_CPR_CER, CO_EXT_CER
+
+
+--- Diff for /src/main/resources/application-prod.yml ---
+--- a//src/main/resources/application-prod.yml
++++ b//src/main/resources/application-prod.yml
+@@ -1,3 +1,5 @@
++server:
++  port: 8080
+ spring:
+   # Datasource primario: ARTS_EC
+   datasource:
+
+
+--- Diff for /src/main/resources/application.yml ---
+--- a//src/main/resources/application.yml
++++ b//src/main/resources/application.yml
+@@ -1,3 +1,6 @@
++server:
++  port: 8080
++
+ spring:
+   main:
+     keep-alive: true
+@@ -30,6 +33,17 @@
+ tsl:
+   omit-xml-declaration: false
+ 
++springdoc:
++  api-docs:
++    path: /api-docs
++  swagger-ui:
++    path: /swagger-ui.html
++    operationsSorter: alpha
++
++jwt:
++  secret: ${JWT_SECRET:defaultsecretkey12345678901234567890}
++  expire-length: ${JWT_EXPIRE_LENGTH:3600000}
++
+ management:
+   endpoints:
+     web:
+
+
+--- Diff for /src/main/resources/logback-spring.xml ---
+--- a//src/main/resources/logback-spring.xml
++++ b//src/main/resources/logback-spring.xml
+@@ -1,27 +1,46 @@
+ <?xml version="1.0" encoding="UTF-8"?>
+ <configuration>
+     <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+-    <springProfile name="!prod">
+-        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+-            <encoder>
+-                <pattern>%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %clr(${LOG_LEVEL_PATTERN:-%5p}) %clr(${PID:- }){magenta} %clr(---){faint} %clr([%15.15t]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}</pattern>
+-            </encoder>
+-        </appender>
+-        
++
++    <!-- Appender for Console (Local/Dev) -->
++    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
++        <encoder>
++            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
++        </encoder>
++    </appender>
++
++    <!-- Appender for File (Local/Dev) -->
++    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
++        <file>${LOG_PATH:-./logs}/app.log</file>
++        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
++            <fileNamePattern>${LOG_PATH:-./logs}/app-%d{yyyy-MM-dd}.%i.log</fileNamePattern>
++            <maxFileSize>10MB</maxFileSize>
++            <maxHistory>7</maxHistory>
++            <totalSizeCap>100MB</totalSizeCap>
++        </rollingPolicy>
++        <encoder>
++            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
++        </encoder>
++    </appender>
++
++    <!-- Appender for GCP Cloud Logging (Prod) -->
++    <appender name="CLOUD" class="com.google.cloud.logging.logback.LoggingAppender">
++        <!-- Log structure will be auto-formatted to GCP Stackdriver Logging JSON format -->
++        <log>application.log</log>
++        <flushLevel>WARN</flushLevel>
++    </appender>
++
++    <!-- Profile environments -->
++    <springProfile name="local,dev">
+         <root level="INFO">
+             <appender-ref ref="CONSOLE"/>
++            <appender-ref ref="FILE"/>
+         </root>
+     </springProfile>
+ 
+     <springProfile name="prod">
+-        <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+-            <encoder class="org.springframework.boot.logging.structured.StructuredLoggingJsonEncoder">
+-                <format>gcp</format>
+-            </encoder>
+-        </appender>
+-
+         <root level="INFO">
+-            <appender-ref ref="JSON_CONSOLE"/>
++            <appender-ref ref="CLOUD"/>
+         </root>
+     </springProfile>
+ </configuration>
+
+

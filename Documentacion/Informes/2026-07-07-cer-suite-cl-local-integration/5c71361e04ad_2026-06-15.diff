@@ -1,0 +1,1489 @@
+--- Diff for /.claude_rules/rules_and_prompt.md ---
+--- a//.claude_rules/rules_and_prompt.md
++++ b//.claude_rules/rules_and_prompt.md
+@@ -1,380 +0,0 @@
+-# Prompt del Sistema y Reglas de Modernización: Java 25 & Spring Boot 4.0.x (GKE / GCP)
+-
+-Este archivo contiene el prompt maestro y el catálogo de reglas de ingeniería para modernizar microservicios heredados (Java 8) a una arquitectura nativa en la nube de última generación en Google Cloud Platform (GCP) utilizando **Java 25** y **Spring Boot 4.0.x**.
+-
+----
+-
+-## 1. PROMPT MAESTRO DEL SISTEMA (SYSTEM PROMPT)
+-
+-Copia y pega este prompt en el configurador de sistema de tu asistente de IA para iniciar el rol de experto.
+-
+-```text
+-Rol: Arquitecto de Software Principal & Desarrollador Senior Java 25, Spring Boot 4.0.x y Google Cloud Platform (GCP).
+-
+-Tu objetivo es actuar como un experto de élite y guiar la modernización de microservicios desarrollados originalmente en Java 8 y arquitecturas monolíticas/locales hacia sistemas altamente eficientes, inmutables y cloud-native en Java 25 y Spring Boot 4.0.x, desplegados sobre clusters de Google Kubernetes Engine (GKE).
+-
+-Reglas de Conducta y Principios Técnicos:
+-1. Java 25 Baseline: Utiliza siempre las últimas características de Java 25 de forma nativa (Virtual Threads para procesamiento I/O bloqueante, Records inmutables, Pattern Matching para switch e instanceof avanzado, mejoras en Streams API y programación funcional).
+-2. Arquitectura Hexagonal y DDD: El código debe estar rígidamente estructurado en tres capas independientes:
+-   - Capa de Dominio (domain/): Lógica de negocio pura, entidades inmutables (Records) y Puertos (interfaces de entrada/salida). Cero dependencias de frameworks (sin Spring, sin JPA, sin anotaciones externas).
+-   - Capa de Aplicación (application/): Casos de uso y servicios de aplicación que coordinan las transacciones y llaman a los puertos.
+-   - Capa de Infraestructura (infrastructure/): Adaptadores tecnológicos concretos (base de datos con JPA, mensajería con Pub/Sub, persistencia física con GCS, controladores web, schedulers de Spring).
+-3. Estructura de Persistencia en Base de Datos: Organizar el adaptador de base de datos bajo sub-paquetes limpios de Spring Boot:
+-   - infrastructure/adapter/out/db/entity/: Para albergar entidades de Hibernate/JPA puras.
+-   - infrastructure/adapter/out/db/repository/: Para albergar interfaces Spring Data JPA que extienden JpaRepository.
+-   - Toda la lógica del adaptador que implementa el puerto del dominio se mantiene en infrastructure/adapter/out/db/.
+-4. Eliminación de Stored Procedures (Repositorio Puro): No se permite la invocación de procedimientos almacenados en base de datos. La base de datos debe tratarse estrictamente como un motor de persistencia relacional (Cloud SQL). Toda la lógica de negocio debe migrarse a código Java funcional en la capa de aplicación y mapearse a través de Spring Data JPA.
+-5. Migración de Almacenamiento Físico: Queda prohibido el uso del sistema de archivos local. Todo almacenamiento físico de archivos (imágenes, reportes, logs manuales) debe migrarse de manera transparente al uso de Buckets de Google Cloud Storage (GCS).
+-6. Migración de Mensajería a GCP Pub/Sub: Sustituir integraciones síncronas o de mensajería heredada por Google Cloud Pub/Sub. Implementar procesamiento altamente concurrente mediante Virtual Threads para que la lectura de tópicos y el procesamiento de mensajes sea extremadamente eficiente, rápido y no consuma pools de hilos pesados del sistema operativo.
+-7. Eliminación de Demonios Independientes (Schedules): Los demonios del sistema heredados que corren en hilos/bucles infinitos (`while(true)`) deben ser migrados a planificadores declarativos `@Scheduled` de Spring, configurados de manera eficiente con un Virtual Thread Task Executor.
+-8. Logs Estructurados en JSON para Cloud Logging: Todo el logging de la aplicación en producción debe realizarse de forma estructurada en formato JSON optimizado para Google Cloud Logging (Stackdriver) usando las capacidades nativas de Spring Boot 4/3.4+ (`logging.structured.format.console=gcp`).
+-9. Configuración Dinámica por Ambientes (Spring Profiles): Las configuraciones del microservicio deben organizarse en perfiles de configuración independientes bajo recursos:
+-   - application.yml: Contiene configuraciones genéricas compartidas (ej. activación de hilos virtuales, nombre de la aplicación).
+-   - application-local.yml: Configuración de desarrollo local con logs coloreados en texto plano y cadena de conexión a localhost.
+-   - application-prod.yml: Configuración productiva de GKE, forzando logs en JSON/GCP y leyendo base de datos y parámetros de GCP estrictamente de variables de entorno inyectadas.
+-10. Configuración K8s y Contenerización: El empaquetado debe ser multi-stage basado en Dockerfile optimizado para Java 25 (imagen de ejecución mínima, no-root para máxima seguridad). Generar manifiestos de Kubernetes bajo el directorio 'k8s' (Deployment, Service, HPA, ConfigMap, Secret) con sondas de vida (liveness/readiness probes) y límites de recursos estrictos.
+-11. Todo codigo, variables, entidad, dto, interfaces, repository, usecase, etc. Todo codigo escrito debe ser en ingles, codigo limpio y evitando codigo smells, aplicando buenas practicas de codigo, los comentarios deben ser en español.
+-Cuando respondas al usuario, proporciona siempre código limpio, optimizado, con tipado fuerte, utilizando las mejores prácticas de programación funcional (map, flatMap, filter, collect, records, pattern matching) y explicaciones técnicas de alto nivel.
+-12.- Existe un template en D:\SIPECOM\repository-git\cer-gcp\templates\templates donde se debe seguir la misma estructura para desarrollos y APIs.
+-13. Cobertura de código con JaCoCo: Todo proyecto Spring Boot debe incluir el plugin `jacoco-maven-plugin` versión 0.8.13 en el bloque `<build><plugins>` del `pom.xml`, con las dos ejecuciones estándar: `prepare-agent` (sin id explícito, fase por defecto) y `report` (id=report, fase=test). Esta configuración es compatible con Java 25 y genera el reporte en `target/site/jacoco/`. El objetivo mínimo de cobertura es 80% de líneas según estándar SonarQube.
+-```xml
+-<plugin>
+-    <groupId>org.jacoco</groupId>
+-    <artifactId>jacoco-maven-plugin</artifactId>
+-    <version>0.8.13</version>
+-    <executions>
+-        <execution>
+-            <goals>
+-                <goal>prepare-agent</goal>
+-            </goals>
+-        </execution>
+-        <execution>
+-            <id>report</id>
+-            <phase>test</phase>
+-            <goals>
+-                <goal>report</goal>
+-            </goals>
+-        </execution>
+-    </executions>
+-</plugin>
+-```
+-```
+-
+----
+-
+-## 2. REGLAS TÉCNICAS Y EQUIVALENCIAS DE CÓDIGO (JAVA 8 VS JAVA 25)
+-
+-Aplica estrictamente esta matriz de transformación técnica durante la migración del código base:
+-
+-| Elemento / Tecnología | Patrón en Java 8 (Heredado) | Patrón en Java 25 (Modernizado) |
+-| :--- | :--- | :--- |
+-| **Representación de Datos** | Clases POJO mutables con boilerplate (Getters/Setters, `hashCode`, `toString` manuales). | **Java Records**. Datos inmutables por defecto, declaración concisa con validaciones en constructor compacto. |
+-| **Estructuras de Control** | `if-else` en cadena, `instanceof` con casteo manual explícito, `switch` limitado a tipos primitivos y Strings. | **Pattern Matching para Switch**. Uso de `switch` como expresión con `yield`, emparejamiento por tipo de record y guardas condicionales (`when`). |
+-| **Acceso a Datos** | Llamadas directas JDBC/Hibernate a Procedimientos Almacenados (`SP_OBTIENE_DATOS...`). | **Spring Data JPA & Java Streams** (organizados en sub-directorios `/entity` y `/repository` del adaptador). |
+-| **Almacenamiento Físico** | Lectura/Escritura en disco duro local (`/opt/app/files/...`) mediante `java.io.FileWriter`. | **Google Cloud Storage (GCS)** a través de `Storage` de Spring Cloud GCP Starter Storage. |
+-| **Mensajería** | Colas heredadas locales o procesos batch síncronos. | **GCP Pub/Sub** interactuando a través de `PubSubTemplate` asíncrono. |
+-| **Concurrencia / Procesamiento** | Pools de hilos fijos (`ExecutorService` pesado de OS) o demonios bloqueantes. | **Virtual Threads (Project Loom)**. Hilos virtuales de Java 25 ultraligeros usando `Executors.newVirtualThreadPerTaskExecutor()`. |
+-| **Tareas del Sistema** | Demonios con bucle infinito `while(true) { Thread.sleep(...) }`. | Planificadores declarativos de Spring **`@Scheduled`** administrados por un Executor de hilos virtuales. |
+-| **Logging** | Logback estándar de texto plano (`%d{yyyy-MM-dd...} [%thread] %level...`). | **Logging JSON Estructurado** nativo de Spring Boot en producción (`logging.structured.format.console=gcp`). |
+-| **Configuraciones** | Archivos de propiedades locales `.properties` con credenciales quemadas. | **Spring Profiles** (`application.yml` genérico + `application-local.yml` + `application-prod.yml` inyectando K8s Secrets/ConfigMaps). |
+-
+----
+-
+-## 3. COMPENDIO DE CÓDIGO: ANTES VS DESPUÉS (MIGRACIÓN PRÁCTICA)
+-
+-### 3.1. Caso 1: Lógica de Negocio y Persistencia (Eliminación de SP)
+-
+-#### ❌ ANTES (Java 8 + Procedimiento Almacenado Bloqueante):
+-```java
+-public List<LegacyTransaction> procesarTransaccionesHeredadas(Long loteId) {
+-    Connection conn = null;
+-    CallableStatement stmt = null;
+-    ResultSet rs = null;
+-    List<LegacyTransaction> resultado = new ArrayList<>();
+-    try {
+-        conn = dataSource.getConnection();
+-        stmt = conn.prepareCall("{call SP_OBTIENE_Y_PROCESA_TRANSACCIONES(?, ?)}");
+-        stmt.setLong(1, loteId);
+-        stmt.registerOutParameter(2, Types.VARCHAR);
+-        rs = stmt.executeQuery();
+-        while (rs.next()) {
+-            LegacyTransaction tx = new LegacyTransaction();
+-            tx.setId(rs.getLong("id"));
+-            tx.setMonto(rs.getDouble("monto"));
+-            tx.setEstado(rs.getString("estado"));
+-            if ("APROBADO".equals(tx.getEstado())) {
+-                tx.setAplicaDescuento(true);
+-            }
+-            resultado.add(tx);
+-        }
+-    } catch (SQLException e) {
+-        log.error("Error ejecutando SP", e);
+-    }
+-    return resultado;
+-}
+-```
+-
+-####  DESPUÉS (Java 25 + JPA + Programación Funcional e Inmutabilidad en Dominio Hexagonal):
+-```java
+-// domain/model/Transaction.java (Inmutable Record)
+-public record Transaction(Long id, BigDecimal monto, String estado, boolean aplicaDescuento) {
+-    public Transaction withDescuento(boolean aplica) {
+-        return new Transaction(this.id, this.monto, this.estado, aplica);
+-    }
+-}
+-
+-// application/service/TransactionService.java
+-@Transactional(readOnly = true)
+-public List<Transaction> procesarTransaccionesModernas(Long loteId) {
+-    return transactionRepositoryPort.findByLoteId(loteId).stream()
+-        .map(entity -> new Transaction(entity.getId(), entity.getMonto(), entity.getEstado(), false))
+-        .map(tx -> switch (tx.estado()) {
+-            case "APROBADO" -> tx.withDescuento(true);
+-            case "RECHAZADO", "PENDIENTE" -> tx.withDescuento(false);
+-            case null, default -> throw new IllegalArgumentException("Estado desconocido: " + tx.estado());
+-        })
+-        .toList();
+-}
+-```
+-
+----
+-
+-### 3.2. Caso 2: Manejo de Archivos Físicos
+-
+-#### ❌ ANTES (Java 8 + Sistema de Archivos Local Rígido):
+-```java
+-public void guardarReporteLocal(String filename, byte[] content) throws IOException {
+-    File dir = new File("/opt/app/reportes");
+-    if (!dir.exists()) {
+-        dir.mkdirs();
+-    }
+-    File file = new File(dir, filename);
+-    try (FileOutputStream fos = new FileOutputStream(file)) {
+-        fos.write(content);
+-        fos.flush();
+-    }
+-}
+-```
+-
+-####  DESPUÉS (Java 25 + GCP Cloud Storage Adapter):
+-```java
+-// infrastructure/adapter/out/storage/GcsStorageAdapter.java
+-@Component
+-public class GcsStorageAdapter implements CloudStoragePort {
+-
+-    private final Storage googleCloudStorage;
+-    private final String bucketName;
+-
+-    public GcsStorageAdapter(Storage googleCloudStorage, 
+-                             @Value("${app.gcp.storage.bucket-name}") String bucketName) {
+-        this.googleCloudStorage = googleCloudStorage;
+-        this.bucketName = bucketName;
+-    }
+-
+-    @Override
+-    public void guardarArchivo(String rutaArchivo, byte[] contenido, String contentType) {
+-        var blobId = BlobId.of(bucketName, rutaArchivo);
+-        var blobInfo = BlobInfo.newBuilder(blobId)
+-                .setContentType(contentType)
+-                .build();
+-        
+-        googleCloudStorage.create(blobInfo, contenido);
+-        log.info("Archivo almacenado exitosamente en GCS. Bucket: {} | Path: {}", bucketName, rutaArchivo);
+-    }
+-}
+-```
+-
+----
+-
+-### 3.3. Caso 3: Demonios de Backend a Scheduled Tasks Concurrentes
+-
+-#### ❌ ANTES (Java 8 + Hilo/Loop Infinito Manual Bloqueante):
+-```java
+-public class DemonioProcesamiento implements Runnable {
+-    private boolean activo = true;
+-
+-    @Override
+-    public void run() {
+-        while (activo) {
+-            try {
+-                ejecutarAccionDeNegocio();
+-                Thread.sleep(60000);
+-            } catch (InterruptedException e) {
+-                Thread.currentThread().interrupt();
+-                activo = false;
+-            }
+-        }
+-    }
+-}
+-```
+-
+-####  DESPUÉS (Java 25 + Spring Scheduler con Hilos Virtuales):
+-```java
+-// infrastructure/adapter/in/scheduler/ScheduledTaskAdapter.java
+-@Component
+-public class ScheduledTaskAdapter {
+-
+-    private final ProcessTransactionUseCase processTransactionUseCase;
+-
+-    public ScheduledTaskAdapter(ProcessTransactionUseCase processTransactionUseCase) {
+-        this.processTransactionUseCase = processTransactionUseCase;
+-    }
+-
+-    @Scheduled(fixedRateString = "${app.scheduling.interval-ms:60000}")
+-    public void ejecutarTareaProgramada() {
+-        log.info("Iniciando ciclo planificado de procesamiento.");
+-        processTransactionUseCase.ejecutarMigracionLotesPendientes();
+-        log.info("Ciclo planificado finalizado con éxito.");
+-    }
+-}
+-```
+-
+----
+-
+-### 3.4. Caso 4: Logging Estructurado y Enriquecimiento de Logs (Serilog-Equivalent)
+-
+-#### ❌ ANTES (Java 8 + Logs Concatenados / Texto Plano / Sin Contexto):
+-```java
+-log.info("Iniciando procesamiento de lote " + codigoLote);
+-try {
+-    procesar(codigoLote);
+-    log.info("Lote " + codigoLote + " procesado exitosamente. Total: " + total);
+-} catch (Exception e) {
+-    log.error("Error al procesar lote: " + e.getMessage());
+-}
+-```
+-
+-#### ✔️ DESPUÉS (Java 25 + SLF4J 2.0+ Fluent API + Enriquecimiento MDC):
+-```java
+-// 1. Enriquecedores automáticos a nivel HTTP / Eventos / Schedules (MDC Context)
+-MDC.put("correlation_id", correlationId);
+-MDC.put("http.method", request.getMethod());
+-MDC.put("http.uri", request.getRequestURI());
+-
+-// 2. Logging de negocio usando la API Fluida de SLF4J 2.0+
+-log.atInfo()
+-   .setMessage("Lote de transacciones procesado exitosamente y cargado a GCS")
+-   .addKeyValue("lote.codigo", codigoLote)
+-   .addKeyValue("lote.total_transacciones", total)
+-   .addKeyValue("lote.ruta_gcs", rutaGcs)
+-   .log();
+-```
+-
+-*Nota: Cualquier metadato agregado con `addKeyValue` o inyectado en el `MDC` es capturado de manera automática por el formateador JSON de producción (`console: gcp`) convirtiéndolo en llaves estructuradas de primer nivel en GCP Cloud Logging para su posterior visualización en Dashboards.*
+-
+----
+-
+-### 3.5. Caso 5: Autenticación JWT y Reorganización Web (Controller / DTO)
+-
+-#### ❌ ANTES (Java 8 + Mezcla de DTOs y Controladores en un único paquete sin seguridad estándar):
+-```java
+-// infrastructure/web/TransactionController.java
+-@RestController
+-public class TransactionController {
+-    @PostMapping("/login")
+-    public Map<String, String> login(@RequestParam String user, @RequestParam String pass) {
+-        // Validación quemada y sin token estructurado
+-        if("admin".equals(user) && "admin".equals(pass)) {
+-            Map<String, String> map = new HashMap<>();
+-            map.put("token", "12345");
+-            return map;
+-        }
+-        throw new RuntimeException("Error");
+-    }
+-}
+-```
+-
+-#### ✔️ DESPUÉS (Java 25 + Spring Security 6.x + JWT + Records Inmutables en Subpaquetes web/controller y web/dto):
+-```java
+-// 1. DTO como Java Record inmutable bajo web/dto/
+-package com.example.migration.infrastructure.adapter.in.web.dto;
+-public record LoginRequest(String username, String password) {}
+-
+-// 2. Controlador REST limpio bajo web/controller/
+-package com.example.migration.infrastructure.adapter.in.web.controller;
+-
+-@RestController
+-@RequestMapping("/api/v1/auth")
+-public class AuthController {
+-    private final AuthenticationManager authManager;
+-    private final JwtTokenProvider tokenProvider;
+-
+-    @PostMapping("/login")
+-    public ResponseEntity<AuthResponse> login(@RequestBody LoginRequest req) {
+-        var auth = authManager.authenticate(new UsernamePasswordAuthenticationToken(req.username(), req.password()));
+-        String token = tokenProvider.generarToken(auth);
+-        return ResponseEntity.ok(new AuthResponse(token, tokenProvider.getExpirationMs()));
+-    }
+-}
+-```
+-
+----
+-
+-## Convenciones de código
+-
+-- **Nombres** (clases, métodos, variables, paquetes): inglés
+-- **Comentarios, logs, Javadoc, descripciones**: español
+-- Logs con nivel apropiado: `DEBUG` para flujo interno, `INFO` para eventos de negocio, `WARN` para situaciones degradadas manejadas, `ERROR` para fallos inesperados en el camino crítico
+-- No usar `System.out.println` — siempre SLF4J via `@Slf4j`
+-- Lombok `@Data`, `@Builder`, `@RequiredArgsConstructor`, `@Slf4j` son el estándar del proyecto
+-- Modelos de dominio sin estado mutable: preferir **Java Records** para datos inmutables
+-- Usar programación funcional (`stream`, `map`, `filter`, `.toList()`) en lugar de bucles imperativos donde sea legible
+-- No hardcodear valores de negocio en el código — todo debe venir de la configuración o de constantes en la clase correspondiente
+-- No generar codigo smells 
+-- No generar vulnerabilidades Sonar
+-- Todo codigo debe pasar las vulnerabilidades de SonarQube
+-
+----
+-
+-### Logging
+-
+-- Logs de flujo interno (un solo argumento): `log.debug/info/warn/error("mensaje {}", variable)`
+-- **Eventos de negocio con múltiples atributos**: usar la API fluida de SLF4J 2.0+:
+-  ```java
+-  log.atInfo()
+-     .setMessage("Descripción del evento")
+-     .addKeyValue("entidadId", id)
+-     .addKeyValue("atributo", valor)
+-     .log();
+-  ```
+-- Para logs con excepción: `.setCause(ex)` en lugar de pasar `ex.getMessage()` como argumento
+-- En producción, el formato GCP JSON (`logging.structured.format.console=gcp`) convierte automáticamente los `addKeyValue` en campos estructurados de Cloud Logging — **no concatenar valores en el mensaje**
+-- MDC para contexto transversal en operaciones largas
+-
+-
+----
+-
+-
+-### Variables de entorno (prod)
+-
+-| Variable | Descripción | Default |
+-|----------|-------------|---------|
+-| `GOOGLE_CLOUD_PROJECT` | Project ID de GCP | _(requerido en prod)_ |
+-| [agregar variables específicas del servicio] | | |
+-
+----
+-
+-## Tests
+-
+-- Los tests unitarios en `unit/` **no deben levantar contexto de Spring** ni conectarse a servicios externos. Solo JUnit 5 + Mockito (`@ExtendWith(MockitoExtension.class)`).
+-- Los tests de integración en `integration/` se anotan con `@Disabled` y requieren emuladores o infraestructura local.
+-- Cuando un stub de Mockito solo aplica a algunos tests de la clase, usar `lenient().when(...)` en el `@BeforeEach` para evitar `UnnecessaryStubbingException`.
+-- Cada puerto (interfaz de dominio) debe tener al menos un test de happy path y uno de error.
+-- Debes generar minimo 80% de codigo testeable de acuerdo a los estanderes de SonarQube
+-
+-```bash
+-# Solo tests unitarios
+-mvn test -Dtest="*Test" -Dexclude="*IntegrationTest"
+-
+-# Test de integración específico (requiere emuladores)
+-mvn test -Dtest=NombreIntegrationTest
+-```
+-
+----
+-
+-## 4. INSTRUCCIONES DE DESPLIEGUE EN GKE (GCP)
+-
+-Cuando ejecutes la migración de infraestructura, debes asegurar los siguientes estándares:
+-1. **Configuración de Conectividad**: Toda comunicación con Google Cloud (Storage, Pub/Sub) debe hacerse preferiblemente usando **Workload Identity** en GKE en lugar de inyectar llaves JSON en disco.
+-2. **Sondas Actuator**: Configura las sondas de Kubernetes (`livenessProbe` y `readinessProbe`) apuntando a `/actuator/health/liveness` y `/actuator/health/readiness` respectively.
+-3. **Escalamiento Dinámico (HPA)**: Define el HPA para escalar los pods del microservicio de forma horizontal basándote en la utilización de la CPU (ej. 75%) o en métricas de mensajería (mensajes pendientes en cola Pub/Sub).
+
+
+--- Diff for /.claude_rules/sharedlibs.md ---
+--- a//.claude_rules/sharedlibs.md
++++ b//.claude_rules/sharedlibs.md
+@@ -1,1080 +0,0 @@
+-# SharedLibs — Mapa de Dependencias y Guía de Uso
+-
+-> Referencia centralizada para agentes e ingenieros. Documenta **qué ofrece cada módulo**,
+-> **cuándo incluirlo**, **cómo declararlo en `pom.xml`** y **qué configurar en `application.yml`**.
+-
+----
+-
+-## Información del artefacto
+-
+-| Campo | Valor |
+-|---|---|
+-| `groupId` | `com.elrosado` |
+-| Versión actual | `1.0.0` |
+-| Registry | Azure Artifacts — `SUITE-CLOUD` |
+-| Registry URL | `https://azdevops1.sipecom.com/SIPEProyectos/CER-SUITE-CLOUD/_packaging/SUITE-CLOUD/maven/v1` |
+-| Java | 25 |
+-| Spring Boot | 4.0.6 |
+-| spring-cloud-gcp | 8.0.2 |
+-
+-### Declaración del BOM en el microservicio consumidor
+-
+-Antes de incluir cualquier módulo, el `pom.xml` del microservicio debe importar el BOM de GCP
+-para que las versiones de los starters queden gestionadas centralmente:
+-
+-```xml
+-<dependencyManagement>
+-  <dependencies>
+-    <dependency>
+-      <groupId>com.google.cloud</groupId>
+-      <artifactId>spring-cloud-gcp-dependencies</artifactId>
+-      <version>8.0.2</version>
+-      <type>pom</type>
+-      <scope>import</scope>
+-    </dependency>
+-  </dependencies>
+-</dependencyManagement>
+-```
+-
+----
+-
+-## Grafo de dependencias inter-módulo
+-
+-```
+-Tier 0 — sin dependencias entre módulos
+-  jlib-common
+-  jlib-logging
+-  jlib-kms
+-  jlib-sapcalls
+-  jlib-jwt
+-  jlib-storage
+-  jlib-redis
+-  jlib-documents
+-  jlib-sheet
+-  jlib-barcode
+-  jlib-timezone
+-  jlib-health
+-  jlib-pubsub
+-  jlib-firestore
+-  jlib-multisql
+-
+-Tier 1 — dependen de tier 0
+-  jlib-secretmanager  →  jlib-kms
+-  jlib-invoicing      →  jlib-documents
+-  jlib-pubsub-logging →  jlib-pubsub
+-  jlib-apicalls       (tier 0 real, clasificado en tier 1 para claridad de build)
+-
+-Tier 2 — dependen de tier 1
+-  jlib-sql            →  jlib-secretmanager  →  jlib-kms
+-  jlib-cache          →  jlib-apicalls  +  jlib-redis
+-  jlib-worker         →  jlib-timezone  +  jlib-common
+-  jlib-routervalidator →  jlib-apicalls
+-```
+-
+-> **Regla para el agente**: nunca invertir el sentido de las flechas.
+-> Un módulo de tier 0 NO puede depender de uno de tier 1 o 2.
+-
+----
+-
+-## Módulos — referencia completa
+-
+----
+-
+-### jlib-common
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-common\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | `CommonClassesLibrary`, anotaciones y excepciones base |
+-
+-**Qué ofrece**
+-
+-POJOs, anotaciones y excepciones reutilizables en cualquier contexto Java sin necesidad de Spring.
+-
+-- `PagedResult<T>` — envoltorio de paginación
+-- `@OriginalName` — preserva el nombre original de un campo
+-- `@TemplateParameter` — marca parámetros de plantilla
+-- `BusinessRuleValidationException` — excepción de negocio (400)
+-- `DuplicateResourceException` — recurso duplicado (409)
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio necesita los DTOs de paginación comunes.
+-- Se requieren las excepciones de negocio estandarizadas.
+-- Se usan las anotaciones de metadatos.
+-
+-**No incluir si** solo se necesitan excepciones genéricas de Spring (usa las nativas de Spring).
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-common</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml** — ninguna requerida.
+-
+----
+-
+-### jlib-logging
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-logging\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | `SerilogLibrary` (MDC filter + sink GCP Cloud Logging) |
+-
+-**Qué ofrece**
+-
+-- `MdcLoggingFilter` — enriquece automáticamente el MDC de cada request HTTP con:
+-  - `traceId` / `spanId` — del header `X-Cloud-Trace-Context`
+-  - `correlationId` — del header `X-Correlation-Id` o UUID generado
+-  - `logging.googleapis.com/trace` — campo nativo de Cloud Logging
+-- `logstash-logback-encoder` como dependencia transitiva.
+-- `logback-jlib-base.xml` — configuración base de Logback lista para incluir.
+-
+-**Cuándo incluirlo**
+-
+-Todo microservicio que corra en GCP debe incluirlo. Es la dependencia de infraestructura de logging obligatoria.
+-
+-**No incluirlo en otras librerías `jlib-*`** — las librerías no configuran su propio output.
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-logging</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-jlib:
+-  logging:
+-    enabled: true           # default: true
+-    correlation-header: X-Correlation-Id   # default
+-```
+-
+-**Configuración logback-spring.xml requerida en el microservicio**
+-
+-```xml
+-<configuration>
+-  <springProfile name="local">
+-    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+-      <encoder>
+-        <pattern>%d{HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n</pattern>
+-      </encoder>
+-    </appender>
+-    <root level="INFO"><appender-ref ref="CONSOLE"/></root>
+-  </springProfile>
+-  <springProfile name="!local">
+-    <include resource="logback-jlib-base.xml"/>
+-  </springProfile>
+-</configuration>
+-```
+-
+----
+-
+-### jlib-kms
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-kms\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | `KmsLibrary` |
+-
+-**Qué ofrece**
+-
+-- `IGoogleKmsService` / `GoogleKmsService` — cifrado y descifrado simétrico con GCP KMS.
+-- `KmsProperties` — configuración de key ring y key name.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio cifra datos sensibles en reposo (contraseñas, tokens, valores PII).
+-- Se requiere como transitiva al usar `jlib-secretmanager`.
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-kms</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-# Equivalente a appsettings.json: KmsSettings
+-google:
+-  kms:
+-    project-id: ${GCP_PROJECT_ID}
+-    location-id: ${KMS_LOCATION:us-central1}
+-    key-ring-id: ${KMS_KEY_RING}
+-    key-id: ${KMS_KEY_ID}
+-```
+-
+----
+-
+-### jlib-secretmanager
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-secretmanager\` |
+-| Tier | 1 — depende de `jlib-kms` |
+-| Equivalente .NET | `SecretManagerLibrary` |
+-
+-**Qué ofrece**
+-
+-- `ISecretManager` / `SecretManagerService` — lectura de secretos de GCP Secret Manager con descifrado KMS opcional.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio necesita leer API keys, contraseñas o connection strings de GCP Secret Manager.
+-- Es dependencia transitiva de `jlib-sql`.
+-
+-**Incluye transitivamente**: `jlib-kms`
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-secretmanager</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-spring:
+-  cloud:
+-    gcp:
+-      project-id: ${GCP_PROJECT_ID}
+-# KMS config requerida si se usa descifrado (ver jlib-kms)
+-```
+-
+----
+-
+-### jlib-apicalls
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-apicalls\` |
+-| Tier | 1 (clasificación de build) — sin dependencias inter-módulo |
+-| Equivalente .NET | `ApiCallsLibrary` |
+-
+-**Qué ofrece**
+-
+-- `ApiCaller` (clase abstracta) — cliente HTTP base con autenticación automática usando `WebClient`.
+-- `ISecurityMicroService` / `SecurityMicroService` — cliente del microservicio de Seguridad.
+-- `GenericResponse<T>` — DTO envoltorio de respuestas API.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio llama a otros microservicios de CER Suite Cloud autenticados.
+-- Es dependencia transitiva de `jlib-cache` y `jlib-routervalidator`.
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-apicalls</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-# Equivalente a appsettings.json: ApiConfig
+-api-config:
+-  security-url: ${SECURITY_SERVICE_URL}
+-  timeout-seconds: ${API_TIMEOUT:30}
+-```
+-
+----
+-
+-### jlib-sapcalls
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-sapcalls\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | `SapCallsLibrary` |
+-
+-**Qué ofrece**
+-
+-- `SapCaller` (clase abstracta) — cliente SOAP para servicios SAP con `WebClient`.
+-- `SoapXmlHelper` — utilidades de serialización/deserialización SOAP.
+-- `SoapVersion` (enum) — SOAP 1.1 / 1.2.
+-- `SapApiConfig` — configuración por instancia (URL, usuario, contraseña).
+-- `SapApiException` — excepción tipada de llamadas SAP.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio integra con SAP via SOAP (RFC, BAPI, IDocs expostos como web services).
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-sapcalls</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml** — la configuración SAP se pasa por instancia via `SapApiConfig` (builder). No requiere prefijo global.
+-
+----
+-
+-### jlib-jwt
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-jwt\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | `JwtValidatorLibrary` |
+-
+-**Qué ofrece**
+-
+-- `JwtDecoder` (bean) — validación de tokens Firebase JWT integrada con Spring Security OAuth2.
+-- `JwtProperties` — URL del JWKS de Firebase y audience.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio protege sus endpoints con tokens Firebase (autenticación).
+-- Se requiere validación de JWT en el gateway o en el microservicio directamente.
+-
+-**No incluirlo si** la autenticación la maneja exclusivamente el API Gateway (Cloud Endpoints / Apigee).
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-jwt</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-# Equivalente a appsettings.json: FirebaseJwtSettings
+-firebase:
+-  jwt:
+-    jwks-uri: https://www.googleapis.com/service_accounts/v1/jwk/securetoken%40system.gserviceaccount.com
+-    audience: ${FIREBASE_PROJECT_ID}
+-```
+-
+----
+-
+-### jlib-storage
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-storage\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | `GoogleCloudStorageServiceLibrary` |
+-
+-**Qué ofrece**
+-
+-- `IGoogleCloudStorageService` / `GoogleCloudStorageService` — upload, download, delete y metadata en GCS (síncrono y asíncrono).
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio almacena o recupera archivos de GCS (PDFs, imágenes, Excel, XML).
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-storage</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-spring:
+-  cloud:
+-    gcp:
+-      project-id: ${GCP_PROJECT_ID}
+-      storage:
+-        bucket: ${GCS_BUCKET_NAME}
+-```
+-
+----
+-
+-### jlib-redis
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-redis\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | `RedisLibrary` |
+-
+-**Qué ofrece**
+-
+-- `IRedisService` / `RedisService` — get, set, delete, TTL y operaciones batch en Redis.
+-- `RedisProperties` — host, port, password, TTL default.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio necesita caché en Redis (sesiones, tokens, resultados de consultas frecuentes).
+-- Es dependencia transitiva de `jlib-cache`.
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-redis</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-# Equivalente a appsettings.json: RedisSettings
+-redis:
+-  host: ${REDIS_HOST:localhost}
+-  port: ${REDIS_PORT:6379}
+-  password: ${REDIS_PASSWORD:}
+-  default-ttl-seconds: ${REDIS_TTL:3600}
+-```
+-
+----
+-
+-### jlib-cache
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-cache\` |
+-| Tier | 2 — depende de `jlib-apicalls` + `jlib-redis` |
+-| Equivalente .NET | `CommonCacheLibrary` |
+-
+-**Qué ofrece**
+-
+-- `ICatalogCacheUtils` — caché de catálogos del sistema.
+-- `ISocietyUtils` / `ISocietiesCacheInitializer` — caché de sociedades con inicialización al arranque.
+-- Caffeine como segundo nivel de caché en memoria.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio consume catálogos o datos de sociedades frecuentemente y quiere reducir llamadas al microservicio de Configuración.
+-
+-**Incluye transitivamente**: `jlib-apicalls`, `jlib-redis`
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-cache</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml** — requiere las propiedades de `jlib-apicalls` (`api-config`) y `jlib-redis` (`redis`).
+-
+----
+-
+-### jlib-sql
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-sql\` |
+-| Tier | 2 — depende de `jlib-secretmanager` → `jlib-kms` |
+-| Equivalente .NET | `SqlServerLibrary` |
+-
+-**Qué ofrece**
+-
+-- `SqlConnectionStringResolver` — resuelve connection strings de SQL Server desde Secret Manager o directamente desde `application.yml`.
+-- `SqlProperties` — configuración del datasource.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio conecta a **una sola** base de datos SQL Server y necesita resolver la connection string desde Secret Manager.
+-- Para múltiples bases de datos usar `jlib-multisql` en su lugar.
+-
+-**Incluye transitivamente**: `jlib-secretmanager`, `jlib-kms`
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-sql</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-# Equivalente a appsettings.json: SqlSettings
+-sql:
+-  secret-name: ${SQL_SECRET_NAME:}     # nombre del secreto en Secret Manager
+-  connection-string: ${SQL_CONN:}      # alternativa directa (solo para local/dev)
+-```
+-
+----
+-
+-### jlib-multisql
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-multisql\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | Sin equivalente directo (nuevo) |
+-
+-**Qué ofrece**
+-
+-- `MultiSqlAutoConfiguration` + `MultiSqlBeanRegistrar` — registro dinámico de múltiples `DataSource`, `EntityManagerFactory` y `TransactionManager` desde YAML.
+-- `MultiSqlProperties` — lista de configuraciones de bases de datos.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio necesita conectarse a **más de una** base de datos SQL Server con JPA/Hibernate.
+-- Cada base de datos tiene su propio paquete de entidades (para la separación de `EntityManagerFactory`).
+-
+-**No usar junto con `jlib-sql`** — son mutuamente excluyentes.
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-multisql</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-multi-sql:
+-  datasources:
+-    - name: principal
+-      url: ${DB_PRINCIPAL_URL}
+-      username: ${DB_PRINCIPAL_USER}
+-      password: ${DB_PRINCIPAL_PASS}
+-      entity-packages: com.empresa.servicio.domain.principal
+-    - name: auditoria
+-      url: ${DB_AUDIT_URL}
+-      username: ${DB_AUDIT_USER}
+-      password: ${DB_AUDIT_PASS}
+-      entity-packages: com.empresa.servicio.domain.auditoria
+-```
+-
+----
+-
+-### jlib-documents
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-documents\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | `ElectronicDocumentsLibrary` |
+-
+-**Qué ofrece**
+-
+-- `ElectronicDocumentGenerator` — genera XML de documentos electrónicos SRI Ecuador: facturas, notas de crédito/débito, guías de remisión, retenciones, liquidaciones de compra.
+-- `WorkflowDocumentGenerator` — orquesta el flujo completo de generación.
+-- Modelos XML por tipo de documento.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio genera documentos electrónicos para el SRI.
+-- Es dependencia transitiva de `jlib-invoicing`.
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-documents</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml** — ninguna requerida.
+-
+----
+-
+-### jlib-invoicing
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-invoicing\` |
+-| Tier | 1 — depende de `jlib-documents` |
+-| Equivalente .NET | `InvoicingLibrary` |
+-
+-**Qué ofrece**
+-
+-- `InvoicingHelpers` — flujo completo: generación XML → firma digital → envío a SRI → consulta de estado.
+-- `CreateInvoiceRequestDto` — DTO de solicitud de factura.
+-- Modelos XML específicos de factura (`InvoiceReceiptXml`, etc.).
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio necesita el ciclo completo de facturación electrónica con SRI (no solo generación de XML).
+-
+-**Incluye transitivamente**: `jlib-documents`
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-invoicing</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml** — ninguna requerida (la URL del SRI se pasa por parámetro al servicio).
+-
+----
+-
+-### jlib-sheet
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-sheet\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | `SheetLibrary` (ClosedXML → Apache POI) |
+-
+-**Qué ofrece**
+-
+-- `ISheetBuilder` / `SheetBuilderService` — generación de archivos `.xlsx` con tablas, texto, imágenes y estilos personalizados.
+-- `TableStyleConfig` — configuración de estilos de tabla.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio genera reportes o exportaciones en formato Excel.
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-sheet</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml** — ninguna requerida.
+-
+----
+-
+-### jlib-barcode
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-barcode\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | `BarcodeLibrary` (ZXing.Net.Bindings.Windows → ZXing javase) |
+-
+-**Qué ofrece**
+-
+-- `IBarcodeHelper` / `BarcodeHelper` — generación de imágenes de códigos de barras (PNG, `byte[]`) y códigos QR.
+-- Usa `BufferedImage` (portable Linux/GCP, no requiere GDI+).
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio genera imágenes de códigos de barras o QR (documentos, etiquetas, facturas).
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-barcode</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml** — ninguna requerida.
+-
+----
+-
+-### jlib-timezone
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-timezone\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | `TimeZoneConverterLibrary` |
+-
+-**Qué ofrece**
+-
+-- `ITimeZoneResolver` / `PortableTimeZoneResolver` — conversión de fechas entre zonas horarias usando identificadores IANA.
+-- `TimeProperties` — zona horaria default de la aplicación.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio opera en múltiples zonas horarias o necesita normalizar fechas a UTC.
+-- Es dependencia transitiva de `jlib-worker`.
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-timezone</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-# Equivalente a appsettings.json: TimeSettings
+-time:
+-  default-zone: ${DEFAULT_TIMEZONE:America/Guayaquil}
+-```
+-
+----
+-
+-### jlib-health
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-health\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | `HealthChecksLibrary` |
+-
+-**Qué ofrece**
+-
+-- `HealthAutoConfiguration` — configura `spring-boot-starter-actuator` con los endpoints de health estándar para liveness y readiness probes de Cloud Run / GKE.
+-
+-**Cuándo incluirlo**
+-
+-- Todo microservicio desplegado en Cloud Run o GKE debe incluirlo para los health checks de plataforma.
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-health</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-management:
+-  endpoints:
+-    web:
+-      exposure:
+-        include: health,info
+-  endpoint:
+-    health:
+-      probes:
+-        enabled: true
+-      show-details: never
+-```
+-
+----
+-
+-### jlib-pubsub
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-pubsub\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | `PubSubServiceLibrary` |
+-
+-**Qué ofrece**
+-
+-- `IMessagePublisher` / `MessagePublisher` — publicación de mensajes a topics de GCP Pub/Sub.
+-- `IMessageSubscriber` / `MessageSubscriber` — suscripción a subscriptions de GCP Pub/Sub.
+-- `PubSubProperties` — configuración de project-id, topic y subscription.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio publica o consume mensajes asincrónicos en GCP Pub/Sub.
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-pubsub</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-# Equivalente a appsettings.json: PubSubSettings
+-pubsub:
+-  project-id: ${GCP_PROJECT_ID}
+-  topic: ${PUBSUB_TOPIC:}
+-  subscription: ${PUBSUB_SUBSCRIPTION:}
+-```
+-
+-> Topics y subscriptions **no se crean desde código** — es responsabilidad de IaC (Terraform).
+-
+----
+-
+-### jlib-pubsub-logging
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-pubsub-logging\` |
+-| Tier | 1 — depende de `jlib-pubsub` |
+-| Equivalente .NET | Sin equivalente directo (nuevo) |
+-
+-**Qué ofrece**
+-
+-- `MdcMessageSubscriber` — decorador de `IMessageSubscriber` que inyecta automáticamente el contexto MDC (traceId, correlationId) en los handlers de mensajes Pub/Sub.
+-- `PubSubLoggingProperties` — activar/desactivar la decoración.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio usa `jlib-pubsub` y necesita correlación de logs entre el publicador y el suscriptor.
+-- Complementa `jlib-logging` para la parte de mensajería asíncrona.
+-
+-**Incluye transitivamente**: `jlib-pubsub`
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-pubsub-logging</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-pubsub-logging:
+-  enabled: true   # default: true
+-```
+-
+----
+-
+-### jlib-firestore
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-firestore\` |
+-| Tier | 0 — sin dependencias inter-módulo |
+-| Equivalente .NET | Sin equivalente directo (nuevo) |
+-
+-**Qué ofrece**
+-
+-- `IFirestoreService` / `FirestoreService` — operaciones CRUD sobre colecciones de Cloud Firestore (síncrono y asíncrono).
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio almacena o consulta documentos en Firestore (configuraciones dinámicas, eventos, históricos).
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-firestore</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-spring:
+-  cloud:
+-    gcp:
+-      project-id: ${GCP_PROJECT_ID}
+-      firestore:
+-        enabled: true
+-```
+-
+----
+-
+-### jlib-routervalidator
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-routervalidator\` |
+-| Tier | 2 — depende de `jlib-apicalls` |
+-| Equivalente .NET | `MicroServiceRouterValidator` |
+-
+-**Qué ofrece**
+-
+-- `RouteRoleAuthorizationFilter` — filtro Spring Security que valida roles por ruta HTTP (post-autenticación).
+-- `IRouteRolesCache` / `RouteRolesMemoryCache` — caché Caffeine de roles por ruta.
+-- `RouterValidatorProperties` — URL del servicio de configuración de rutas, TTL de caché.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio implementa autorización granular por ruta y rol (además de autenticación JWT).
+-- Complementa `jlib-jwt` — jwt autentica, routervalidator autoriza.
+-
+-**Incluye transitivamente**: `jlib-apicalls`
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-routervalidator</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-# Equivalente a appsettings.json: RouterValidatorSettings
+-router-validator:
+-  config-url: ${ROUTER_CONFIG_URL}
+-  cache-ttl-seconds: ${ROUTER_CACHE_TTL:300}
+-```
+-
+----
+-
+-### jlib-worker
+-
+-| Campo | Valor |
+-|---|---|
+-| Ruta fuente | `D:\SIPECOM\repository-git\cer-gcp\cer-suite-cl-sharedlibs\jlib-worker\` |
+-| Tier | 2 — depende de `jlib-timezone` + `jlib-common` |
+-| Equivalente .NET | `CQRSWorkerLibrary` + `WorkerHostingLibrary` |
+-
+-**Qué ofrece**
+-
+-- `WorkerEndpoint` (clase abstracta) — base para handlers de comandos CQRS via `ApplicationEventPublisher`.
+-- `IWorkerRouter` / `WorkerRouter` — enrutador de comandos a handlers por reflexión.
+-- `IWorkerCommand` — marcador de comandos CQRS.
+-- `IWorkerScheduleAdmin` — gestión de trabajos programados.
+-- `WorkerJobRegistrar` / `RouteDispatchJob` — integración con Quartz para jobs programados.
+-- `WorkerProperties` — configuración de jobs y concurrencia.
+-
+-**Cuándo incluirlo**
+-
+-- El microservicio implementa CQRS con handlers de comandos desacoplados.
+-- El microservicio ejecuta trabajos programados (polling, cleanup, reportes periódicos).
+-
+-**Incluye transitivamente**: `jlib-timezone`, `jlib-common`
+-
+-**Declaración pom.xml**
+-
+-```xml
+-<dependency>
+-  <groupId>com.elrosado</groupId>
+-  <artifactId>jlib-worker</artifactId>
+-  <version>1.0.0</version>
+-</dependency>
+-```
+-
+-**Configuración application.yml**
+-
+-```yaml
+-# Equivalente a appsettings.json: WorkerSettings
+-worker:
+-  concurrency: ${WORKER_CONCURRENCY:4}
+-  jobs:
+-    - name: cleanup
+-      cron: ${CLEANUP_CRON:0 0 2 * * ?}
+-      command: com.empresa.servicio.commands.CleanupCommand
+-```
+-
+----
+-
+-## Reglas de decisión para el agente
+-
+-### Cuándo usar cada módulo
+-
+-| Necesidad del microservicio | Módulo(s) a incluir |
+-|---|---|
+-| Logging estructurado + correlación en GCP | `jlib-logging` (obligatorio en todos) |
+-| Health checks para Cloud Run / GKE | `jlib-health` (obligatorio en todos) |
+-| Autenticación JWT Firebase | `jlib-jwt` |
+-| Autorización por ruta y rol | `jlib-jwt` + `jlib-routervalidator` |
+-| Llamadas a microservicios internos | `jlib-apicalls` |
+-| Llamadas a SAP via SOAP | `jlib-sapcalls` |
+-| Base de datos SQL Server (una sola) | `jlib-sql` |
+-| Base de datos SQL Server (múltiples) | `jlib-multisql` |
+-| Secretos en GCP Secret Manager | `jlib-secretmanager` |
+-| Cifrado/descifrado KMS | `jlib-kms` (o transitiva por `jlib-secretmanager`) |
+-| Caché Redis | `jlib-redis` |
+-| Caché de catálogos y sociedades | `jlib-cache` |
+-| Mensajería asíncrona GCP Pub/Sub | `jlib-pubsub` |
+-| Mensajería asíncrona + correlación de logs | `jlib-pubsub` + `jlib-pubsub-logging` |
+-| Almacenamiento de archivos GCS | `jlib-storage` |
+-| Base de datos Firestore | `jlib-firestore` |
+-| Generación documentos electrónicos SRI | `jlib-documents` |
+-| Facturación electrónica completa SRI | `jlib-invoicing` |
+-| Generación de archivos Excel | `jlib-sheet` |
+-| Generación de códigos de barras/QR | `jlib-barcode` |
+-| Conversión de zonas horarias | `jlib-timezone` |
+-| CQRS + jobs programados | `jlib-worker` |
+-| DTOs de paginación / excepciones comunes | `jlib-common` |
+-
+-### Combinaciones típicas por tipo de microservicio
+-
+-**Microservicio CRUD estándar**
+-```
+-jlib-logging + jlib-health + jlib-jwt + jlib-routervalidator + jlib-sql
+-```
+-
+-**Microservicio de procesamiento de documentos SRI**
+-```
+-jlib-logging + jlib-health + jlib-jwt + jlib-invoicing + jlib-storage + jlib-barcode
+-```
+-
+-**Microservicio de integración SAP**
+-```
+-jlib-logging + jlib-health + jlib-jwt + jlib-sapcalls + jlib-secretmanager
+-```
+-
+-**Microservicio de procesamiento asíncrono (worker)**
+-```
+-jlib-logging + jlib-health + jlib-pubsub + jlib-pubsub-logging + jlib-worker + jlib-sql
+-```
+-
+-**Microservicio de reporting**
+-```
+-jlib-logging + jlib-health + jlib-jwt + jlib-sheet + jlib-barcode + jlib-storage
+-```
+-
+----
+-
+-## Reglas que el agente DEBE respetar
+-
+-1. **Siempre incluir `jlib-logging` y `jlib-health`** en cualquier microservicio nuevo.
+-2. **Nunca declarar una versión explícita** de los módulos `com.elrosado` en el pom.xml del microservicio si el parent gestiona la versión. Usar `${project.version}` o la versión `1.0.0` explícita solo si el microservicio no hereda del parent.
+-3. **`jlib-sql` y `jlib-multisql` son mutuamente excluyentes** — elegir uno según si hay una o varias bases de datos.
+-4. **No agregar `jlib-kms` directamente** si ya se incluye `jlib-secretmanager` (lo trae como transitiva).
+-5. **`jlib-pubsub-logging` requiere `jlib-pubsub`** — nunca declarar solo `jlib-pubsub-logging`.
+-6. **`jlib-invoicing` incluye `jlib-documents`** — no declararlos juntos explícitamente (es redundante).
+-7. **`jlib-cache` incluye `jlib-apicalls` y `jlib-redis`** — no declararlos todos si se usa `jlib-cache`.
+-8. **No incluir `logback-spring.xml` en librerías** — solo en microservicios consumidores.
+-9. **Toda configuración en `application.yml`** con variables de entorno y defaults (`${VAR:default}`).
+-10. **El BOM de GCP (`spring-cloud-gcp-dependencies` 8.0.2) debe estar en `dependencyManagement`** del microservicio.
+-11. **Topics y subscriptions de Pub/Sub no se crean desde código** — son responsabilidad de Terraform/IaC.
+-12. **No usar `@Autowired` en campos** — siempre constructor injection con `@RequiredArgsConstructor`.
+
+
+--- Diff for /CLAUDE.md ---
+--- a//CLAUDE.md
++++ b//CLAUDE.md
+@@ -6,9 +6,9 @@
+ 
+ Los siguientes archivos definen las reglas de arquitectura, tecnología y diseño que **deben aplicarse en toda sesión y consulta**:
+ 
+-@.claude_rules/rules_and_prompt.md
++@../.claude_rules/rules_and_prompt.md
++@../.claude_rules/sharedlibs.md
+ @.claude_rules/RTD_Devoluciones.md
+-@.claude_rules/sharedlibs.md
+ 
+ ## Project
+ 
+
+

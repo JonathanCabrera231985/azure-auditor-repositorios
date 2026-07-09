@@ -1,0 +1,244 @@
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -16,7 +16,7 @@
+   GCP_PUBSUB_TOPIC_VENTAS: "retail.local.ventas.request.v1"
+   GCP_PUBSUB_TOPIC_DISTRIBUTOR: "retail.local.distributor.request.v1"
+   GCP_FIRESTORE_COLLECTION: "frames"
+-  GCP_FIRESTORE_COLLECTION_REPRO: "frames-repro"
++  GCP_FIRESTORE_COLLECTION_REPRO: "frames_repro"
+ 
+   # Configuración del scheduler de reproceso
+   REPRO_ENABLED: "true"
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/FrameRepro.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/FrameRepro.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/FrameRepro.java
+@@ -1,10 +1,10 @@
+ package com.elrosado.cersuitecloudlocalcore.domain.model;
+ 
+ /**
+- * Representa un documento de la colecciÃ³n frames-repro.
++ * Representa un documento de la colecciÃ³n frames_repro.
+  * El operador inserta solo id_repro; el campo status lo agrega la rÃ©plica que lo toma.
+  */
+ public record FrameRepro(
+-        String reproId,       // ID del documento en frames-repro
++        String reproId,       // ID del documento en frames_repro
+         String transactionId  // id_repro â transactionId en colecciÃ³n frames
+ ) {}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/FrameReproFirestorePort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/FrameReproFirestorePort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/FrameReproFirestorePort.java
+@@ -5,7 +5,7 @@
+ import java.util.List;
+ 
+ /**
+- * Puerto de salida para operaciones sobre la colecciÃ³n frames-repro.
++ * Puerto de salida para operaciones sobre la colecciÃ³n frames_repro.
+  */
+ public interface FrameReproFirestorePort {
+ 
+@@ -23,7 +23,7 @@
+     boolean claimDocument(String reproId, String instanceId);
+ 
+     /**
+-     * Elimina el documento frames-repro tras procesamiento exitoso.
++     * Elimina el documento frames_repro tras procesamiento exitoso.
+      * La eliminaciÃ³n garantiza que no sea procesado nuevamente.
+      */
+     void deleteDocument(String reproId);
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/FrameReproSchedulerAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/FrameReproSchedulerAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/FrameReproSchedulerAdapter.java
+@@ -13,7 +13,7 @@
+ import java.util.List;
+ 
+ /**
+- * Poller periÃ³dico de la colecciÃ³n frames-repro.
++ * Poller periÃ³dico de la colecciÃ³n frames_repro.
+  * Cada rÃ©plica ejecuta este mÃ©todo de forma independiente; el claim atÃ³mico en Firestore
+  * garantiza que cada documento sea procesado por exactamente una rÃ©plica.
+  */
+@@ -45,12 +45,12 @@
+         List<FrameRepro> pending = reproFirestorePort.queryPending(reproProperties.batchSize());
+ 
+         if (pending.isEmpty()) {
+-            log.atDebug().setMessage("Sin documentos frames-repro pendientes").log();
++            log.atDebug().setMessage("Sin documentos frames_repro pendientes").log();
+             return;
+         }
+ 
+         log.atInfo()
+-                .setMessage("Documentos frames-repro detectados")
++                .setMessage("Documentos frames_repro detectados")
+                 .addKeyValue("count", pending.size())
+                 .addKeyValue("instanceId", INSTANCE_ID)
+                 .log();
+@@ -65,7 +65,7 @@
+ 
+         if (!claimed) {
+             log.atDebug()
+-                    .setMessage("frames-repro ya tomado por otra rÃ©plica â skip")
++                    .setMessage("frames_repro ya tomado por otra rÃ©plica â skip")
+                     .addKeyValue("reproId", repro.reproId())
+                     .log();
+             return;
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FrameReproFirestoreAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FrameReproFirestoreAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FrameReproFirestoreAdapter.java
+@@ -2,6 +2,7 @@
+ 
+ import com.elrosado.cersuitecloudlocalcore.domain.model.FrameRepro;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.FrameReproFirestorePort;
++import com.google.api.gax.rpc.NotFoundException;
+ import com.google.cloud.Timestamp;
+ import com.google.cloud.firestore.DocumentReference;
+ import com.google.cloud.firestore.DocumentSnapshot;
+@@ -19,7 +20,7 @@
+ import java.util.concurrent.ExecutionException;
+ 
+ /**
+- * Operaciones Firestore sobre la colecciÃ³n frames-repro.
++ * Operaciones Firestore sobre la colecciÃ³n frames_repro.
+  * Usa el bean Firestore directamente (Spring Cloud GCP auto-config) para
+  * queries con filtro null y transacciones atÃ³micas.
+  */
+@@ -30,7 +31,7 @@
+ 
+     private final Firestore firestore;
+ 
+-    @Value("${app.gcp.firestore.collection-repro:frames-repro}")
++    @Value("${app.gcp.firestore.collection-repro:frames_repro}")
+     private String reproCollection;
+ 
+     public FrameReproFirestoreAdapter(Firestore firestore) {
+@@ -60,9 +61,16 @@
+ 
+         } catch (InterruptedException e) {
+             Thread.currentThread().interrupt();
+-            throw new IllegalStateException("Consulta frames-repro interrumpida", e);
++            throw new IllegalStateException("Consulta frames_repro interrumpida", e);
+         } catch (ExecutionException e) {
+-            throw new IllegalStateException("Error consultando frames-repro pendientes", e.getCause());
++            if (e.getCause() instanceof NotFoundException) {
++                log.atWarn()
++                        .setMessage("ColecciÃ³n frames-repro o base de datos Firestore no encontrada â ciclo omitido")
++                        .addKeyValue("collection", reproCollection)
++                        .log();
++                return List.of();
++            }
++            throw new IllegalStateException("Error consultando frames_repro pendientes", e.getCause());
+         }
+     }
+ 
+@@ -91,7 +99,7 @@
+ 
+         } catch (InterruptedException e) {
+             Thread.currentThread().interrupt();
+-            throw new IllegalStateException("Claim frames-repro interrumpido: " + reproId, e);
++            throw new IllegalStateException("Claim frames_repro interrumpido: " + reproId, e);
+         } catch (ExecutionException e) {
+             log.atWarn()
+                     .setMessage("Conflicto de claim â otra rÃ©plica ganÃ³")
+@@ -110,7 +118,7 @@
+                     .get();
+ 
+             log.atInfo()
+-                    .setMessage("Documento frames-repro eliminado tras reproceso exitoso")
++                    .setMessage("Documento frames_repro eliminado tras reproceso exitoso")
+                     .addKeyValue("reproId", reproId)
+                     .log();
+ 
+@@ -118,7 +126,7 @@
+             Thread.currentThread().interrupt();
+             throw new IllegalStateException("deleteDocument interrumpido: " + reproId, e);
+         } catch (ExecutionException e) {
+-            throw new IllegalStateException("Error eliminando frames-repro: " + reproId, e.getCause());
++            throw new IllegalStateException("Error eliminando frames_repro: " + reproId, e.getCause());
+         }
+     }
+ 
+@@ -133,7 +141,7 @@
+                     .get();
+ 
+             log.atWarn()
+-                    .setMessage("Documento frames-repro liberado para reintento")
++                    .setMessage("Documento frames_repro liberado para reintento")
+                     .addKeyValue("reproId", reproId)
+                     .log();
+ 
+@@ -141,7 +149,7 @@
+             Thread.currentThread().interrupt();
+             throw new IllegalStateException("releaseDocument interrumpido: " + reproId, e);
+         } catch (ExecutionException e) {
+-            throw new IllegalStateException("Error liberando frames-repro: " + reproId, e.getCause());
++            throw new IllegalStateException("Error liberando frames_repro: " + reproId, e.getCause());
+         }
+     }
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/ReproProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/ReproProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/ReproProperties.java
+@@ -3,7 +3,7 @@
+ import org.springframework.boot.context.properties.ConfigurationProperties;
+ 
+ /**
+- * Propiedades de configuraciÃ³n del scheduler de reproceso frames-repro.
++ * Propiedades de configuraciÃ³n del scheduler de reproceso frames_repro.
+  * Prefijo: {@code app.repro.*} en application.yml.
+  */
+ @ConfigurationProperties(prefix = "app.repro")
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java
+@@ -5,7 +5,7 @@
+ import org.springframework.scheduling.annotation.EnableScheduling;
+ 
+ /**
+- * Habilita @Scheduled para el proceso de reproceso frames-repro.
++ * Habilita @Scheduled para el proceso de reproceso frames_repro.
+  */
+ @Configuration
+ @EnableScheduling
+
+
+--- Diff for /src/main/resources/application-local.yml ---
+--- a//src/main/resources/application-local.yml
++++ b//src/main/resources/application-local.yml
+@@ -89,7 +89,7 @@
+       topic-distributor: retail.local.distributor.request.v1
+     firestore:
+       collection: frames
+-      collection-repro: frames-repro
++      collection-repro: frames_repro
+   repro:
+     enabled: true
+     polling-interval-ms: 30000
+
+
+--- Diff for /src/main/resources/application-prod.yml ---
+--- a//src/main/resources/application-prod.yml
++++ b//src/main/resources/application-prod.yml
+@@ -69,7 +69,7 @@
+       topic-distributor: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR}
+     firestore:
+       collection: ${GCP_FIRESTORE_COLLECTION:frames}
+-      collection-repro: ${GCP_FIRESTORE_COLLECTION_REPRO:frames-repro}
++      collection-repro: ${GCP_FIRESTORE_COLLECTION_REPRO:frames_repro}
+   repro:
+     enabled: ${REPRO_ENABLED:true}
+     polling-interval-ms: ${REPRO_POLLING_MS:30000}
+
+

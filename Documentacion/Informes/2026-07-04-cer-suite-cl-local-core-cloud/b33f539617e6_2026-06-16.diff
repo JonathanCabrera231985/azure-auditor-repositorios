@@ -1,0 +1,44 @@
+--- Diff for /Dockerfile ---
+--- a//Dockerfile
++++ b//Dockerfile
+@@ -1,32 +1,11 @@
+-FROM docker.io/library/maven:3.9-eclipse-temurin-25 AS build
++FROM eclipse-temurin:25-jre
+ 
+ WORKDIR /app
+ 
+-# Copiar pom.xml para aprovechar cache
+-COPY pom.xml .
+-
+-# Descargar dependencias
+-RUN mvn dependency:go-offline
+-
+-# Copiar código fuente
+-COPY src ./src
+-
+-# Compilar
+-RUN mvn clean package -DskipTests
+-
+-# ==========================
+-# Imagen final
+-# ==========================
+-FROM docker.io/library/eclipse-temurin:25-jre
+-
+-WORKDIR /app
+-
+-# Crear usuario no root
+ RUN groupadd --gid 10001 appgroup && \
+     useradd --uid 10001 --gid appgroup --shell /bin/bash --create-home appuser
+ 
+-# Copiar el jar generado en la etapa build
+-COPY --from=build /app/target/*.jar app.jar
++COPY target/*.jar app.jar
+ 
+ RUN chown -R appuser:appgroup /app
+ 
+@@ -34,4 +13,4 @@
+ 
+ EXPOSE 8080
+ 
+-ENTRYPOINT ["java", "-XX:+UseG1GC", "-Djava.security.egd=file:/dev/./urandom", "-jar", "app.jar"]+ENTRYPOINT ["java","-jar","app.jar"]
+

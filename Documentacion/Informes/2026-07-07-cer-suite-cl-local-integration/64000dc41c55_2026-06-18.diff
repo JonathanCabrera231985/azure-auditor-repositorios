@@ -1,0 +1,133 @@
+--- Diff for /asyncapi.yaml ---
+--- a//asyncapi.yaml
++++ b//asyncapi.yaml
+@@ -144,7 +144,7 @@
+             codStore: 1
+             numNc: 87
+             creditNoteNumber: "001001000000087"
+-            gcsBucket: "gcs-cer-syncrhonization-files-dev"
++            gcsBucket: "gcs-cer-suite-core-files"
+             gcsPath: "001/DV_20260612_12345.txt"
+             fileName: "DV_20260612_12345.txt"
+             processedAt: "2026-06-12T14:35:22.123Z"
+@@ -154,7 +154,7 @@
+             codStore: 1
+             numNc: 0
+             creditNoteNumber: ""
+-            gcsBucket: "gcs-cer-syncrhonization-files-dev"
++            gcsBucket: "gcs-cer-suite-core-files"
+             gcsPath: "001/DV_20260612_99001.txt"
+             fileName: "DV_20260612_99001.txt"
+             processedAt: "2026-06-12T15:10:00.000Z"
+@@ -223,7 +223,7 @@
+         gcsBucket:
+           type: string
+           description: Nombre del bucket GCS donde se almacenó el archivo DV.
+-          example: "gcs-cer-syncrhonization-files-dev"
++          example: "gcs-cer-suite-core-files"
+         gcsPath:
+           type: string
+           description: |
+
+
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -7,7 +7,7 @@
+   SPRING_PROFILES_ACTIVE: "prod"
+   SERVER_PORT: "8080"
+   GOOGLE_CLOUD_PROJECT: "modern-suite-cloud-inf"
+-  GCS_BUCKET_DEVS: "gcs-cer-syncrhonization-files-dev"
++  GCS_BUCKET_DEVS: "gcs-cer-suite-core-files"
+   PUBSUB_TOPIC_DEVOLUTION: "retail.local.devolution.processed.v1"
+   PUBSUB_SUBSCRIPTION_DEVOLUCION: "retail.local.devolution.request.v1-sub"
+   PARAM_NUM_POS_DEVOL: "NUMPOSDEVOL"
+
+
+--- Diff for /src/main/java/com/elrosado/integration/application/service/ExecuteDevolutionService.java ---
+--- a//src/main/java/com/elrosado/integration/application/service/ExecuteDevolutionService.java
++++ b//src/main/java/com/elrosado/integration/application/service/ExecuteDevolutionService.java
+@@ -41,6 +41,8 @@
+ 
+     @Value("${app.gcp.storage.bucket-name}")
+     private String gcsBucketName;
++    @Value("${app.gcp.storage.path-dev}")
++    private String pathDev;
+ 
+     private final DevolutionReadPort devolutionReadPort;
+     private final DevolutionWritePort devolutionWritePort;
+@@ -96,14 +98,16 @@
+         DvFile dvFile = DvFileBuilder.build(devolution, txData, storeData, taxRates, returnMode, numNc,
+                 command.operatorCode(), null, nota);
+ 
+-        dvFileStoragePort.upload(dvFile);
++        String bucket = gcsBucketName + "/" + pathDev;
++        dvFileStoragePort.upload(dvFile, bucket);
++
+         String messageId = devolutionEventPort.publish(
+                 new DevolutionProcessedEvent(
+                         idDev,
+                         storeData.storeCode(),
+                         numNc,
+                         nota,
+-                        gcsBucketName,
++                        bucket,
+                         dvFile.gcsPath(),
+                         dvFile.fileName(),
+                         Instant.now()));
+@@ -113,7 +117,7 @@
+                 .addKeyValue("devolutionId", idDev)
+                 .addKeyValue("creditNote", nota)
+                 .addKeyValue("dvFile", dvFile.fileName())
+-                .addKeyValue("gcsBucket", gcsBucketName)
++                .addKeyValue("gcsBucket", bucket)
+                 .addKeyValue("gcsPath", dvFile.gcsPath())
+                 .log();
+ 
+
+
+--- Diff for /src/main/java/com/elrosado/integration/domain/port/out/DvFileStoragePort.java ---
+--- a//src/main/java/com/elrosado/integration/domain/port/out/DvFileStoragePort.java
++++ b//src/main/java/com/elrosado/integration/domain/port/out/DvFileStoragePort.java
+@@ -4,5 +4,5 @@
+ 
+ public interface DvFileStoragePort {
+ 
+-    String upload(DvFile dvFile);
++    String upload(DvFile dvFile, String bucketName);
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/integration/infrastructure/adapter/out/storage/GcsDvFileAdapter.java ---
+--- a//src/main/java/com/elrosado/integration/infrastructure/adapter/out/storage/GcsDvFileAdapter.java
++++ b//src/main/java/com/elrosado/integration/infrastructure/adapter/out/storage/GcsDvFileAdapter.java
+@@ -15,11 +15,9 @@
+ 
+     private final IGoogleCloudStorageService googleCloudStorageService;
+ 
+-    @Value("${app.gcp.storage.bucket-name}")
+-    private String bucketName;
+ 
+     @Override
+-    public String upload(DvFile dvFile) {
++    public String upload(DvFile dvFile, String bucketName) {
+         googleCloudStorageService.uploadFile(
+                 bucketName,
+                 dvFile.content(),
+
+
+--- Diff for /src/main/resources/application-local.yaml ---
+--- a//src/main/resources/application-local.yaml
++++ b//src/main/resources/application-local.yaml
+@@ -58,7 +58,8 @@
+     region-frecuento: ${PARAM_REGION_FRECUENTO:COD_REGION_FRECUENTO}
+   gcp:
+     storage:
+-      bucket-name: ${GCS_BUCKET_DEVS:gcs-cer-syncrhonization-files-dev}
++      bucket-name: ${GCS_BUCKET_DEVS:gcs-cer-suite-core-files}
++      path-dev: dev
+     pubsub:
+       topic-devolution: ${PUBSUB_TOPIC_DEVOLUTION:retail.local.devolution.processed.v1}
+       subscription-devolution-request: ${PUBSUB_SUBSCRIPTION_DEVOLUCION:retail.local.devolution.request.v1-sub}
+
+

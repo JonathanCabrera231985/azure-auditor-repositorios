@@ -1,0 +1,1714 @@
+--- Diff for /.claude_rules/GCS_ROUTES_INVENTORY.md ---
+--- a//.claude_rules/GCS_ROUTES_INVENTORY.md
++++ b//.claude_rules/GCS_ROUTES_INVENTORY.md
+@@ -58,6 +58,8 @@
+ 
+ | `journal.zip.folder.path` | `gs://gcs-cer-suite-core-files/JOURNAL/{codeStore}/` | `gcs-cer-suite-core-files` | `JOURNAL/{codeStore}/` | Defined | User confirmation, 2026-07-03. Sin subcarpetas `TRANSFERIR`/`PROCESADO`/`ERROR`. `{codeStore}` = `MN_TIENDA.DES_CLAVE`. ZIP publicado via Pub/Sub a `retail.local.journal.request.v1` para que TransactionCloud lo transfiera a central |
+ | `journal.procesado.folder.path` | `gs://gcs-cer-suite-core-files/JOURNAL_PROCESADO/{codeStore}/` | `gcs-cer-suite-core-files` | `JOURNAL_PROCESADO/{codeStore}/` | Defined | User confirmation, 2026-07-03. Respaldo por tienda de los archivos journal crudos ya comprimidos, equivalente al legacy `moverArchivoJournal()` que movia a la subcarpeta local `JOURNAL_PROCESADO` |
++| `searchInventarioSticker.gcs.base-prefix` | `gs://gcs-cer-suite-core-files/INVENTARIO_STICKER/{storeCode}/` | `gcs-cer-suite-core-files` | `INVENTARIO_STICKER/{storeCode}/` | Defined | User confirmation, 2026-07-03. Descarga activa por tienda del archivo diario `<yyyyMMdd>.<storeCode>` del controlador POS |
++| `searchInventarioSticker.gcs.backup-suffix` | `gs://gcs-cer-suite-core-files/INVENTARIO_STICKER/{storeCode}/back` | `gcs-cer-suite-core-files` | `INVENTARIO_STICKER/{storeCode}/back` | Defined | User confirmation, 2026-07-03. Backup tras procesar exitosamente, equivalente al legacy `moverArchivo()` a subcarpeta local `back`. Sin ruta de error: el legacy no la usa para este proceso |
+ 
+ ## Pending Routes
+ 
+
+
+--- Diff for /CLAUDE.md ---
+--- a//CLAUDE.md
++++ b//CLAUDE.md
+@@ -95,6 +95,7 @@
+ - `UpdateCedPadRucProcess` — reads identity files from GCS, updates SQL, writes errors to Firestore.
+ - `SendCartaMotoProcess` — reads MOTO files from GCS, updates SQL (CVMT_EC datasource), publishes to Pub/Sub.
+ - `UpdateSecSubSecProcess` — reads SEC/SUBSEC department files from GCS, updates ARTS_EC, generates controller files, publishes per-store Pub/Sub events.
++- `SearchInventarioStickerFileProcess` — downloads the daily sticker inventory/delivery file per store from the POS controller (dynamic endpoint via `StoreRegistry`/`MN_TIENDA.IP`), backs it up in GCS, and upserts `ENTREGA_STICKER_POS` in ARTS_EC against the active `CAMPAIGN_STICKER` (replaces `SP_SAVE_ENTREGA_STICKER_POS`).
+ 
+ ### Key classes
+ 
+@@ -283,6 +284,7 @@
+ | `UpdateCedPadRucProcess` | `UpdateCedPadRucProcess` | Reads identity (CED/PAD/RUC) files from GCS, upserts records in ARTS_EC SQL. Errors tracked in Firestore. |
+ | `SendCartaMotoProcess` | `SendCartaMotoProcess` | Reads MOTO XML files from GCS, upserts records in CVMT_EC SQL, publishes events via Pub/Sub. |
+ | `UpdateSecSubSecProcess` | `UpdateSecSubSecProcess` | Reads SEC/SUBSEC department files from GCS, upserts departments and MHG families in ARTS_EC, generates controller DAT/CMD files, publishes per-store Pub/Sub events to `retail.local.synchro.controller.v1`. |
++| `SearchInventarioStickerFileProcess` | `SearchInventarioStickerFileProcess` | Downloads the daily sticker inventory/delivery file (`<yyyyMMdd>.<storeCode>`) per MULTI_LOCAL store from the POS controller, backs up the raw file in GCS, and upserts `ENTREGA_STICKER_POS` per active `CAMPAIGN_STICKER` in ARTS_EC via Spring Data JPA (no stored procedure call). |
+ 
+ ### What this service does NOT do (boundaries with the ecosystem)
+ - Does NOT persist sales transactions to Cloud SQL Server (Multi Local) — that is Distributor Cloud's responsibility.
+
+
+--- Diff for /k8s/properties.yaml ---
+--- a//k8s/properties.yaml
++++ b//k8s/properties.yaml
+@@ -82,3 +82,10 @@
+     journalFileFtp.gcs.base-prefix=JOURNAL
+     journalFileFtp.gcs.procesado-prefix=JOURNAL_PROCESADO
+     journalFileFtp.pubsub.topic=retail.local.journal.request.v1
++    searchInventarioSticker.sleeptime=300000
++    searchInventarioSticker.controllerFolder=C:\\ADX_UDT1
++    searchInventarioSticker.controllerPort=8033
++    searchInventarioSticker.controllerPath=/api/v1/files
++    searchInventarioSticker.gcs.bucket=gcs-cer-suite-core-files
++    searchInventarioSticker.gcs.base-prefix=INVENTARIO_STICKER
++    searchInventarioSticker.gcs.backup-suffix=back
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/exception/SearchInventarioStickerException.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/exception/SearchInventarioStickerException.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/exception/SearchInventarioStickerException.java
+@@ -0,0 +1,20 @@
++package com.elrosado.cersuitecloudlocalcore.domain.exception;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.SearchInventarioStickerStage;
++
++/**
++ * ExcepciÃ³n tipada para fallos en el proceso de sincronizaciÃ³n de inventario de stickers.
++ */
++public class SearchInventarioStickerException extends RuntimeException {
++
++    private final SearchInventarioStickerStage stage;
++
++    public SearchInventarioStickerException(SearchInventarioStickerStage stage, String message, Throwable cause) {
++        super(message, cause);
++        this.stage = stage;
++    }
++
++    public SearchInventarioStickerStage stage() {
++        return stage;
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SearchInventarioStickerStage.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SearchInventarioStickerStage.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/SearchInventarioStickerStage.java
+@@ -0,0 +1,13 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++/**
++ * Etapas de procesamiento del proceso SearchInventarioSticker para diagnÃ³stico de errores.
++ */
++public enum SearchInventarioStickerStage {
++    CONTROLLER_DOWNLOAD,
++    GCS_UPLOAD,
++    PARSE,
++    PERSIST,
++    GCS_BACKUP,
++    UNKNOWN
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/StickerErrorRecord.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/StickerErrorRecord.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/StickerErrorRecord.java
+@@ -0,0 +1,34 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++import java.time.Instant;
++
++/**
++ * Registro de error para la colecciÃ³n Firestore compartida {@code process_error}.
++ * Mismo shape que {@link JournalErrorRecord}/{@link MotoErrorRecord} para mantener
++ * consistencia entre procesos migrados.
++ */
++public record StickerErrorRecord(
++        String processName,
++        String processType,
++        String executionId,
++        String storeCode,
++        String fileName,
++        String bucket,
++        String gcsPath,
++        String stage,
++        String operation,
++        String errorType,
++        String errorCode,
++        String errorMessage,
++        String stackTrace,
++        int retry,
++        int maxRetries,
++        boolean stopRetries,
++        String status,
++        Instant createdAt,
++        Instant updatedAt,
++        String hostname,
++        String podName,
++        String schedulerExecutionId
++) {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/StickerInventoryLine.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/StickerInventoryLine.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/StickerInventoryLine.java
+@@ -0,0 +1,10 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++/**
++ * LÃ­nea CSV del archivo diario de inventario/entrega de stickers descargado del
++ * controlador POS ({@code cajero,secuencia,hora,cantidad}). Solo {@code cajero} y
++ * {@code cantidad} se persisten â {@code secuencia}/{@code hora} no los consume
++ * {@code SP_SAVE_ENTREGA_STICKER_POS} legacy.
++ */
++public record StickerInventoryLine(int cajero, int cantidad) {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/SearchInventarioStickerUseCase.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/SearchInventarioStickerUseCase.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/SearchInventarioStickerUseCase.java
+@@ -0,0 +1,10 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.in;
++
++/**
++ * Caso de uso: sincronizar el archivo diario de inventario/entrega de stickers
++ * descargado del controlador POS para cada tienda activa MULTI_LOCAL.
++ */
++public interface SearchInventarioStickerUseCase {
++
++    void processAllPendingStores();
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/StickerControllerFilePort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/StickerControllerFilePort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/StickerControllerFilePort.java
+@@ -0,0 +1,12 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import java.util.Optional;
++
++/**
++ * Puerto HTTP hacia el controlador POS de una tienda. La IP es dinÃ¡mica por tienda
++ * (MN_TIENDA.IP); el puerto y el path del endpoint provienen de configuraciÃ³n legacy.
++ */
++public interface StickerControllerFilePort {
++
++    Optional<byte[]> downloadFile(String ip, String dir, String fileName);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/StickerErrorTrackerPort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/StickerErrorTrackerPort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/StickerErrorTrackerPort.java
+@@ -0,0 +1,11 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.StickerErrorRecord;
++
++/**
++ * Puerto de tracking de errores hacia la colecciÃ³n Firestore compartida {@code process_error}.
++ */
++public interface StickerErrorTrackerPort {
++
++    void recordError(StickerErrorRecord errorRecord);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/StickerInventoryPersistencePort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/StickerInventoryPersistencePort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/StickerInventoryPersistencePort.java
+@@ -0,0 +1,14 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import java.time.LocalDate;
++
++/**
++ * Puerto de persistencia ARTS_EC para la entrega de stickers por cajero y campaÃ±a vigente.
++ * Traduce {@code SP_SAVE_ENTREGA_STICKER_POS}: busca la campaÃ±a vigente para la fecha
++ * contable y hace upsert en {@code ENTREGA_STICKER_POS}. Lanza {@link IllegalStateException}
++ * si no existe campaÃ±a vigente (equivalente a {@code THROW 'NO EXISTE CAMPAIGN'} del SP).
++ */
++public interface StickerInventoryPersistencePort {
++
++    void saveEntry(int cajero, LocalDate fechaContable, int cantidad);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/StickerInventoryStoragePort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/StickerInventoryStoragePort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/StickerInventoryStoragePort.java
+@@ -0,0 +1,15 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++
++/**
++ * Puerto de almacenamiento GCS para el archivo diario de inventario de stickers por tienda.
++ */
++public interface StickerInventoryStoragePort {
++
++    GcsObjectReference uploadFile(String storeCode, String fileName, byte[] content);
++
++    void moveToBackup(String storeCode, String fileName);
++
++    void deleteFile(String storeCode, String fileName);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SearchInventarioStickerSchedulerAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SearchInventarioStickerSchedulerAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SearchInventarioStickerSchedulerAdapter.java
+@@ -0,0 +1,36 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.scheduler;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.SearchInventarioStickerUseCase;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.scheduling.annotation.Scheduled;
++import org.springframework.stereotype.Component;
++
++/**
++ * Dispara la sincronizaciÃ³n de inventario de stickers cada
++ * {@code searchInventarioSticker.sleeptime} ms, igual que el loop legacy
++ * {@code SearchInventarioStickerFileProcess} (5 minutos por defecto).
++ */
++@Component
++public class SearchInventarioStickerSchedulerAdapter {
++
++    private static final Logger log = LoggerFactory.getLogger(SearchInventarioStickerSchedulerAdapter.class);
++
++    private final SearchInventarioStickerUseCase searchInventarioStickerUseCase;
++
++    public SearchInventarioStickerSchedulerAdapter(SearchInventarioStickerUseCase searchInventarioStickerUseCase) {
++        this.searchInventarioStickerUseCase = searchInventarioStickerUseCase;
++    }
++
++    @Scheduled(fixedDelayString = "${searchInventarioSticker.sleeptime:300000}")
++    public void execute() {
++        try {
++            searchInventarioStickerUseCase.processAllPendingStores();
++        } catch (Exception e) {
++            log.atError()
++                    .setMessage("Error no controlado en scheduler de SearchInventarioSticker")
++                    .setCause(e)
++                    .log();
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbStickerInventoryPersistenceAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbStickerInventoryPersistenceAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbStickerInventoryPersistenceAdapter.java
+@@ -0,0 +1,53 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.StickerInventoryPersistencePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.CampaignStickerEntity;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.EntregaStickerPosEntity;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository.JpaCampaignStickerRepository;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository.JpaEntregaStickerPosRepository;
++import org.springframework.stereotype.Component;
++import org.springframework.transaction.annotation.Transactional;
++
++import java.time.LocalDate;
++import java.time.LocalDateTime;
++
++/**
++ * Adaptador de persistencia ARTS_EC para el inventario de stickers.
++ * Replica {@code SP_SAVE_ENTREGA_STICKER_POS}: busca la campaÃ±a vigente para la fecha
++ * contable y hace upsert en ENTREGA_STICKER_POS por (campaÃ±a, cajero, fecha).
++ */
++@Component
++public class DbStickerInventoryPersistenceAdapter implements StickerInventoryPersistencePort {
++
++    private final JpaCampaignStickerRepository campaignRepository;
++    private final JpaEntregaStickerPosRepository entregaRepository;
++
++    public DbStickerInventoryPersistenceAdapter(
++            JpaCampaignStickerRepository campaignRepository, JpaEntregaStickerPosRepository entregaRepository) {
++        this.campaignRepository = campaignRepository;
++        this.entregaRepository = entregaRepository;
++    }
++
++    @Override
++    @Transactional(transactionManager = "artsEcTransactionManager")
++    public void saveEntry(int cajero, LocalDate fechaContable, int cantidad) {
++        LocalDateTime fecha = fechaContable.atStartOfDay();
++
++        CampaignStickerEntity campaign = campaignRepository
++                .findFirstByFechaInicioLessThanEqualAndFechaFinGreaterThanEqual(fecha, fecha)
++                .orElseThrow(() -> new IllegalStateException(
++                        "NO EXISTE CAMPAIGN vigente para fecha contable: " + fechaContable));
++
++        String campaignCodigo = campaign.getCodigo();
++
++        entregaRepository.findByCampaignStickerAndUsuarioCajeroAndFechaEntrega(campaignCodigo, cajero, fecha)
++                .ifPresentOrElse(
++                        existing -> {
++                            existing.setCantidad(cantidad);
++                            entregaRepository.save(existing);
++                        },
++                        () -> entregaRepository.save(
++                                EntregaStickerPosEntity.forInsert(campaignCodigo, cajero, cantidad, fecha))
++                );
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/CampaignStickerEntity.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/CampaignStickerEntity.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/CampaignStickerEntity.java
+@@ -0,0 +1,58 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++import jakarta.persistence.Table;
++
++import java.time.LocalDateTime;
++
++/**
++ * Entidad JPA de solo lectura de CAMPAIGN_STICKER (ARTS_EC). Mapea Ãºnicamente las
++ * columnas consultadas por {@code SP_SAVE_ENTREGA_STICKER_POS}
++ * ({@code SELECT CODIGO FROM CAMPAIGN_STICKER WHERE FECHA_INICIO <= ? AND FECHA_FIN >= ?}).
++ * Nunca se inserta/actualiza desde este proceso.
++ */
++@Entity
++@Table(name = "CAMPAIGN_STICKER")
++public class CampaignStickerEntity {
++
++    @Id
++    @Column(name = "ID")
++    private Integer id;
++
++    @Column(name = "CODIGO", nullable = false, length = 24)
++    private String codigo;
++
++    @Column(name = "FECHA_INICIO", nullable = false)
++    private LocalDateTime fechaInicio;
++
++    @Column(name = "FECHA_FIN", nullable = false)
++    private LocalDateTime fechaFin;
++
++    protected CampaignStickerEntity() {
++    }
++
++    public CampaignStickerEntity(Integer id, String codigo, LocalDateTime fechaInicio, LocalDateTime fechaFin) {
++        this.id = id;
++        this.codigo = codigo;
++        this.fechaInicio = fechaInicio;
++        this.fechaFin = fechaFin;
++    }
++
++    public Integer getId() {
++        return id;
++    }
++
++    public String getCodigo() {
++        return codigo;
++    }
++
++    public LocalDateTime getFechaInicio() {
++        return fechaInicio;
++    }
++
++    public LocalDateTime getFechaFin() {
++        return fechaFin;
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/EntregaStickerPosEntity.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/EntregaStickerPosEntity.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/EntregaStickerPosEntity.java
+@@ -0,0 +1,91 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.GeneratedValue;
++import jakarta.persistence.GenerationType;
++import jakarta.persistence.Id;
++import jakarta.persistence.Table;
++
++import java.time.LocalDateTime;
++
++/**
++ * Entidad JPA de ENTREGA_STICKER_POS (ARTS_EC): entrega de stickers por campaÃ±a,
++ * cajero y fecha contable. Replica el upsert de {@code SP_SAVE_ENTREGA_STICKER_POS}.
++ */
++@Entity
++@Table(name = "ENTREGA_STICKER_POS")
++public class EntregaStickerPosEntity {
++
++    private static final String ESTADO_PENDIENTE = "PE";
++
++    @Id
++    @GeneratedValue(strategy = GenerationType.IDENTITY)
++    @Column(name = "ID")
++    private Integer id;
++
++    @Column(name = "CAMPAIGN_STICKER", nullable = false, length = 10)
++    private String campaignSticker;
++
++    @Column(name = "USUARIO_CAJERO", nullable = false)
++    private Integer usuarioCajero;
++
++    @Column(name = "CANTIDAD")
++    private Integer cantidad;
++
++    @Column(name = "FECHA_ENTREGA")
++    private LocalDateTime fechaEntrega;
++
++    @Column(name = "ESTADO", length = 10)
++    private String estado;
++
++    protected EntregaStickerPosEntity() {
++    }
++
++    private EntregaStickerPosEntity(String campaignSticker, Integer usuarioCajero, Integer cantidad,
++                                     LocalDateTime fechaEntrega, String estado) {
++        this.campaignSticker = campaignSticker;
++        this.usuarioCajero = usuarioCajero;
++        this.cantidad = cantidad;
++        this.fechaEntrega = fechaEntrega;
++        this.estado = estado;
++    }
++
++    /**
++     * Fidelidad legacy: el INSERT del SP excluye ESTADO de la lista de columnas, dejando que
++     * el DEFAULT('PE') de la tabla lo asigne. Hibernate siempre envÃ­a todas las columnas
++     * mapeadas, asÃ­ que se fija explÃ­citamente 'PE' para reproducir el mismo resultado.
++     */
++    public static EntregaStickerPosEntity forInsert(String campaignSticker, int usuarioCajero, int cantidad,
++                                                     LocalDateTime fechaEntrega) {
++        return new EntregaStickerPosEntity(campaignSticker, usuarioCajero, cantidad, fechaEntrega, ESTADO_PENDIENTE);
++    }
++
++    public Integer getId() {
++        return id;
++    }
++
++    public String getCampaignSticker() {
++        return campaignSticker;
++    }
++
++    public Integer getUsuarioCajero() {
++        return usuarioCajero;
++    }
++
++    public Integer getCantidad() {
++        return cantidad;
++    }
++
++    public void setCantidad(Integer cantidad) {
++        this.cantidad = cantidad;
++    }
++
++    public LocalDateTime getFechaEntrega() {
++        return fechaEntrega;
++    }
++
++    public String getEstado() {
++        return estado;
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/JpaCampaignStickerRepository.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/JpaCampaignStickerRepository.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/JpaCampaignStickerRepository.java
+@@ -0,0 +1,13 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository;
++
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.CampaignStickerEntity;
++import org.springframework.data.jpa.repository.JpaRepository;
++
++import java.time.LocalDateTime;
++import java.util.Optional;
++
++public interface JpaCampaignStickerRepository extends JpaRepository<CampaignStickerEntity, Integer> {
++
++    Optional<CampaignStickerEntity> findFirstByFechaInicioLessThanEqualAndFechaFinGreaterThanEqual(
++            LocalDateTime fechaInicio, LocalDateTime fechaFin);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/JpaEntregaStickerPosRepository.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/JpaEntregaStickerPosRepository.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/JpaEntregaStickerPosRepository.java
+@@ -0,0 +1,13 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository;
++
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.EntregaStickerPosEntity;
++import org.springframework.data.jpa.repository.JpaRepository;
++
++import java.time.LocalDateTime;
++import java.util.Optional;
++
++public interface JpaEntregaStickerPosRepository extends JpaRepository<EntregaStickerPosEntity, Integer> {
++
++    Optional<EntregaStickerPosEntity> findByCampaignStickerAndUsuarioCajeroAndFechaEntrega(
++            String campaignSticker, Integer usuarioCajero, LocalDateTime fechaEntrega);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/StickerProcessErrorFirestoreAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/StickerProcessErrorFirestoreAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/StickerProcessErrorFirestoreAdapter.java
+@@ -0,0 +1,73 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.firestore;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.StickerErrorRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.StickerErrorTrackerPort;
++import com.google.cloud.Timestamp;
++import com.google.cloud.firestore.Firestore;
++import org.springframework.beans.factory.annotation.Value;
++import org.springframework.stereotype.Component;
++
++import java.time.Instant;
++import java.util.LinkedHashMap;
++import java.util.Map;
++import java.util.concurrent.ExecutionException;
++
++@Component
++public class StickerProcessErrorFirestoreAdapter implements StickerErrorTrackerPort {
++
++    private final Firestore firestore;
++
++    @Value("${app.gcp.firestore.collection-process-error:process_error}")
++    private String collection;
++
++    public StickerProcessErrorFirestoreAdapter(Firestore firestore) {
++        this.firestore = firestore;
++    }
++
++    @Override
++    public void recordError(StickerErrorRecord errorRecord) {
++        Map<String, Object> document = new LinkedHashMap<>();
++        document.put("processName", errorRecord.processName());
++        document.put("processType", errorRecord.processType());
++        document.put("executionId", errorRecord.executionId());
++        document.put("storeCode", errorRecord.storeCode());
++        document.put("fileName", errorRecord.fileName());
++        document.put("bucket", errorRecord.bucket());
++        document.put("gcsPath", errorRecord.gcsPath());
++        document.put("stage", errorRecord.stage());
++        document.put("operation", valueOrDefault(errorRecord.operation()));
++        document.put("errorType", valueOrDefault(errorRecord.errorType()));
++        document.put("errorCode", valueOrDefault(errorRecord.errorCode()));
++        document.put("errorMessage", valueOrDefault(errorRecord.errorMessage()));
++        document.put("stackTrace", valueOrDefault(errorRecord.stackTrace()));
++        document.put("retry", errorRecord.retry());
++        document.put("maxRetries", errorRecord.maxRetries());
++        document.put("stopRetries", errorRecord.stopRetries());
++        document.put("status", errorRecord.status());
++        document.put("createdAt", toTimestamp(errorRecord.createdAt()));
++        document.put("updatedAt", toTimestamp(errorRecord.updatedAt()));
++        document.put("hostname", valueOrDefault(errorRecord.hostname()));
++        document.put("podName", valueOrDefault(errorRecord.podName()));
++        document.put("schedulerExecutionId", valueOrDefault(errorRecord.schedulerExecutionId()));
++
++        try {
++            firestore.collection(collection)
++                    .document(errorRecord.executionId())
++                    .set(document)
++                    .get();
++        } catch (InterruptedException e) {
++            Thread.currentThread().interrupt();
++            throw new IllegalStateException("Firestore Sticker error registration interrupted", e);
++        } catch (ExecutionException e) {
++            throw new IllegalStateException("Error registering Firestore Sticker error", e);
++        }
++    }
++
++    private Timestamp toTimestamp(Instant instant) {
++        return Timestamp.ofTimeSecondsAndNanos(instant.getEpochSecond(), instant.getNano());
++    }
++
++    private String valueOrDefault(String value) {
++        return value == null ? "" : value;
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/http/StickerControllerHttpAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/http/StickerControllerHttpAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/http/StickerControllerHttpAdapter.java
+@@ -0,0 +1,99 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.http;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.StickerControllerFilePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.LegacySearchInventarioStickerProperties;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Component;
++import tools.jackson.databind.ObjectMapper;
++
++import java.io.IOException;
++import java.net.URI;
++import java.net.URLEncoder;
++import java.net.http.HttpClient;
++import java.net.http.HttpRequest;
++import java.net.http.HttpResponse;
++import java.nio.charset.StandardCharsets;
++import java.time.Duration;
++import java.util.Base64;
++import java.util.LinkedHashMap;
++import java.util.Map;
++import java.util.Optional;
++import java.util.stream.Collectors;
++
++/**
++ * Cliente HTTP hacia el controlador POS de una tienda. Reemplaza al {@code HttpImpl} legacy
++ * (que aceptaba cualquier certificado TLS); aquÃ­ se usa el {@link HttpClient} del JDK con
++ * validaciÃ³n TLS estÃ¡ndar. Mismo contrato de respuesta {@code HttpResponseWs} legacy
++ * (file/dir/content Base64) ya usado por {@code JournalControllerHttpAdapter}.
++ */
++@Component
++public class StickerControllerHttpAdapter implements StickerControllerFilePort {
++
++    private static final Logger log = LoggerFactory.getLogger(StickerControllerHttpAdapter.class);
++    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(15);
++
++    private final HttpClient httpClient;
++    private final ObjectMapper objectMapper;
++    private final LegacySearchInventarioStickerProperties properties;
++
++    public StickerControllerHttpAdapter(ObjectMapper objectMapper, LegacySearchInventarioStickerProperties properties) {
++        this.httpClient = HttpClient.newBuilder()
++                .connectTimeout(REQUEST_TIMEOUT)
++                .build();
++        this.objectMapper = objectMapper;
++        this.properties = properties;
++    }
++
++    @Override
++    public Optional<byte[]> downloadFile(String ip, String dir, String fileName) {
++        URI uri = buildUri(ip, Map.of("dir", dir, "file", fileName));
++        try {
++            HttpResponse<byte[]> response = send(uri);
++            if (response.statusCode() != 200) {
++                log.atWarn()
++                        .setMessage("Descarga de inventario de sticker respondio con error")
++                        .addKeyValue("ip", ip)
++                        .addKeyValue("fileName", fileName)
++                        .addKeyValue("status", response.statusCode())
++                        .log();
++                return Optional.empty();
++            }
++
++            ControllerFileResponse body = objectMapper.readValue(response.body(), ControllerFileResponse.class);
++            if (body.content() == null || body.content().isBlank()) {
++                return Optional.empty();
++            }
++            return Optional.of(Base64.getDecoder().decode(body.content()));
++        } catch (IOException e) {
++            throw new IllegalStateException("Error de comunicacion descargando inventario de sticker del controlador", e);
++        } catch (InterruptedException e) {
++            Thread.currentThread().interrupt();
++            throw new IllegalStateException("Descarga de inventario de sticker interrumpida", e);
++        }
++    }
++
++    private HttpResponse<byte[]> send(URI uri) throws IOException, InterruptedException {
++        return httpClient.send(buildRequest(uri), HttpResponse.BodyHandlers.ofByteArray());
++    }
++
++    HttpRequest buildRequest(URI uri) {
++        return HttpRequest.newBuilder(uri)
++                .timeout(REQUEST_TIMEOUT)
++                .header("Authorization", "Bearer " + properties.jwt())
++                .GET()
++                .build();
++    }
++
++    URI buildUri(String ip, Map<String, String> params) {
++        Map<String, String> ordered = new LinkedHashMap<>(params);
++        String query = ordered.entrySet().stream()
++                .map(e -> URLEncoder.encode(e.getKey(), StandardCharsets.UTF_8)
++                        + "=" + URLEncoder.encode(e.getValue(), StandardCharsets.UTF_8))
++                .collect(Collectors.joining("&"));
++        return URI.create("https://" + ip + ":" + properties.controllerPort() + properties.controllerPath() + "?" + query);
++    }
++
++    private record ControllerFileResponse(String file, String dir, String content) {
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsStickerInventoryStorageAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsStickerInventoryStorageAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/storage/GcsStickerInventoryStorageAdapter.java
+@@ -0,0 +1,62 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.storage;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.StickerInventoryStoragePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.LegacySearchInventarioStickerProperties;
++import com.google.cloud.storage.BlobId;
++import com.google.cloud.storage.Storage;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Component;
++
++@Component
++public class GcsStickerInventoryStorageAdapter implements StickerInventoryStoragePort {
++
++    private static final Logger log = LoggerFactory.getLogger(GcsStickerInventoryStorageAdapter.class);
++    private static final String CONTENT_TYPE = "text/csv";
++
++    private final GcsStorageHelper gcsHelper;
++    private final Storage storage;
++    private final LegacySearchInventarioStickerProperties properties;
++
++    public GcsStickerInventoryStorageAdapter(
++            GcsStorageHelper gcsHelper, Storage storage, LegacySearchInventarioStickerProperties properties) {
++        this.gcsHelper = gcsHelper;
++        this.storage = storage;
++        this.properties = properties;
++    }
++
++    @Override
++    public GcsObjectReference uploadFile(String storeCode, String fileName, byte[] content) {
++        GcsObjectReference target = rootFolder(storeCode).resolve(fileName);
++        return gcsHelper.upload(target, content, CONTENT_TYPE);
++    }
++
++    @Override
++    public void moveToBackup(String storeCode, String fileName) {
++        GcsObjectReference source = rootFolder(storeCode).resolve(fileName);
++        GcsObjectReference backupFolder = new GcsObjectReference(
++                properties.gcs().bucket(),
++                rootPrefix(storeCode) + "/" + properties.gcs().backupSuffix());
++        gcsHelper.moveBlob(source, backupFolder);
++        log.atInfo()
++                .setMessage("Inventario de sticker movido a backup")
++                .addKeyValue("storeCode", storeCode)
++                .addKeyValue("fileName", fileName)
++                .log();
++    }
++
++    @Override
++    public void deleteFile(String storeCode, String fileName) {
++        GcsObjectReference target = rootFolder(storeCode).resolve(fileName);
++        storage.delete(BlobId.of(target.bucket(), target.objectName()));
++    }
++
++    private GcsObjectReference rootFolder(String storeCode) {
++        return new GcsObjectReference(properties.gcs().bucket(), rootPrefix(storeCode));
++    }
++
++    private String rootPrefix(String storeCode) {
++        return properties.gcs().basePrefix() + "/" + storeCode;
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LegacySearchInventarioStickerProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LegacySearchInventarioStickerProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/LegacySearchInventarioStickerProperties.java
+@@ -0,0 +1,41 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.boot.context.properties.ConfigurationProperties;
++
++/**
++ * Propiedades heredadas de ArmsServerConf.properties para el proceso de sincronizaciÃ³n de
++ * inventario/entrega de stickers con el controlador POS. Registradas en k8s/properties.yaml
++ * bajo el prefijo searchInventarioSticker, salvo {@code jwt} que se inyecta desde el mismo
++ * Kubernetes Secret compartido con JournalFileFtp ({@code jwt.tcx.sky.controller} legacy es
++ * un Ãºnico token compartido por todos los controladores).
++ */
++@ConfigurationProperties(prefix = "searchInventarioSticker")
++public record LegacySearchInventarioStickerProperties(
++        long sleeptime,
++        String controllerFolder,
++        int controllerPort,
++        String controllerPath,
++        String jwt,
++        Gcs gcs
++) {
++
++    public LegacySearchInventarioStickerProperties {
++        if (sleeptime <= 0) {
++            sleeptime = 300_000L;
++        }
++        if (controllerFolder == null) controllerFolder = "";
++        if (controllerPath == null) controllerPath = "";
++        if (jwt == null) jwt = "";
++        if (gcs == null) {
++            gcs = new Gcs("", "", "");
++        }
++    }
++
++    public record Gcs(String bucket, String basePrefix, String backupSuffix) {
++        public Gcs {
++            if (bucket == null) bucket = "";
++            if (basePrefix == null) basePrefix = "";
++            if (backupSuffix == null) backupSuffix = "";
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SchedulingConfig.java
+@@ -34,7 +34,9 @@
+         RegisterItemFilesProperties.class,
+         LegacyRegisterItemFilesProperties.class,
+         SendJournalFileFtpProperties.class,
+-        LegacyJournalFileFtpProperties.class
++        LegacyJournalFileFtpProperties.class,
++        SearchInventarioStickerProperties.class,
++        LegacySearchInventarioStickerProperties.class
+ })
+ public class SchedulingConfig {
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SearchInventarioStickerProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SearchInventarioStickerProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SearchInventarioStickerProperties.java
+@@ -0,0 +1,7 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.config;
++
++import org.springframework.boot.context.properties.ConfigurationProperties;
++
++@ConfigurationProperties(prefix = "app.search-inventario-sticker")
++public record SearchInventarioStickerProperties(boolean enabled) {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/SearchInventarioStickerService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/SearchInventarioStickerService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/SearchInventarioStickerService.java
+@@ -0,0 +1,233 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.exception.SearchInventarioStickerException;
++import com.elrosado.cersuitecloudlocalcore.domain.model.SearchInventarioStickerStage;
++import com.elrosado.cersuitecloudlocalcore.domain.model.StickerErrorRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.model.StickerInventoryLine;
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.SearchInventarioStickerUseCase;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.StickerControllerFilePort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.StickerErrorTrackerPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.StickerInventoryPersistencePort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.StickerInventoryStoragePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.LegacySearchInventarioStickerProperties;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.SearchInventarioStickerProperties;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.StoreRegistry;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.beans.factory.annotation.Qualifier;
++import org.springframework.core.task.AsyncTaskExecutor;
++import org.springframework.stereotype.Service;
++
++import java.nio.charset.StandardCharsets;
++import java.time.Instant;
++import java.time.LocalDate;
++import java.time.format.DateTimeFormatter;
++import java.util.List;
++import java.util.Optional;
++import java.util.UUID;
++import java.util.concurrent.CompletableFuture;
++
++/**
++ * Orquesta la sincronizaciÃ³n de inventario/entrega de stickers por tienda MULTI_LOCAL:
++ * descarga desde el controlador POS, respaldo en GCS, parseo CSV y upsert en ARTS_EC.
++ * TraducciÃ³n de {@code SearchInventarioStickerFileProcess} legacy (ArmsServerLocal), con un
++ * ciclo (virtual thread) por tienda activa en vez de una tienda Ãºnica global.
++ */
++@Service
++public class SearchInventarioStickerService implements SearchInventarioStickerUseCase {
++
++    private static final Logger log = LoggerFactory.getLogger(SearchInventarioStickerService.class);
++    private static final DateTimeFormatter FILE_DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
++    private static final int MAX_RETRIES = 3;
++
++    private final StickerControllerFilePort controllerPort;
++    private final StickerInventoryStoragePort storagePort;
++    private final StickerInventoryPersistencePort persistencePort;
++    private final StickerErrorTrackerPort errorTrackerPort;
++    private final StickerInventoryParserService parserService;
++    private final StoreRegistry storeRegistry;
++    private final SearchInventarioStickerProperties properties;
++    private final LegacySearchInventarioStickerProperties legacyProperties;
++    private final AsyncTaskExecutor virtualThreadTaskExecutor;
++
++    public SearchInventarioStickerService(
++            StickerControllerFilePort controllerPort,
++            StickerInventoryStoragePort storagePort,
++            StickerInventoryPersistencePort persistencePort,
++            StickerErrorTrackerPort errorTrackerPort,
++            StickerInventoryParserService parserService,
++            StoreRegistry storeRegistry,
++            SearchInventarioStickerProperties properties,
++            LegacySearchInventarioStickerProperties legacyProperties,
++            @Qualifier("virtualThreadTaskExecutor") AsyncTaskExecutor virtualThreadTaskExecutor) {
++        this.controllerPort = controllerPort;
++        this.storagePort = storagePort;
++        this.persistencePort = persistencePort;
++        this.errorTrackerPort = errorTrackerPort;
++        this.parserService = parserService;
++        this.storeRegistry = storeRegistry;
++        this.properties = properties;
++        this.legacyProperties = legacyProperties;
++        this.virtualThreadTaskExecutor = virtualThreadTaskExecutor;
++    }
++
++    @Override
++    public void processAllPendingStores() {
++        if (!properties.enabled()) {
++            log.atDebug().setMessage("SearchInventarioSticker deshabilitado").log();
++            return;
++        }
++
++        if (!storeRegistry.isMultiLocalEnabled()) {
++            log.atWarn().setMessage("SearchInventarioSticker omitido - sin tiendas multi-local activas en MN_TIENDA").log();
++            return;
++        }
++
++        List<CompletableFuture<Void>> futures = storeRegistry.getActiveMultiLocalStores().stream()
++                .map(store -> {
++                    int desClave = store.getDesClave();
++                    String ip = store.getIp();
++                    return CompletableFuture
++                            .runAsync(() -> processStore(desClave, ip), virtualThreadTaskExecutor)
++                            .exceptionally(ex -> {
++                                log.atError()
++                                        .setMessage("Error no controlado en hilo de tienda para SearchInventarioSticker")
++                                        .addKeyValue("desClave", desClave)
++                                        .setCause(ex)
++                                        .log();
++                                return null;
++                            });
++                })
++                .toList();
++
++        CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).join();
++    }
++
++    private void processStore(int codStore, String ip) {
++        String storeCode = String.valueOf(codStore);
++
++        if (ip == null || ip.isBlank()) {
++            log.atWarn()
++                    .setMessage("Tienda sin IP registrada en MN_TIENDA - omitida para SearchInventarioSticker")
++                    .addKeyValue("storeCode", storeCode)
++                    .log();
++            return;
++        }
++
++        LocalDate today = LocalDate.now();
++        String fileName = today.format(FILE_DATE_FMT) + "." + storeCode;
++
++        Optional<byte[]> content;
++        try {
++            content = controllerPort.downloadFile(ip, legacyProperties.controllerFolder(), fileName);
++        } catch (RuntimeException e) {
++            recordError(storeCode, fileName, SearchInventarioStickerStage.CONTROLLER_DOWNLOAD, e);
++            return;
++        }
++
++        if (content.isEmpty()) {
++            log.atDebug()
++                    .setMessage("Sin archivo de inventario de sticker disponible para la tienda hoy")
++                    .addKeyValue("storeCode", storeCode)
++                    .addKeyValue("fileName", fileName)
++                    .log();
++            return;
++        }
++
++        byte[] fileContent = content.get();
++
++        try {
++            storagePort.uploadFile(storeCode, fileName, fileContent);
++        } catch (RuntimeException e) {
++            recordError(storeCode, fileName, SearchInventarioStickerStage.GCS_UPLOAD, e);
++            return;
++        }
++
++        List<StickerInventoryLine> lines;
++        try {
++            List<String> rawLines = new String(fileContent, StandardCharsets.ISO_8859_1).lines().toList();
++            lines = parserService.parse(rawLines);
++        } catch (RuntimeException e) {
++            recordError(storeCode, fileName, SearchInventarioStickerStage.PARSE, e);
++            return;
++        }
++
++        if (lines.isEmpty()) {
++            storagePort.deleteFile(storeCode, fileName);
++            log.atInfo()
++                    .setMessage("Archivo de inventario de sticker vacio - eliminado")
++                    .addKeyValue("storeCode", storeCode)
++                    .addKeyValue("fileName", fileName)
++                    .log();
++            return;
++        }
++
++        try {
++            for (StickerInventoryLine line : lines) {
++                persistencePort.saveEntry(line.cajero(), today, line.cantidad());
++            }
++        } catch (RuntimeException e) {
++            // Fidelidad legacy: si una linea falla, el archivo completo no se mueve a backup
++            // y queda pendiente para reintento en el proximo ciclo.
++            recordError(storeCode, fileName, SearchInventarioStickerStage.PERSIST, e);
++            return;
++        }
++
++        try {
++            storagePort.moveToBackup(storeCode, fileName);
++        } catch (RuntimeException e) {
++            recordError(storeCode, fileName, SearchInventarioStickerStage.GCS_BACKUP, e);
++            return;
++        }
++
++        log.atInfo()
++                .setMessage("Inventario de sticker procesado y respaldado")
++                .addKeyValue("storeCode", storeCode)
++                .addKeyValue("fileName", fileName)
++                .addKeyValue("lineas", lines.size())
++                .log();
++    }
++
++    private void recordError(String storeCode, String fileName, SearchInventarioStickerStage stage, Exception e) {
++        SearchInventarioStickerException wrapped = new SearchInventarioStickerException(stage, e.getMessage(), e);
++        log.atError()
++                .setMessage("Error procesando inventario de sticker")
++                .addKeyValue("storeCode", storeCode)
++                .addKeyValue("fileName", fileName)
++                .addKeyValue("stage", stage.name())
++                .setCause(e)
++                .log();
++        try {
++            errorTrackerPort.recordError(new StickerErrorRecord(
++                    "SearchInventarioSticker",
++                    "SCHEDULED",
++                    UUID.randomUUID().toString(),
++                    storeCode,
++                    fileName,
++                    "",
++                    "",
++                    stage.name(),
++                    "",
++                    wrapped.getClass().getSimpleName(),
++                    "",
++                    wrapped.getMessage() == null ? "" : wrapped.getMessage(),
++                    "",
++                    0,
++                    MAX_RETRIES,
++                    false,
++                    "ERROR",
++                    Instant.now(),
++                    Instant.now(),
++                    System.getenv().getOrDefault("HOSTNAME", ""),
++                    System.getenv().getOrDefault("POD_NAME", ""),
++                    "%s-%s".formatted(storeCode, fileName)
++            ));
++        } catch (RuntimeException trackerFailure) {
++            log.atError()
++                    .setMessage("No se pudo registrar el error de SearchInventarioSticker en Firestore")
++                    .addKeyValue("storeCode", storeCode)
++                    .setCause(trackerFailure)
++                    .log();
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/StickerInventoryParserService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/StickerInventoryParserService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/StickerInventoryParserService.java
+@@ -0,0 +1,51 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.StickerInventoryLine;
++import org.springframework.stereotype.Service;
++
++import java.util.ArrayList;
++import java.util.List;
++
++/**
++ * Parsea el archivo diario de inventario de stickers ({@code cajero,secuencia,hora,cantidad})
++ * a una lista de {@link StickerInventoryLine}. TraducciÃ³n de la lÃ³gica CSV inline de
++ * {@code SearchInventarioStickerFileProcess.saveOrUpdateStickerByCajeroJava8()} legacy.
++ * <p>
++ * Fidelidad legacy: si cualquier lÃ­nea tiene menos de 4 campos o un campo no numÃ©rico,
++ * se lanza {@link IllegalArgumentException} y el archivo completo falla (no se procesan
++ * lÃ­neas parciales) â igual que el legacy, que ejecuta un Ãºnico {@code CallableStatement}
++ * dentro de un solo try que aborta todo el archivo ante el primer error de lÃ­nea.
++ */
++@Service
++public class StickerInventoryParserService {
++
++    private static final int MIN_FIELDS = 4;
++    private static final int FIELD_CAJERO = 0;
++    private static final int FIELD_CANTIDAD = 3;
++
++    public List<StickerInventoryLine> parse(List<String> lines) {
++        List<StickerInventoryLine> result = new ArrayList<>();
++        for (String line : lines) {
++            if (line.isBlank()) {
++                continue;
++            }
++            result.add(parseLine(line));
++        }
++        return result;
++    }
++
++    private StickerInventoryLine parseLine(String line) {
++        String[] fields = line.split(",", -1);
++        if (fields.length < MIN_FIELDS) {
++            throw new IllegalArgumentException(
++                    "Linea de inventario de sticker con campos insuficientes: " + fields.length);
++        }
++        try {
++            int cajero = Integer.parseInt(fields[FIELD_CAJERO].trim());
++            int cantidad = Integer.parseInt(fields[FIELD_CANTIDAD].trim());
++            return new StickerInventoryLine(cajero, cantidad);
++        } catch (NumberFormatException e) {
++            throw new IllegalArgumentException("Linea de inventario de sticker con campo no numerico", e);
++        }
++    }
++}
+
+
+--- Diff for /src/main/resources/application-dev.yml ---
+--- a//src/main/resources/application-dev.yml
++++ b//src/main/resources/application-dev.yml
+@@ -80,6 +80,9 @@
+ journalFileFtp:
+   jwt: ${JOURNAL_CONTROLLER_JWT}
+ 
++searchInventarioSticker:
++  jwt: ${JOURNAL_CONTROLLER_JWT}
++
+ app:
+   send-carta-moto:
+     enabled: ${SEND_CARTA_MOTO_ENABLED:true}
+@@ -143,5 +146,7 @@
+     enabled: ${REPLICATE_CUSTOMER_DATA_ENABLED:true}
+   register-item-files:
+     enabled: ${REGISTER_ITEM_FILES_ENABLED:true}
++  search-inventario-sticker:
++    enabled: ${SEARCH_INVENTARIO_STICKER_ENABLED:false}
+ 
+ 
+
+
+--- Diff for /src/main/resources/application-local.yml ---
+--- a//src/main/resources/application-local.yml
++++ b//src/main/resources/application-local.yml
+@@ -87,10 +87,15 @@
+ journalFileFtp:
+   jwt: ${JOURNAL_CONTROLLER_JWT:}
+ 
++searchInventarioSticker:
++  jwt: ${JOURNAL_CONTROLLER_JWT:}
++
+ app:
+   send-carta-moto:
+     enabled: false
+   journal-file-ftp:
++    enabled: false
++  search-inventario-sticker:
+     enabled: false
+   update-moto:
+     enabled: false
+
+
+--- Diff for /src/main/resources/application-prod.yml ---
+--- a//src/main/resources/application-prod.yml
++++ b//src/main/resources/application-prod.yml
+@@ -70,6 +70,9 @@
+ journalFileFtp:
+   jwt: ${JOURNAL_CONTROLLER_JWT}
+ 
++searchInventarioSticker:
++  jwt: ${JOURNAL_CONTROLLER_JWT}
++
+ app:
+   update-moto:
+     enabled: ${UPDATE_MOTO_ENABLED:true}
+@@ -104,5 +107,7 @@
+     enabled: ${REGISTER_ITEM_FILES_ENABLED:true}
+   journal-file-ftp:
+     enabled: ${JOURNAL_FILE_FTP_ENABLED:false}
++  search-inventario-sticker:
++    enabled: ${SEARCH_INVENTARIO_STICKER_ENABLED:false}
+ 
+ 
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SearchInventarioStickerSchedulerAdapterTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SearchInventarioStickerSchedulerAdapterTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SearchInventarioStickerSchedulerAdapterTest.java
+@@ -0,0 +1,36 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.in.scheduler;
++
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.SearchInventarioStickerUseCase;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import static org.mockito.Mockito.doThrow;
++import static org.mockito.Mockito.verify;
++
++@ExtendWith(MockitoExtension.class)
++class SearchInventarioStickerSchedulerAdapterTest {
++
++    @Mock
++    SearchInventarioStickerUseCase useCase;
++
++    @Test
++    void execute_invocaCasoDeUso() {
++        SearchInventarioStickerSchedulerAdapter scheduler = new SearchInventarioStickerSchedulerAdapter(useCase);
++
++        scheduler.execute();
++
++        verify(useCase).processAllPendingStores();
++    }
++
++    @Test
++    void execute_errorEnUseCase_noPropagaExcepcion() {
++        SearchInventarioStickerSchedulerAdapter scheduler = new SearchInventarioStickerSchedulerAdapter(useCase);
++        doThrow(new IllegalStateException("controlador no disponible")).when(useCase).processAllPendingStores();
++
++        scheduler.execute();
++
++        verify(useCase).processAllPendingStores();
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbStickerInventoryPersistenceAdapterTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbStickerInventoryPersistenceAdapterTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbStickerInventoryPersistenceAdapterTest.java
+@@ -0,0 +1,89 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db;
++
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.CampaignStickerEntity;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.EntregaStickerPosEntity;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository.JpaCampaignStickerRepository;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository.JpaEntregaStickerPosRepository;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.ArgumentCaptor;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.time.LocalDate;
++import java.time.LocalDateTime;
++import java.util.Optional;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.assertj.core.api.Assertions.assertThatThrownBy;
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.ArgumentMatchers.eq;
++import static org.mockito.Mockito.never;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.when;
++
++@ExtendWith(MockitoExtension.class)
++class DbStickerInventoryPersistenceAdapterTest {
++
++    @Mock JpaCampaignStickerRepository campaignRepository;
++    @Mock JpaEntregaStickerPosRepository entregaRepository;
++
++    DbStickerInventoryPersistenceAdapter adapter;
++
++    private static final LocalDate FECHA_CONTABLE = LocalDate.of(2026, 7, 3);
++    private static final LocalDateTime FECHA_INICIO_DIA = FECHA_CONTABLE.atStartOfDay();
++
++    @BeforeEach
++    void setUp() {
++        adapter = new DbStickerInventoryPersistenceAdapter(campaignRepository, entregaRepository);
++    }
++
++    @Test
++    void saveEntry_sinCampaignVigente_lanzaExcepcion() {
++        when(campaignRepository.findFirstByFechaInicioLessThanEqualAndFechaFinGreaterThanEqual(any(), any()))
++                .thenReturn(Optional.empty());
++
++        assertThatThrownBy(() -> adapter.saveEntry(227934, FECHA_CONTABLE, 1039))
++                .isInstanceOf(IllegalStateException.class)
++                .hasMessageContaining("NO EXISTE CAMPAIGN");
++
++        verify(entregaRepository, never()).save(any());
++    }
++
++    @Test
++    void saveEntry_entregaNoExiste_inserta() {
++        CampaignStickerEntity campaign = new CampaignStickerEntity(
++                1, "CMP01", FECHA_INICIO_DIA.minusDays(5), FECHA_INICIO_DIA.plusDays(5));
++        when(campaignRepository.findFirstByFechaInicioLessThanEqualAndFechaFinGreaterThanEqual(any(), any()))
++                .thenReturn(Optional.of(campaign));
++        when(entregaRepository.findByCampaignStickerAndUsuarioCajeroAndFechaEntrega(
++                "CMP01", 227934, FECHA_INICIO_DIA)).thenReturn(Optional.empty());
++
++        adapter.saveEntry(227934, FECHA_CONTABLE, 1039);
++
++        ArgumentCaptor<EntregaStickerPosEntity> captor = ArgumentCaptor.forClass(EntregaStickerPosEntity.class);
++        verify(entregaRepository).save(captor.capture());
++        assertThat(captor.getValue().getCampaignSticker()).isEqualTo("CMP01");
++        assertThat(captor.getValue().getUsuarioCajero()).isEqualTo(227934);
++        assertThat(captor.getValue().getCantidad()).isEqualTo(1039);
++        assertThat(captor.getValue().getEstado()).isEqualTo("PE");
++    }
++
++    @Test
++    void saveEntry_entregaYaExiste_actualizaCantidad() {
++        CampaignStickerEntity campaign = new CampaignStickerEntity(
++                1, "CMP01", FECHA_INICIO_DIA.minusDays(5), FECHA_INICIO_DIA.plusDays(5));
++        when(campaignRepository.findFirstByFechaInicioLessThanEqualAndFechaFinGreaterThanEqual(any(), any()))
++                .thenReturn(Optional.of(campaign));
++        EntregaStickerPosEntity existing =
++                EntregaStickerPosEntity.forInsert("CMP01", 227934, 500, FECHA_INICIO_DIA);
++        when(entregaRepository.findByCampaignStickerAndUsuarioCajeroAndFechaEntrega(
++                "CMP01", 227934, FECHA_INICIO_DIA)).thenReturn(Optional.of(existing));
++
++        adapter.saveEntry(227934, FECHA_CONTABLE, 1039);
++
++        verify(entregaRepository).save(existing);
++        assertThat(existing.getCantidad()).isEqualTo(1039);
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/http/StickerControllerHttpAdapterTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/http/StickerControllerHttpAdapterTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/http/StickerControllerHttpAdapterTest.java
+@@ -0,0 +1,48 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.http;
++
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.LegacySearchInventarioStickerProperties;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++
++import java.net.URI;
++import java.net.http.HttpRequest;
++import java.util.Map;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++/**
++ * Verifica la construcciÃ³n de URL/headers hacia el controlador POS sin realizar llamadas de
++ * red reales. La validaciÃ³n TLS real (a diferencia del {@code HttpImpl} legacy permisivo) se
++ * garantiza por diseÃ±o: el adaptador no configura ningÃºn {@code SSLContext} personalizado.
++ */
++class StickerControllerHttpAdapterTest {
++
++    private StickerControllerHttpAdapter adapter;
++
++    @BeforeEach
++    void setUp() {
++        LegacySearchInventarioStickerProperties properties = new LegacySearchInventarioStickerProperties(
++                300_000L, "C:\\ADX_UDT1", 8033, "/api/v1/files", "test-jwt-token",
++                new LegacySearchInventarioStickerProperties.Gcs("bucket", "INVENTARIO_STICKER", "back")
++        );
++        adapter = new StickerControllerHttpAdapter(new tools.jackson.databind.ObjectMapper(), properties);
++    }
++
++    @Test
++    void buildUri_incluyeDirYFile() {
++        URI uri = adapter.buildUri("10.22.14.2", Map.of("dir", "C:\\ADX_UDT1", "file", "20260703.191"));
++
++        assertThat(uri.toString()).startsWith("https://10.22.14.2:8033/api/v1/files?");
++        assertThat(uri.toString()).contains("file=20260703.191");
++        assertThat(uri.getScheme()).isEqualTo("https");
++    }
++
++    @Test
++    void buildRequest_incluyeHeaderAuthorizationBearer() {
++        HttpRequest request = adapter.buildRequest(URI.create("https://10.22.14.2:8033/api/v1/files"));
++
++        assertThat(request.headers().firstValue("Authorization"))
++                .contains("Bearer test-jwt-token");
++        assertThat(request.method()).isEqualTo("GET");
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/SearchInventarioStickerServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/SearchInventarioStickerServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/SearchInventarioStickerServiceTest.java
+@@ -0,0 +1,196 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.StickerErrorRecord;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.StickerControllerFilePort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.StickerErrorTrackerPort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.StickerInventoryPersistencePort;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.StickerInventoryStoragePort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.saadmin.entity.StoreEntity;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.LegacySearchInventarioStickerProperties;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.SearchInventarioStickerProperties;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.StoreRegistry;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++import org.springframework.core.task.SimpleAsyncTaskExecutor;
++
++import java.time.LocalDate;
++import java.util.List;
++import java.util.Optional;
++
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.ArgumentMatchers.anyInt;
++import static org.mockito.ArgumentMatchers.anyString;
++import static org.mockito.ArgumentMatchers.eq;
++import static org.mockito.Mockito.doThrow;
++import static org.mockito.Mockito.lenient;
++import static org.mockito.Mockito.mock;
++import static org.mockito.Mockito.never;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.verifyNoInteractions;
++import static org.mockito.Mockito.when;
++
++@ExtendWith(MockitoExtension.class)
++class SearchInventarioStickerServiceTest {
++
++    @Mock StickerControllerFilePort controllerPort;
++    @Mock StickerInventoryStoragePort storagePort;
++    @Mock StickerInventoryPersistencePort persistencePort;
++    @Mock StickerErrorTrackerPort errorTrackerPort;
++    @Mock StoreRegistry storeRegistry;
++
++    private static final int STORE = 191;
++    private static final String STORE_CODE = "191";
++    private static final byte[] FILE_CONTENT = "227934,003,08:32,1039".getBytes();
++
++    SearchInventarioStickerService service;
++
++    @BeforeEach
++    void setUp() {
++        StoreEntity store = mock(StoreEntity.class);
++        lenient().when(store.getDesClave()).thenReturn(STORE);
++        lenient().when(store.getIp()).thenReturn("10.1.1.1");
++
++        lenient().when(storeRegistry.isMultiLocalEnabled()).thenReturn(true);
++        lenient().when(storeRegistry.getActiveMultiLocalStores()).thenReturn(List.of(store));
++
++        service = buildService(true);
++    }
++
++    private SearchInventarioStickerService buildService(boolean enabled) {
++        return new SearchInventarioStickerService(
++                controllerPort, storagePort, persistencePort, errorTrackerPort,
++                new StickerInventoryParserService(),
++                storeRegistry,
++                new SearchInventarioStickerProperties(enabled),
++                legacyProperties(),
++                new SimpleAsyncTaskExecutor()
++        );
++    }
++
++    private LegacySearchInventarioStickerProperties legacyProperties() {
++        return new LegacySearchInventarioStickerProperties(
++                300_000L, "C:\\ADX_UDT1", 8033, "/api/v1/files", "test-jwt",
++                new LegacySearchInventarioStickerProperties.Gcs("bucket", "INVENTARIO_STICKER", "back")
++        );
++    }
++
++    @Test
++    void processAllPendingStores_deshabilitado_noConsultaNada() {
++        service = buildService(false);
++
++        service.processAllPendingStores();
++
++        verifyNoInteractions(storeRegistry, controllerPort, storagePort, persistencePort);
++    }
++
++    @Test
++    void processAllPendingStores_sinTiendasMultiLocal_noConsultaNada() {
++        when(storeRegistry.isMultiLocalEnabled()).thenReturn(false);
++
++        service.processAllPendingStores();
++
++        verifyNoInteractions(controllerPort, storagePort, persistencePort);
++    }
++
++    @Test
++    void processAllPendingStores_tiendaSinIp_omiteTienda() {
++        StoreEntity storeSinIp = mock(StoreEntity.class);
++        when(storeSinIp.getDesClave()).thenReturn(999);
++        when(storeSinIp.getIp()).thenReturn("");
++        when(storeRegistry.getActiveMultiLocalStores()).thenReturn(List.of(storeSinIp));
++
++        service.processAllPendingStores();
++
++        verifyNoInteractions(controllerPort, storagePort, persistencePort);
++    }
++
++    @Test
++    void processAllPendingStores_sinArchivoDisponible_noSubeNiPersiste() {
++        when(controllerPort.downloadFile(anyString(), anyString(), anyString())).thenReturn(Optional.empty());
++
++        service.processAllPendingStores();
++
++        verifyNoInteractions(storagePort, persistencePort);
++    }
++
++    @Test
++    void processAllPendingStores_archivoVacio_seEliminaDeGcs() {
++        when(controllerPort.downloadFile(anyString(), anyString(), anyString()))
++                .thenReturn(Optional.of("".getBytes()));
++
++        service.processAllPendingStores();
++
++        verify(storagePort).deleteFile(eq(STORE_CODE), anyString());
++        verify(storagePort, never()).moveToBackup(anyString(), anyString());
++        verifyNoInteractions(persistencePort);
++    }
++
++    @Test
++    void processAllPendingStores_happyPath_persisteYMueveABackup() {
++        when(controllerPort.downloadFile(anyString(), anyString(), anyString()))
++                .thenReturn(Optional.of(FILE_CONTENT));
++
++        service.processAllPendingStores();
++
++        verify(storagePort).uploadFile(eq(STORE_CODE), anyString(), eq(FILE_CONTENT));
++        verify(persistencePort).saveEntry(eq(227934), any(LocalDate.class), eq(1039));
++        verify(storagePort).moveToBackup(eq(STORE_CODE), anyString());
++        verifyNoInteractions(errorTrackerPort);
++    }
++
++    @Test
++    void processAllPendingStores_errorDescarga_registraErrorYNoContinua() {
++        when(controllerPort.downloadFile(anyString(), anyString(), anyString()))
++                .thenThrow(new IllegalStateException("controlador no disponible"));
++
++        service.processAllPendingStores();
++
++        verify(errorTrackerPort).recordError(any(StickerErrorRecord.class));
++        verifyNoInteractions(storagePort, persistencePort);
++    }
++
++    @Test
++    void processAllPendingStores_errorParseo_registraErrorYNoPersiste() {
++        when(controllerPort.downloadFile(anyString(), anyString(), anyString()))
++                .thenReturn(Optional.of("invalida".getBytes()));
++
++        service.processAllPendingStores();
++
++        verify(errorTrackerPort).recordError(any(StickerErrorRecord.class));
++        verifyNoInteractions(persistencePort);
++        verify(storagePort, never()).moveToBackup(anyString(), anyString());
++    }
++
++    @Test
++    void processAllPendingStores_errorPersistencia_registraErrorYNoMueveABackup() {
++        when(controllerPort.downloadFile(anyString(), anyString(), anyString()))
++                .thenReturn(Optional.of(FILE_CONTENT));
++        doThrow(new IllegalStateException("NO EXISTE CAMPAIGN"))
++                .when(persistencePort).saveEntry(anyInt(), any(LocalDate.class), anyInt());
++
++        service.processAllPendingStores();
++
++        verify(errorTrackerPort).recordError(any(StickerErrorRecord.class));
++        verify(storagePort, never()).moveToBackup(anyString(), anyString());
++    }
++
++    @Test
++    void processAllPendingStores_multiTienda_procesaIndependiente() {
++        StoreEntity store001 = mock(StoreEntity.class);
++        lenient().when(store001.getDesClave()).thenReturn(1);
++        lenient().when(store001.getIp()).thenReturn("10.1.1.1");
++        StoreEntity store002 = mock(StoreEntity.class);
++        lenient().when(store002.getDesClave()).thenReturn(2);
++        lenient().when(store002.getIp()).thenReturn("10.1.1.2");
++        when(storeRegistry.getActiveMultiLocalStores()).thenReturn(List.of(store001, store002));
++        when(controllerPort.downloadFile(anyString(), anyString(), anyString())).thenReturn(Optional.empty());
++
++        service.processAllPendingStores();
++
++        verify(controllerPort).downloadFile(eq("10.1.1.1"), anyString(), anyString());
++        verify(controllerPort).downloadFile(eq("10.1.1.2"), anyString(), anyString());
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/StickerInventoryParserServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/StickerInventoryParserServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/StickerInventoryParserServiceTest.java
+@@ -0,0 +1,80 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.StickerInventoryLine;
++import org.junit.jupiter.api.Test;
++
++import java.util.List;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertThrows;
++import static org.junit.jupiter.api.Assertions.assertTrue;
++
++class StickerInventoryParserServiceTest {
++
++    private final StickerInventoryParserService parser = new StickerInventoryParserService();
++
++    @Test
++    void parse_lineaValida_extraeCajeroYCantidad() {
++        List<StickerInventoryLine> result = parser.parse(List.of("227934,003,08:32,1039"));
++
++        assertEquals(1, result.size());
++        assertEquals(227934, result.get(0).cajero());
++        assertEquals(1039, result.get(0).cantidad());
++    }
++
++    @Test
++    void parse_multiplesLineas_preservaOrden() {
++        List<StickerInventoryLine> result = parser.parse(List.of(
++                "227934,003,08:32,1039",
++                "205921,008,08:37,0977",
++                "219213,012,08:37,1727"));
++
++        assertEquals(3, result.size());
++        assertEquals(227934, result.get(0).cajero());
++        assertEquals(205921, result.get(1).cajero());
++        assertEquals(219213, result.get(2).cajero());
++    }
++
++    @Test
++    void parse_lineaVacia_seOmite() {
++        List<StickerInventoryLine> result = parser.parse(List.of("227934,003,08:32,1039", "", "  "));
++
++        assertEquals(1, result.size());
++    }
++
++    @Test
++    void parse_sinLineas_retornaListaVacia() {
++        List<StickerInventoryLine> result = parser.parse(List.of());
++
++        assertTrue(result.isEmpty());
++    }
++
++    @Test
++    void parse_camposInsuficientes_lanzaExcepcion() {
++        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
++                () -> parser.parse(List.of("227934,003,08:32")));
++
++        assertTrue(ex.getMessage().contains("campos insuficientes"));
++    }
++
++    @Test
++    void parse_cajeroNoNumerico_lanzaExcepcion() {
++        assertThrows(IllegalArgumentException.class,
++                () -> parser.parse(List.of("ABC123,003,08:32,1039")));
++    }
++
++    @Test
++    void parse_cantidadNoNumerica_lanzaExcepcion() {
++        assertThrows(IllegalArgumentException.class,
++                () -> parser.parse(List.of("227934,003,08:32,ABC")));
++    }
++
++    @Test
++    void parse_unaLineaInvalidaAbortaArchivoCompleto() {
++        // Fidelidad legacy: una linea invalida hace fallar todo el archivo, no se procesan
++        // lineas parciales antes del error.
++        assertThrows(IllegalArgumentException.class, () -> parser.parse(List.of(
++                "227934,003,08:32,1039",
++                "invalida")));
++    }
++}
+
+

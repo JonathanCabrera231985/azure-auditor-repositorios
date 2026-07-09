@@ -1,0 +1,14 @@
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -6,6 +6,8 @@
+   labels:
+     app: cer-suite-local-core
+ data:
++  SPRING_PROFILES_ACTIVE: "dev"
++  SERVER_PORT: "8080"
+   # Identificación de Proyecto en Google Cloud Platform
+   GCP_PROJECT_ID: "modern-suite-cloud-per-b55b0"
+   
+
+

@@ -1,0 +1,60 @@
+--- Diff for /src/main/resources/application-dev.yml ---
+--- a//src/main/resources/application-dev.yml
++++ b//src/main/resources/application-dev.yml
+@@ -51,11 +51,12 @@
+ 
+ multi-sql:
+   datasources:
+-    - name: central
++    central:
+       url: ${SPRING_DATASOURCE_CENTRAL_URL}
+       username: ${SPRING_DATASOURCE_CENTRAL_USERNAME}
+       password: ${SPRING_DATASOURCE_CENTRAL_PASSWORD}
+-      entity-packages: com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.central
++      entity-packages:
++        - com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.central
+ 
+ app:
+   gcp:
+
+
+--- Diff for /src/main/resources/application-local.yml ---
+--- a//src/main/resources/application-local.yml
++++ b//src/main/resources/application-local.yml
+@@ -85,11 +85,12 @@
+ 
+ multi-sql:
+   datasources:
+-    - name: central
++    central:
+       url: jdbc:sqlserver://10.2.7.21:1433;databaseName=ARTS_EC;encrypt=false
+       username: alliances
+       password: ALLC_0180
+-      entity-packages: com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.central
++      entity-packages:
++        - com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.central
+ 
+ app:
+   gcp:
+
+
+--- Diff for /src/main/resources/application-prod.yml ---
+--- a//src/main/resources/application-prod.yml
++++ b//src/main/resources/application-prod.yml
+@@ -65,11 +65,12 @@
+ 
+ multi-sql:
+   datasources:
+-    - name: central
++    central:
+       url: ${SPRING_DATASOURCE_CENTRAL_URL}
+       username: ${SPRING_DATASOURCE_CENTRAL_USERNAME}
+       password: ${SPRING_DATASOURCE_CENTRAL_PASSWORD}
+-      entity-packages: com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.central
++      entity-packages:
++        - com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.central
+ 
+ app:
+   gcp:
+
+

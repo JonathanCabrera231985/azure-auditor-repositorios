@@ -1,0 +1,86 @@
+--- Diff for /src/main/resources/application-dev.yml ---
+--- a//src/main/resources/application-dev.yml
++++ b//src/main/resources/application-dev.yml
+@@ -14,8 +14,8 @@
+ 
+ logging:
+   level:
+-    root: INFO
+-    com.elrosado.cersuitecloudlocalcore: DEBUG
++    root: ${LOGGING_LEVEL_ROOT:INFO}
++    com.elrosado.cersuitecloudlocalcore: ${LOGGING_LEVEL_APPLICATION:INFO}
+     org.springframework: INFO
+     org.hibernate.SQL: WARN
+ 
+
+
+--- Diff for /src/main/resources/logback-spring.xml ---
+--- a//src/main/resources/logback-spring.xml
++++ b//src/main/resources/logback-spring.xml
+@@ -2,45 +2,31 @@
+ <configuration>
+     <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+ 
+-    <!-- Appender for Console (Local/Dev) -->
+-    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+-        <encoder>
+-            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+-        </encoder>
+-    </appender>
+-
+-    <!-- Appender for File (Local/Dev) -->
+-    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+-        <file>${LOG_PATH:-./logs}/app.log</file>
+-        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+-            <fileNamePattern>${LOG_PATH:-./logs}/app-%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+-            <maxFileSize>10MB</maxFileSize>
+-            <maxHistory>7</maxHistory>
+-            <totalSizeCap>100MB</totalSizeCap>
+-        </rollingPolicy>
+-        <encoder>
+-            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+-        </encoder>
+-    </appender>
+-
+-    <!-- Appender for GCP Cloud Logging (Prod) -->
+-    <appender name="CLOUD" class="com.google.cloud.logging.logback.LoggingAppender">
+-        <!-- Log structure will be auto-formatted to GCP Stackdriver Logging JSON format -->
+-        <log>application.log</log>
+-        <flushLevel>WARN</flushLevel>
+-    </appender>
+-
+-    <!-- Profile environments -->
+-    <springProfile name="local,dev">
++    <springProfile name="local">
++        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
++            <encoder>
++                <pattern>%d{HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n</pattern>
++            </encoder>
++        </appender>
+         <root level="INFO">
+             <appender-ref ref="CONSOLE"/>
+-            <appender-ref ref="FILE"/>
+         </root>
+     </springProfile>
+ 
+-    <springProfile name="prod">
++    <!--
++        Perfil dev/prod: Spring Boot 4 gestiona el formato de consola via
++        logging.structured.format.console (application-dev/prod.yml).
++        No se declara appender aquÃ­ para no sobreescribir esa configuraciÃ³n.
++    -->
++    <springProfile name="dev,prod">
++        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
++            <encoder>
++                <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg %kvp%n</pattern>
++            </encoder>
++        </appender>
+         <root level="INFO">
+-            <appender-ref ref="CLOUD"/>
++            <appender-ref ref="CONSOLE"/>
+         </root>
+     </springProfile>
++
+ </configuration>
+
+

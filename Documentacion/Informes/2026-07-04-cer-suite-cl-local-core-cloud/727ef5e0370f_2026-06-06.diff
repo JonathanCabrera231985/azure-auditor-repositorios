@@ -1,0 +1,12 @@
+--- Diff for /k8s/deployment.yaml ---
+--- a//k8s/deployment.yaml
++++ b//k8s/deployment.yaml
+@@ -98,3 +98,7 @@
+             initialDelaySeconds: 60
+             periodSeconds: 30
+             failureThreshold: 5
++      volumes:
++        - name: gcp-credentials
++          secret:
++            secretName: gcp-credentials
+

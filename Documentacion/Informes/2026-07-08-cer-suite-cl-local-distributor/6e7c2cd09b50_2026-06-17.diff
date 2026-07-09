@@ -1,0 +1,493 @@
+--- Diff for /.gitignore ---
+--- a//.gitignore
++++ b//.gitignore
+@@ -33,3 +33,4 @@
+ ### VS Code ###
+ .vscode/
+ .claude/
++logs/
+
+
+--- Diff for /CLAUDE.md ---
+--- a//CLAUDE.md
++++ b//CLAUDE.md
+@@ -8,7 +8,7 @@
+ 
+ **distributor-cloud** es el distribuidor de transacciones POS del stack CER Suite Cloud. Recibe notificaciones Pub/Sub con IDs de documentos Firestore, lee el XML del TLOG desde el campo `xmlGenerated` del documento, lo parsea y persiste el grafo completo de transacción en las bases de datos SQL Server del sistema ARTS/IXRetail extendido con lógica propia de CER.
+ 
+-El servicio reemplaza al antiguo `cer-local-serv-distributor-db` (Java 8 / Hibernate XML / multi-thread manual), migrando a Java 25, Spring Boot 4.0.6 y JPA con JPQL.
++El servicio reemplaza al antiguo `cer-local-serv-distributor-db` (Java 8 / Hibernate XML / multi-thread manual), migrando a Java 25, Spring Boot 4.0.6 y JPA con JPQL. en la ruta `C:\GIT\CER\cer-local-serv-distributor-db`
+ 
+ **No** genera archivos de conciliación (Datafast, Medianet, Banco Pacífico, etc.) ni expone endpoints REST. **No accede al sistema de archivos** del pod — toda la entrada viene de Pub/Sub + Firestore.
+ 
+
+
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -1,4 +1,4 @@
+-apiVersion:v1
++apiVersion: v1
+ kind: ConfigMap
+ metadata:
+   name: modern-gcp-microservice-config
+
+
+--- Diff for /pom.xml ---
+--- a//pom.xml
++++ b//pom.xml
+@@ -17,6 +17,7 @@
+ 
+     <properties>
+         <java.version>25</java.version>
++        <spring-cloud-gcp.version>8.0.2</spring-cloud-gcp.version>
+     </properties>
+ 
+     <repositories>
+@@ -26,11 +27,35 @@
+         </repository>
+     </repositories>
+ 
++    <dependencyManagement>
++        <dependencies>
++            <dependency>
++                <groupId>com.google.cloud</groupId>
++                <artifactId>spring-cloud-gcp-dependencies</artifactId>
++                <version>${spring-cloud-gcp.version}</version>
++                <type>pom</type>
++                <scope>import</scope>
++            </dependency>
++        </dependencies>
++    </dependencyManagement>
++
+     <dependencies>
+         <!-- Web/Core -->
+         <dependency>
+             <groupId>org.springframework.boot</groupId>
+             <artifactId>spring-boot-starter</artifactId>
++        </dependency>
++
++        <!-- Tomcat para el management server del Actuator (probes de GKE). El main web server
++             no arranca: web-application-type=none en application.yaml -->
++        <dependency>
++            <groupId>org.springframework.boot</groupId>
++            <artifactId>spring-boot-starter-web</artifactId>
++        </dependency>
++
++        <dependency>
++            <groupId>org.springframework.boot</groupId>
++            <artifactId>spring-boot-starter-actuator</artifactId>
+         </dependency>
+ 
+         <!-- JPA -->
+@@ -53,12 +78,6 @@
+             <optional>true</optional>
+         </dependency>
+ 
+-        <!-- Actuator (health probes para K8s) -->
+-        <dependency>
+-            <groupId>org.springframework.boot</groupId>
+-            <artifactId>spring-boot-starter-actuator</artifactId>
+-        </dependency>
+-
+         <!-- Jackson XML (parser de TLOGs) -->
+         <dependency>
+             <groupId>com.fasterxml.jackson.dataformat</groupId>
+@@ -77,6 +96,12 @@
+             <artifactId>spring-boot-starter-validation</artifactId>
+         </dependency>
+ 
++        <!-- Formato estructurado `gcp` para Cloud Logging -->
++        <dependency>
++            <groupId>com.google.cloud</groupId>
++            <artifactId>spring-cloud-gcp-starter-logging</artifactId>
++        </dependency>
++
+         <!-- Firestore (CER Suite Cloud) -->
+         <dependency>
+             <groupId>com.elrosado</groupId>
+@@ -103,6 +128,18 @@
+             <groupId>com.elrosado</groupId>
+             <artifactId>jlib-multisql</artifactId>
+             <version>1.0.2</version>
++        </dependency>
++
++        <dependency>
++            <groupId>com.elrosado</groupId>
++            <artifactId>jlib-secretmanager</artifactId>
++            <version>1.0.3</version>
++            <exclusions>
++                <exclusion>
++                    <groupId>com.elrosado</groupId>
++                    <artifactId>jlib-kms</artifactId>
++                </exclusion>
++            </exclusions>
+         </dependency>
+ 
+         <!-- Tests -->
+
+
+--- Diff for /src/main/java/com/elrosado/distributor_cloud/infrastructure/config/SecretManagerDatasourceEnvironmentPostProcessor.java ---
+--- a//src/main/java/com/elrosado/distributor_cloud/infrastructure/config/SecretManagerDatasourceEnvironmentPostProcessor.java
++++ b//src/main/java/com/elrosado/distributor_cloud/infrastructure/config/SecretManagerDatasourceEnvironmentPostProcessor.java
+@@ -0,0 +1,209 @@
++package com.elrosado.distributor_cloud.infrastructure.config;
++
++import com.elrosado.jlib_secretmanager.services.SecretManagerService;
++import com.google.api.gax.core.CredentialsProvider;
++import com.google.api.gax.core.FixedCredentialsProvider;
++import com.google.auth.oauth2.GoogleCredentials;
++import com.google.cloud.secretmanager.v1.SecretManagerServiceClient;
++import com.google.cloud.secretmanager.v1.SecretManagerServiceSettings;
++import lombok.Data;
++import org.apache.commons.logging.Log;
++import org.springframework.boot.EnvironmentPostProcessor;
++import org.springframework.boot.SpringApplication;
++import org.springframework.boot.context.config.ConfigDataEnvironmentPostProcessor;
++import org.springframework.boot.context.properties.bind.Bindable;
++import org.springframework.boot.context.properties.bind.Binder;
++import org.springframework.boot.logging.DeferredLogFactory;
++import org.springframework.core.Ordered;
++import org.springframework.core.env.ConfigurableEnvironment;
++import org.springframework.core.env.MapPropertySource;
++import org.springframework.core.io.DefaultResourceLoader;
++import org.springframework.core.io.Resource;
++import org.springframework.util.StringUtils;
++
++import java.io.InputStream;
++import java.util.LinkedHashMap;
++import java.util.Map;
++
++/**
++ * Resuelve las credenciales de SQL Server desde GCP Secret Manager y las inyecta en el
++ * {@code Environment} como {@code multi-sql.datasources.*} antes de que
++ * {@code MultiSqlBeanRegistrar} construya los {@code DataSource}.
++ *
++ * <p><b>Por quÃ© un {@link EnvironmentPostProcessor} y no el bean {@code ISecretManager}:</b>
++ * {@code MultiSqlBeanRegistrar} es un {@code ImportBeanDefinitionRegistrar} que enlaza
++ * {@code multi-sql.datasources} con {@code Binder} en tiempo de registro de bean definitions,
++ * mucho antes de que exista el contexto Spring (y por tanto el bean {@code ISecretManager}).
++ * El Ãºnico punto donde se puede alimentar a {@code jlib-multisql} es el {@code Environment},
++ * asÃ­ que aquÃ­ se construye el cliente de Secret Manager a mano âcon las credenciales del
++ * entornoâ y se reutiliza la lÃ³gica de {@link SecretManagerService} de {@code jlib-secretmanager}.
++ *
++ * <p>Se activa solo cuando {@code distributor.secret-manager.enabled=true} (dev/prod). En local
++ * y en tests el flag estÃ¡ en {@code false} y este post-procesador no hace nada: las credenciales
++ * se siguen tomando de las variables de entorno / valores literales del YAML.
++ *
++ * <p>Como {@code jlib-kms} estÃ¡ excluido del classpath, los secretos se leen siempre con
++ * {@code encrypted=false} (texto plano) para evitar el aviso de KMS no disponible.
++ */
++public class SecretManagerDatasourceEnvironmentPostProcessor
++        implements EnvironmentPostProcessor, Ordered {
++
++    /** Nombre de la fuente de propiedades que se inyecta con prioridad sobre el YAML. */
++    private static final String PROPERTY_SOURCE_NAME = "secretManagerDatasourceCredentials";
++
++    private final Log log;
++
++    /**
++     * Spring Boot instancia los {@code EnvironmentPostProcessor} con una {@link DeferredLogFactory},
++     * ya que el sistema de logging todavÃ­a no estÃ¡ listo en esta fase del arranque.
++     */
++    public SecretManagerDatasourceEnvironmentPostProcessor(DeferredLogFactory logFactory) {
++        this.log = logFactory.getLog(getClass());
++    }
++
++    // Se ejecuta despuÃ©s de que ConfigData (application*.yaml) ya estÃ© cargado, de modo que
++    // spring.cloud.gcp.project-id y el flag de activaciÃ³n estÃ©n disponibles.
++    @Override
++    public int getOrder() {
++        return ConfigDataEnvironmentPostProcessor.ORDER + 100;
++    }
++
++    @Override
++    public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
++        Settings settings = Binder.get(environment)
++                .bind("distributor.secret-manager", Bindable.of(Settings.class))
++                .orElseGet(Settings::new);
++
++        if (!settings.isEnabled()) {
++            log.debug("Secret Manager deshabilitado (distributor.secret-manager.enabled=false); "
++                    + "se usan las credenciales del Environment");
++            return;
++        }
++
++        String projectId = environment.getProperty("spring.cloud.gcp.project-id");
++        if (!StringUtils.hasText(projectId)) {
++            throw new IllegalStateException(
++                    "distributor.secret-manager.enabled=true pero spring.cloud.gcp.project-id no estÃ¡ definido");
++        }
++
++        try (SecretManagerServiceClient client = buildClient(environment)) {
++            // Reutiliza la lÃ³gica de jlib-secretmanager (sin KMS â wrapper null).
++            SecretManagerService secretManager = new SecretManagerService(projectId, client, null);
++
++            String username = require(secretManager, settings.getDbUsernameSecret(),
++                    "distributor.secret-manager.db-username-secret");
++            String password = require(secretManager, settings.getDbPasswordSecret(),
++                    "distributor.secret-manager.db-password-secret");
++            String artsUrl = require(secretManager, settings.getArtsUrlSecret(),
++                    "distributor.secret-manager.arts-url-secret");
++            String saadminUrl = require(secretManager, settings.getSaadminUrlSecret(),
++                    "distributor.secret-manager.saadmin-url-secret");
++            String eyesUrl = require(secretManager, settings.getEyesUrlSecret(),
++                    "distributor.secret-manager.eyes-url-secret");
++            String devsUrl = require(secretManager, settings.getDevsUrlSecret(),
++                    "distributor.secret-manager.devs-url-secret");
++            String userCentral = require(secretManager, settings.getDbCentralUsernameSecret(),
++                    "distributor.secret-manager.db-central-username-secret");
++            String passCentral = require(secretManager, settings.getDbCentralPasswordSecret(),
++                    "distributor.secret-manager.db-central-password-secret");
++            String artsCentralUrl = require(secretManager, settings.getArtsCentralUrlSecret(),
++                    "distributor.secret-manager.arts-central-url-secret");
++
++            Map<String, Object> props = new LinkedHashMap<>();
++            props.put("multi-sql.datasources.arts-ec.url", artsUrl);
++            props.put("multi-sql.datasources.arts-ec.username", username);
++            props.put("multi-sql.datasources.arts-ec.password", password);
++            props.put("multi-sql.datasources.saadmin.url", saadminUrl);
++            props.put("multi-sql.datasources.saadmin.username", username);
++            props.put("multi-sql.datasources.saadmin.password", password);
++            props.put("multi-sql.datasources.eyes-ec.url", eyesUrl);
++            props.put("multi-sql.datasources.eyes-ec.username", username);
++            props.put("multi-sql.datasources.eyes-ec.password", password);
++            props.put("multi-sql.datasources.devs-ec.url", devsUrl);
++            props.put("multi-sql.datasources.devs-ec.username", username);
++            props.put("multi-sql.datasources.devs-ec.password", password);
++            props.put("multi-sql.datasources.arts-ec-central.url", artsCentralUrl);
++            props.put("multi-sql.datasources.arts-ec-central.username", userCentral);
++            props.put("multi-sql.datasources.arts-ec-central.password", passCentral);
++
++            // addFirst: gana sobre el YAML (que define los mismos keys con ${ENV_VAR}).
++            environment.getPropertySources().addFirst(new MapPropertySource(PROPERTY_SOURCE_NAME, props));
++
++            log.info("Credenciales de SQL Server cargadas desde GCP Secret Manager (proyecto " + projectId + ")");
++        } catch (Exception ex) {
++            // Falla rÃ¡pido: sin credenciales vÃ¡lidas el servicio no puede operar.
++            throw new IllegalStateException(
++                    "No se pudieron resolver las credenciales de BD desde GCP Secret Manager", ex);
++        }
++    }
++
++    /**
++     * Construye el cliente de Secret Manager con las credenciales del entorno:
++     * en local, el archivo de {@code spring.cloud.gcp.credentials.location};
++     * en GKE, Application Default Credentials (GOOGLE_APPLICATION_CREDENTIALS / Workload Identity).
++     */
++    private SecretManagerServiceClient buildClient(ConfigurableEnvironment environment) throws Exception {
++        String location = environment.getProperty("spring.cloud.gcp.credentials.location");
++        GoogleCredentials credentials;
++        if (StringUtils.hasText(location)) {
++            Resource resource = new DefaultResourceLoader().getResource(location);
++            try (InputStream in = resource.getInputStream()) {
++                credentials = GoogleCredentials.fromStream(in);
++            }
++        } else {
++            credentials = GoogleCredentials.getApplicationDefault();
++        }
++
++        CredentialsProvider credentialsProvider = FixedCredentialsProvider.create(credentials);
++        SecretManagerServiceSettings clientSettings = SecretManagerServiceSettings.newBuilder()
++                .setCredentialsProvider(credentialsProvider)
++                .build();
++        return SecretManagerServiceClient.create(clientSettings);
++    }
++
++    /**
++     * Lee un secreto en texto plano (sin KMS). Valida que el ID estÃ© configurado (los IDs viven en
++     * {@code application.yaml}, no quemados en cÃ³digo) y que el valor no venga vacÃ­o.
++     */
++    private String require(SecretManagerService secretManager, String secretId, String property) {
++        if (!StringUtils.hasText(secretId)) {
++            throw new IllegalStateException(
++                    "Falta el ID de secreto en la propiedad '" + property + "' (requerido con Secret Manager activo)");
++        }
++        String value = secretManager.getSecret(secretId, "latest", false);
++        if (!StringUtils.hasText(value)) {
++            throw new IllegalStateException("El secreto '" + secretId + "' no existe o vino vacÃ­o");
++        }
++        return value;
++    }
++
++    /**
++     * ConfiguraciÃ³n del bloque {@code distributor.secret-manager}. Los IDs de secreto se definen
++     * en {@code application.yaml} (no se queman aquÃ­); este post-procesador valida que estÃ©n presentes
++     * cuando {@code enabled=true}.
++     */
++    @Data
++    public static class Settings {
++        /** Activa la resoluciÃ³n de credenciales de BD desde Secret Manager. */
++        private boolean enabled = false;
++        /** ID del secreto con el usuario de SQL Server (compartido local). */
++        private String dbUsernameSecret;
++        /** ID del secreto con la contraseÃ±a de SQL Server (compartida local). */
++        private String dbPasswordSecret;
++        /** ID del secreto con la URL JDBC del datasource arts-ec. */
++        private String artsUrlSecret;
++        /** ID del secreto con la URL JDBC del datasource saadmin. */
++        private String saadminUrlSecret;
++        /** ID del secreto con la URL JDBC del datasource eyes. */
++        private String eyesUrlSecret;
++        /** ID del secreto con la URL JDBC del datasource devs. */
++        private String devsUrlSecret;
++
++        /** ID del secreto con el usuario de SQL Server Central. */
++        private String dbCentralUsernameSecret;
++        /** ID del secreto con la contraseÃ±a de SQL Server Central. */
++        private String dbCentralPasswordSecret;
++        /** ID del secreto con la URL JDBC del datasource arts-ec Central. */
++        private String artsCentralUrlSecret;
++    }
++}
+
+
+--- Diff for /src/main/resources/META-INF/spring.factories ---
+--- a//src/main/resources/META-INF/spring.factories
++++ b//src/main/resources/META-INF/spring.factories
+@@ -0,0 +1,4 @@
++# EnvironmentPostProcessor que resuelve las credenciales de SQL Server desde GCP Secret Manager
++# y las inyecta en multi-sql.datasources.* antes de que jlib-multisql construya los DataSource.
++org.springframework.boot.EnvironmentPostProcessor=\
++com.elrosado.distributor_cloud.infrastructure.config.SecretManagerDatasourceEnvironmentPostProcessor
+
+
+--- Diff for /src/main/resources/application-local.yaml ---
+--- a//src/main/resources/application-local.yaml
++++ b//src/main/resources/application-local.yaml
+@@ -4,6 +4,13 @@
+       project-id: ${GOOGLE_CLOUD_PROJECT:modern-suite-cloud-per-b55b0}
+       credentials:
+         location: file:${GOOGLE_APPLICATION_CREDENTIALS:}
++
++# Credenciales de BD desde GCP Secret Manager (jlib-secretmanager).
++# url/username/password de multi-sql.datasources.* se resuelven en SecretManagerDatasourceEnvironmentPostProcessor
++# y sobrescriben los valores de abajo. Los IDs de secreto usan los defaults del post-procesador.
++distributor:
++  secret-manager:
++    enabled: true
+ 
+ multi-sql:
+   datasources:
+
+
+--- Diff for /src/main/resources/application.yaml ---
+--- a//src/main/resources/application.yaml
++++ b//src/main/resources/application.yaml
+@@ -22,3 +22,23 @@
+ 
+ pubsub-logging:
+   body-mdc-key: documentId
++
++pubsub:
++  subscriptions:
++    - topic-id: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR:retail.local.distributor.request.v1}
++      subscription-id: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR_SUB:retail.local.distributor.request.v1-sub}
++    - topic-id: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR_PROCESSED:retail.local.distributor.processed.v1}
++      subscription-id: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR_PROCESSED_SUB:retail.local.distributor.processed.v1-sub}
++
++distributor:
++  secret-manager:
++    enabled: false
++    db-username-secret: suite-cloud-local-db-user
++    db-password-secret: suite-cloud-local-db-pass
++    arts-url-secret: suite-cloud-local-db-arts-url
++    saadmin-url-secret: suite-cloud-local-db-saadmin-url
++    eyes-url-secret: suite-cloud-local-db-eyes-url
++    devs-url-secret: suite-cloud-local-db-devs-url
++    db-central-username-secret: suite-cloud-local-db-user
++    db-central-password-secret: suite-cloud-local-db-pass
++    arts-central-url-secret: suite-cloud-local-db-arts-url
+
+--- Diff for /src/main/resources/logback-spring.xml ---
+--- a//src/main/resources/logback-spring.xml
++++ b//src/main/resources/logback-spring.xml
+@@ -0,0 +1,86 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!--
++  ConfiguraciÃ³n de logging del servicio TCP cer-suite-local-generador.
++
++  Estrategia por perfil:
++    - local, dev, default (todo lo que NO sea qa/prod): consola legible y coloreada
++      + archivo rotativo en disco (cÃ³modo para desarrollo). Ambos incluyen los
++      key-value pairs (%kvp) emitidos por la API fluida de SLF4J.
++    - qa y prod: JSON estructurado a stdout para Google Cloud Logging (formato
++      `gcp`), de modo que addKeyValue(...) y el MDC se conviertan en campos
++      estructurados. QA es un ambiente GCP de validaciÃ³n previo a producciÃ³n, por
++      eso loguea igual que prod. No se escribe a disco: en GKE el agente de Cloud
++      Logging recoge stdout.
++
++  Notas:
++    - Los niveles por logger NO se fijan aquÃ­: se gestionan con `logging.level.*`
++      en application*.yaml (Spring los aplica sobre esta configuraciÃ³n).
++    - El formato estructurado `gcp` lo provee la dependencia
++      `spring-cloud-gcp-starter-logging`. Si no estÃ¡ en el classpath, el arranque
++      con el perfil `prod` fallarÃ¡ con "Unknown structured logging format 'gcp'".
++-->
++<configuration>
++
++    <!-- Reglas de conversiÃ³n (%clr, %wEx, ...) y propiedades base de Spring Boot -->
++    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
++
++    <!-- PatrÃ³n coloreado para consola. Replica el de application.yaml aÃ±adiendo
++         color; %kvp imprime los pares clave-valor de los logs de negocio. -->
++    <property name="READABLE_LOG_PATTERN"
++              value="%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %clr([%thread]){faint} %clr(%-5level) %clr(%logger{36}){cyan} %clr(-){faint} %msg %clr(%kvp){faint}%n"/>
++
++    <!-- PatrÃ³n plano (sin cÃ³digos ANSI de color) para el archivo en disco. -->
++    <property name="FILE_LOG_PATTERN_PLAIN"
++              value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg %kvp%n"/>
++
++    <!-- Directorio de logs en desarrollo (sobreescribible con la variable LOG_PATH). -->
++    <property name="LOG_PATH" value="${LOG_PATH:-./logs}"/>
++
++    <!-- ===================== DESARROLLO (ni qa ni prod) ===================== -->
++    <springProfile name="!qa &amp; !prod">
++        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
++            <encoder>
++                <pattern>${READABLE_LOG_PATTERN}</pattern>
++                <charset>UTF-8</charset>
++            </encoder>
++        </appender>
++
++        <!-- Archivo rotativo por tamaÃ±o y fecha: 10MB por archivo, 7 dÃ­as de
++             histÃ³rico, tope total de 100MB. Solo para desarrollo local. -->
++        <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
++            <file>${LOG_PATH}/app.log</file>
++            <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
++                <fileNamePattern>${LOG_PATH}/app-%d{yyyy-MM-dd}.%i.log</fileNamePattern>
++                <maxFileSize>10MB</maxFileSize>
++                <maxHistory>7</maxHistory>
++                <totalSizeCap>100MB</totalSizeCap>
++            </rollingPolicy>
++            <encoder>
++                <pattern>${FILE_LOG_PATTERN_PLAIN}</pattern>
++                <charset>UTF-8</charset>
++            </encoder>
++        </appender>
++
++        <root level="INFO">
++            <appender-ref ref="CONSOLE"/>
++            <appender-ref ref="FILE"/>
++        </root>
++    </springProfile>
++
++    <!-- ============================= QA / PRODUCCIÃN ============================= -->
++    <springProfile name="qa | prod">
++        <appender name="CONSOLE_JSON" class="ch.qos.logback.core.ConsoleAppender">
++            <encoder class="org.springframework.boot.logging.logback.StructuredLogEncoder">
++                <!-- El formato lo controla `logging.structured.format.console` en
++                     application-prod.yaml; por defecto `gcp` para Cloud Logging. -->
++                <format>${CONSOLE_LOG_STRUCTURED_FORMAT:-gcp}</format>
++                <charset>UTF-8</charset>
++            </encoder>
++        </appender>
++
++        <root level="INFO">
++            <appender-ref ref="CONSOLE_JSON"/>
++        </root>
++    </springProfile>
++
++</configuration>
+
+
