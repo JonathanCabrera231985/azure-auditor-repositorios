@@ -49,7 +49,7 @@ def analyze_commit(commit_message, code_diff, task_description=""):
         Example: "Insignificant/Cosmetic: The changes only involve re-indenting code and adding comments."
         """
 
-        model = genai.GenerativeModel('models/gemini-3-pro-preview')
+        model = genai.GenerativeModel('models/gemini-1.5-pro')
         response = model.generate_content(prompt)
         
         analysis = response.text.strip()
@@ -67,15 +67,6 @@ def generate_consolidated_report(commits_data, prompt_template_path, branch_name
     and returns the generated report in markdown.
     Checks first if a manual template file exists at Documentacion/Informe_Analisis_DIFFs_Template.md.
     """
-    manual_template = os.path.join("Documentacion", "Informe_Analisis_DIFFs_Template.md")
-    if os.path.exists(manual_template):
-        logging.info(f"Loading manual analysis template from {manual_template}...")
-        try:
-            with open(manual_template, "r", encoding="utf-8") as f:
-                return f.read()
-        except Exception as e:
-            logging.error(f"Error reading manual template: {e}")
-
     if not commits_data:
         logging.warning("No commit data provided for consolidated report.")
         return "No commits found to audit."
@@ -142,7 +133,7 @@ Repository/Branch: {branch_name}
         logging.info("Sending consolidated diff data to Gemini for analysis...")
         genai.configure(api_key=config.LLM_API_KEY)
         
-        model = genai.GenerativeModel('models/gemini-3-pro-preview')
+        model = genai.GenerativeModel('models/gemini-1.5-pro')
         response = model.generate_content(full_prompt)
         
         analysis = response.text.strip()

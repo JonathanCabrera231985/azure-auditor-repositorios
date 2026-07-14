@@ -125,6 +125,23 @@ def full_process(args):
 
     if not commits:
         logging.warning("No commits found in the specified period to analyze.")
+        
+        # Generar un reporte indicando que no hay commits
+        current_date_str = datetime.now().strftime("%Y-%m-%d")
+        folder_name = f"{current_date_str}-{config.AZURE_DEVOPS_REPOSITORY_NAME}"
+        informes_dir = os.path.join("Documentacion", "Informes", folder_name)
+        os.makedirs(informes_dir, exist_ok=True)
+        
+        report = f"# Reporte de Auditoría de Commits\n\nNo se encontraron commits en el período especificado (últimos {config.DAYS_TO_EXTRACT} días) para el repositorio `{config.AZURE_DEVOPS_REPOSITORY_NAME}`.\n"
+        
+        md_filepath = os.path.join(informes_dir, f"Informe_Analisis_DIFFs_{current_date_str}.md")
+        with open(md_filepath, "w", encoding="utf-8") as f:
+            f.write(report)
+            
+        word_filepath = os.path.join(informes_dir, f"Informe_Analisis_DIFFs_{current_date_str}.docx")
+        convert_markdown_to_docx(report, word_filepath)
+        
+        logging.info("Generated empty report due to no commits.")
         return
 
     analyses = []

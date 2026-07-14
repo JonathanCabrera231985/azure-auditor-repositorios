@@ -1,0 +1,62 @@
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/FrameProtocol.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/FrameProtocol.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/FrameProtocol.java
+@@ -46,6 +46,22 @@
+     }
+ 
+     /**
++     * Extrae el cuerpo de la trama (todo lo que sigue al header de 6 segmentos, {@code parts[6..]}).
++     * Reune los segmentos restantes con el separador para preservar el contenido completo aunque el
++     * cuerpo contuviera el separador â equivalente al {@code getBody().get(0)} legacy cuando el cuerpo
++     * es un Ãºnico segmento (p. ej. el XML {@code <Operator>} de la operaciÃ³n 7).
++     */
++    public static String body(String rawPayload) {
++        String[] parts = split(rawPayload);
++        if (parts.length <= BODY_START_INDEX) {
++            throw new IllegalArgumentException("Trama sin cuerpo (se esperan al menos "
++                    + (BODY_START_INDEX + 1) + " segmentos separados por '|')");
++        }
++        return String.join(SEPARATOR,
++                java.util.Arrays.copyOfRange(parts, BODY_START_INDEX, parts.length));
++    }
++
++    /**
+      * Arma la respuesta framada: {@code <longitud N dÃ­gitos>S'|'<tipo>'|'<c2>'|'<tienda>'|'<c4>'|'<ts><suffix>}.
+      *
+      * @param parts        segmentos del payload de entrada ya divididos ({@link #split})
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateService.java
+@@ -74,7 +74,10 @@
+                     .addKeyValue("transactionId", transactionId)
+                     .log();
+ 
+-            String xml = firestorePort.readPayload(transactionId);
++            String rawPayload = firestorePort.readPayload(transactionId);
++            // El payload de Firestore es la trama completa (header '|' + cuerpo); el XML <Operator> es el
++            // cuerpo (segmento 6). Igual que el legacy getBody().get(0) y el resto de operaciones del carril.
++            String xml = FrameProtocol.body(rawPayload);
+             Operator operator = parser.parse(xml);
+             MDC.put("storeCode", String.valueOf(operator.codTienda()));
+ 
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateServiceTest.java
+@@ -64,7 +64,10 @@
+                     .append("<bitPos>").append(activeBits[i]).append("</bitPos>")
+                     .append(indicat).append("</indicatOPC></Authorization>");
+         }
+-        return "<Operator>"
++        // El payload real de Firestore es la trama completa: header separado por '|' + cuerpo XML
++        // (segmento 6). Igual que lo escribe el Generador para la operaciÃ³n 7.
++        return "060583S'|'7'|'000'|'0'|'0'|'20260713102556'|'"
++                + "<Operator>"
+                 + "<nameAce>ALEX FAJARDO FAJARD</nameAce>"
+                 + "<OperatorBirthDate class=\"sql-timestamp\">2004-01-14 05:00:00</OperatorBirthDate>"
+                 + "<Status>" + status + "</Status>"
+
+
