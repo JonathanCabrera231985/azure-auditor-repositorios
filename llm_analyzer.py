@@ -49,7 +49,7 @@ def analyze_commit(commit_message, code_diff, task_description=""):
         Example: "Insignificant/Cosmetic: The changes only involve re-indenting code and adding comments."
         """
 
-        model = genai.GenerativeModel('models/gemini-1.5-pro')
+        model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content(prompt)
         
         analysis = response.text.strip()
@@ -133,7 +133,7 @@ Repository/Branch: {branch_name}
         logging.info("Sending consolidated diff data to Gemini for analysis...")
         genai.configure(api_key=config.LLM_API_KEY)
         
-        model = genai.GenerativeModel('models/gemini-1.5-pro')
+        model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content(full_prompt)
         
         analysis = response.text.strip()
