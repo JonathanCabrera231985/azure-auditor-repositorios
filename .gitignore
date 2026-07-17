@@ -36,6 +36,7 @@ MANIFEST
 
 # Reports
 *.html
+!templates/*.html
 report.md
 diff_reports/
 audit.log
