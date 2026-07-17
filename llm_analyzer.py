@@ -112,7 +112,7 @@ def generate_consolidated_report(commits_data, prompt_template_path, branch_name
             else:
                 work_items_str = "No associated work items."
                 
-            diff_content = commit.get("diff_content", "No changes / empty diff.")
+            analysis_text = commit.get("analysis", "No se generó análisis individual.")
 
             part = f"""--- COMMIT {index} ---
 Commit ID: {commit_id}
@@ -122,10 +122,8 @@ Commit Message: {message}
 Associated Work Items:
 {work_items_str}
 
-Diff changes:
-```diff
-{diff_content}
-```
+Resultado Análisis Individual:
+{analysis_text}
 """
             input_data_parts.append(part)
 
@@ -234,17 +232,35 @@ def generate_consolidated_report_with_ollama(commits_data, prompt_template_path,
     # Format the inputs for the model
     all_commits_input = ""
     for idx, item in enumerate(commits_data, 1):
-        commit_info = item.get("commit", {})
+        commit_id = item.get("commit_id", "N/A")
+        author = item.get("author", "Desconocido")
+        date = item.get("date", "Desconocida")
+        message = item.get("message", "Sin mensaje")
         analysis_text = item.get("analysis", "No se generó análisis.")
         
+        # Format work items details
+        work_items = item.get("work_items", [])
+        work_items_str_list = []
+        if work_items:
+            for wi in work_items:
+                fields = wi.get('fields', {})
+                wi_id = wi.get('id', 'N/A')
+                wi_title = fields.get('System.Title', 'No title')
+                wi_type = fields.get('System.WorkItemType', 'Unknown type')
+                work_items_str_list.append(f"- Work Item {wi_id} ({wi_type}): {wi_title}")
+            work_items_str = "\n".join(work_items_str_list)
+        else:
+            work_items_str = "No associated work items."
+            
         all_commits_input += f"""
 ---
 COMMIT #{idx}
-Autor: {commit_info.get('author', {}).get('name', 'Desconocido')}
-Fecha: {commit_info.get('author', {}).get('date', 'Desconocida')}
-Mensaje: {commit_info.get('comment', 'Sin mensaje')}
-Código de diferencias (Diff):
-{item.get('diff', 'No disponible')}
+Commit ID: {commit_id}
+Técnico Responsable: {author}
+Fecha del Cambio: {date}
+Mensaje: {message}
+Associated Work Items:
+{work_items_str}
 
 Resultado Análisis Individual:
 {analysis_text}

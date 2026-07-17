@@ -187,6 +187,18 @@ def full_process(args):
             "task_description": task_description
         })
         
+        # Save analysis to JSON metadata file on disk
+        meta_filepath = diff_file_path.replace(".diff", ".json")
+        if os.path.exists(meta_filepath):
+            try:
+                with open(meta_filepath, "r", encoding="utf-8") as f:
+                    meta_data = json.load(f)
+                meta_data["analysis"] = analysis
+                with open(meta_filepath, "w", encoding="utf-8") as f:
+                    json.dump(meta_data, f, indent=4)
+            except Exception as e:
+                logging.error(f"Error saving analysis to metadata JSON: {e}")
+        
         logging.info(f"Result: {analysis}")
 
     logging.info("\n--- Audit Complete ---")
@@ -284,7 +296,8 @@ def process_and_archive_reports():
                 "date": metadata.get("date", "N/A"),
                 "message": metadata.get("message", "N/A"),
                 "work_items": metadata.get("work_items", []),
-                "diff_content": diff_content
+                "diff_content": diff_content,
+                "analysis": metadata.get("analysis", "No se generó análisis individual.")
             })
             
             processed_files.append(diff_filepath)
