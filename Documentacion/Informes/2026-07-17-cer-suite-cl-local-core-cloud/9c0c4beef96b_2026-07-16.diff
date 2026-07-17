@@ -1,0 +1,1557 @@
+--- Diff for /.operations/ANALISIS_ConsultaCedPadRucOperation_MIGRACION.md ---
+--- a//.operations/ANALISIS_ConsultaCedPadRucOperation_MIGRACION.md
++++ b//.operations/ANALISIS_ConsultaCedPadRucOperation_MIGRACION.md
+@@ -0,0 +1,257 @@
++# Análisis de Migración — `ConsultaCedPadRucOperation` (op. 13)
++
++- **Clase legacy:** `com.allc.arms.server.operations.cer.cedpadruc.ConsultaCedPadRucOperation`
++  (idéntica en `cer-local-serv-arms-server` y `cer-central-serv-arms-server`).
++- **DAO legacy:** `com.allc.arms.server.persistence.cedpadruc.CedPadRucDAO` (Hibernate, sesión `"Arts"`).
++- **Mapeo legacy:** `mapeo/sqlserver/mappingCedPadRuc.hbm.xml`.
++- **Carril:** `consultas` / `sync: false` (**request-reply**) — ya confirmado en `seed-operation-types.js`
++  línea 24: `{ code: "13", description: "ConsultaCedPadRucOperation", routeKey: "consultas", sync: false }`.
++- **Datasource:** `arts-ec` (default) — sesión legacy `"Arts"`.
++- **Estado:** IMPLEMENTADO Y VALIDADO (2026-07-15) — tipos 1/2/4. Paridad byte a byte confirmada
++  contra una trama real de producción tipo 1 (§10). Pendiente (opcional): tramas reales de tipo 2 y 4.
++- **Regla clave:** sin SP ni Hibernate mapping — la lógica del DAO se reproduce en JPA (Spring Data).
++
++## Decisiones tomadas (usuario, 2026-07-15)
++
++- **Log de auditoría** (§7): se reemplaza por **logging estructurado** (no se replica a GCS).
++- **Tipo 3** (padrón/registro electoral, vista `CO_REL_CER` → catálogo `VotacionCNE`): **se elimina**,
++  no se usa en producción. No se cablea acceso a `VotacionCNE`. Una trama tipo 3 (o cualquier tipo no
++  soportado) responde `"1"` (no encontrado) con un WARN. Solo se implementan tipos **1/2** (`CO_CPR_CER`)
++  y **4** (`CO_EXT_CER`).
++
++> Repos legacy en esta máquina: `C:\GIT\CER\cer-local-serv-arms-server` (servicio),
++> `C:\GIT\CER\cer-local-db\ARTS_EC` (DDL). El path `D:\SIPECOM\...` de CLAUDE.md no existe aquí.
++
++---
++
++## §0 — Requisitos PENDIENTES (necesito de tu parte)
++
++1. **Tramas reales tipo 13 + sus respuestas** (para fixtures de paridad byte a byte, como se hizo con
++   op. 71). Idealmente un caso por cada `tipo` y por cada resultado:
++   - `tipo=1` o `tipo=2` (cédula / RUC) → encontrado **y** no encontrado.
++   - `tipo=3` (padrón / registro electoral) → encontrado.
++   - `tipo=4` (extranjero) → encontrado.
++   Sin ellas puedo implementar contra el comportamiento legacy, pero no validar paridad exacta.
++2. **Decisión sobre el log de auditoría `eyes.ups.file.name`** (§7): ¿replicar las líneas `CONS_CPR_O`
++   al archivo GCS `eyes-server`, o reemplazarlas por logging estructurado? Recomiendo logging
++   estructurado (§7).
++3. **Acceso al catálogo `VotacionCNE`** desde el datasource `arts-ec` en cloud, para `tipo=3` (§4, §9).
++
++**Gate DDL: SATISFECHO** — DDL exacto de `CO_CPR_CER`, `CO_EXT_CER` y la vista `CO_REL_CER` obtenido de
++`cer-local-db\ARTS_EC` (§4).
++
++---
++
++## §1 — Comportamiento legacy (`process`)
++
++Entrada (`frame.getBody()`):
++- `body[0]` = `tipo` (`"1"`, `"2"`, `"3"`, `"4"`).
++- `body[1]` = `clave` (código a consultar: cédula/RUC/pasaporte).
++
++Despacho por `tipo`:
++
++| `tipo` | Fuente | Respuesta (tras el código `"0"`, separador `'\|'`) |
++|:---:|---|---|
++| `1` / `2` | `getCedRucByCode(clave)` → `CedRuc` | `0` · `codigo` · `nombre` · `direccion` · `telefono` · `genero` |
++| `4` | `getExtranjeroById(clave)` → `Extranjero` | `0` · `codigo` · `nombre` · `direccion` · `telefono` |
++| `3` | `getCedRucByCode(clave)` → `CedRuc` + `registroElec` | `0` · `codigo` · `nombre` · `mesa` · `telefono` · `provincia` · `canton` · `circunscripcion` · `parroquia` · `zona` · `recinto` · `junta` · `funcion` · `genero` |
++
++Reglas:
++- Todos los campos de texto pasan por `Util.validaNotNull(...)` (null → `""`).
++- Si `tipo`/`clave` faltan, o no se encontró registro → `message = "1"` (no encontrado); nunca es error.
++- **Excepción** (fallo BD, etc.) → se registra en log/auditoría; **no** se escribe respuesta (el legacy
++  no responde nada; en cloud el Generador responde `-1` por timeout, ver §6).
++- Respuesta final: `frame.getHeaderStr() + "'\|'" + message`, framada con prefijo de longitud de
++  `serverSocket.quantityBytesLength = 6` dígitos (`Util.addLengthStartOfString`).
++
++`getCedRucByCode` / `getExtranjeroById` consultan por la columna `CD_CPR` (= "codigo"), no por el PK
++`ID_CPR`. (El nombre del método `...ById` es engañoso: el HQL filtra `where codigo = :clave`.)
++
++---
++
++## §2 — Mapeo legacy → datasource/tabla
++
++Sesión Hibernate `"Arts"` = datasource **ARTS_EC** (default cloud `arts-ec`).
++
++| Entidad legacy | Tabla/Vista (ARTS_EC) | Uso en op. 13 |
++|---|---|---|
++| `CedRuc` | `CO_CPR_CER` (tabla) | tipos 1/2/3 |
++| `Extranjero` | `CO_EXT_CER` (tabla) | tipo 4 |
++| `CedRegElec` | `CO_REL_CER` (**vista** sobre `VotacionCNE.dbo.CO_REL_CER`) | tipo 3 |
++| `Padron` | `CO_PAD_CER` (tabla) | **no usado** por la consulta |
++
++---
++
++## §3 — Estas tablas YA están modeladas en cloud (write-only)
++
++El proceso `UpdateCedPadRucService` (op. batch ya migrada) creó entidades JPA para estas tablas, pero
++son **write-only**: constructor privado, `fromDomain(...)`, **sin getters** y con **subconjunto** de
++columnas. No sirven tal cual para la consulta:
++
++| Entidad cloud existente | Tabla | Columnas mapeadas hoy | Falta para la consulta |
++|---|---|---|---|
++| `CedRucUpdateEntity` | `CO_CPR_CER` | `ID_CPR`, `CD_CPR`, `TY_CPR`, `RG_INT`, `NOMBRE`, `GENERO` | **`DIRECCION`, `TELEFONO`** + getters |
++| `ForeignerReplicationEntity` | `CO_EXT_CER` | `CD_CPR`(@Id), `NOMBRE`, `DIRECCION`, `TELEFONO`, `CORREO`, `NACIONALIDAD` | getters (columnas OK) |
++| `CedRegElecUpdateEntity` | `CO_REL_CER` (catalog `VotacionCNE`) | todas las de la vista | getters (columnas OK) |
++
++**Decisión de diseño (recomendada): entidades de lectura dedicadas.** No tocar las entidades de
++escritura (evita mezclar responsabilidades read/write y no arriesga el flujo de `UpdateCedPadRucService`).
++Crear entidades JPA de solo-lectura que mapeen exactamente las columnas que la consulta necesita —mismo
++patrón que la migración de op. 71, que creó entidades nuevas (`WorkstationEntity`, `TrTrnEntity`) en vez
++de reutilizar. JPA admite dos `@Entity` distintas sobre la misma tabla. (Alternativa: extender las
++entidades de escritura con getters + columnas faltantes; se descarta por acoplamiento.)
++
++---
++
++## §4 — DDL exacto (Gate DDL satisfecho)
++
++**`ARTS_EC.dbo.CO_CPR_CER`** (tabla):
++```
++ID_CPR    bigint       NOT NULL   (PK)
++CD_CPR    varchar(20)  NULL       (índice CO_CPR_CER_CD_IDX; = "codigo")
++TY_CPR    varchar(1)   NULL
++RG_INT    int          NOT NULL   DEFAULT 0
++NOMBRE    varchar(250) NULL
++DIRECCION varchar(250) NULL
++COD_CIUDAD int         NULL
++TELEFONO  varchar(20)  NULL
++CORREO    varchar(250) NULL
++COD_REGION int         NULL       DEFAULT 0
++GENERO    varchar(10)  NULL
++EST_REPLICADO char(1)  NULL
++```
++
++**`ARTS_EC.dbo.CO_EXT_CER`** (tabla):
++```
++ID_CPR   int IDENTITY(1,1) NOT NULL  (PK)
++CD_CPR   varchar(50)  NULL           (= "codigo")
++NOMBRE   varchar(250) NULL
++DIRECCION varchar(250) NULL
++TELEFONO varchar(20)  NULL
++CORREO   varchar(250) NULL
++NACIONALIDAD varchar(50) NULL
++EST_REPLICADO char(1)  NULL
++```
++
++**`ARTS_EC.dbo.CO_REL_CER`** (**vista**):
++```sql
++CREATE VIEW [dbo].[CO_REL_CER] AS
++  SELECT ID_CPR, PROVINCIA, CANTON, PARROQUIA, ZONA, RECINTO, MESA, JUNTA,
++         CIRCUNSCRIPCION, FUNCION, GENERO
++  FROM [VotacionCNE].[dbo].[CO_REL_CER]
++```
++> La vista vive en ARTS_EC pero lee de otro catálogo (`VotacionCNE`). La entidad de escritura existente
++> apunta directo al catálogo `VotacionCNE`; para lectura se puede reutilizar ese mapeo o apuntar a la
++> vista `dbo.CO_REL_CER` del propio ARTS_EC. **Confirmar acceso de lectura cross-catálogo** (§9).
++
++> `CD_CPR` es **NULL-able y no único** en ambas tablas; el legacy toma el primer resultado (`iterate()`
++> + `hasNext()`). La consulta cloud debe usar `TOP 1` / `Optional` con el primer match (misma semántica).
++
++---
++
++## §5 — Relación `CedRuc` ⋈ `CedRegElec` (tipo 3)
++
++Legacy: `one-to-one` por `ID_CPR` compartido (`CedRuc.registroElec`). Cloud: **dos lookups explícitos**
++en el adapter (más simple que un `@OneToOne` sobre una vista cross-catálogo):
++1. `findCedRucByCode(clave)` → obtiene la fila y su `ID_CPR`.
++2. `findRegElecById(idCpr)` → obtiene los campos del registro electoral.
++
++Si `CedRuc` existe pero no hay `CedRegElec`, los campos electorales quedan `""` (vía `validaNotNull`);
++mantener esa tolerancia.
++
++---
++
++## §6 — Trama de entrada / respuesta (carril consultas)
++
++**Entrada** (`frames/{id}.payload`, separador `'\|'`):
++- `header[1]` = `"13"` (frameType, ya en `operation-types`).
++- `header[3]` = tienda.
++- `body[0]` (= `parts[6]`) = `tipo`; `body[1]` (= `parts[7]`) = `clave`.
++
++**Salida** (`frameResponse`, armada en Local Core con `FrameProtocol.buildFramedResponse`):
++```
++message = "0" + '\|' + <campos...>   (encontrado)   |   "1"   (no encontrado)
++suffix  = FrameProtocol.SEPARATOR + message
++frameResponse = FrameProtocol.buildFramedResponse(parts, suffix, lengthPrefixDigits=6)
++```
++`buildFramedResponse` antepone el prefijo de 6 dígitos y ecoa `S'\|'header1..5` (convenio del Generador,
++idéntico a op. 24 / op. 71). El `Thread.sleep(3000)` legacy **no** se replica.
++
++---
++
++## §7 — Log de auditoría `eyes.ups.file.name` (decisión pendiente)
++
++El legacy escribe líneas `CONS_CPR_O|host|3|ip|store|<STR|END|WAR|ERR>|<ts>|<mensaje>` al archivo de
++monitoreo UPS (`eyes.ups.file.name` → GCS `gs://gcs-cer-suite-core-files/eyes-server`, ya en
++`GCS_ROUTES_INVENTORY.md`). Estados: `STR` (inicio), `END` (encontrado/no encontrado), `WAR`
++(requerimiento inválido / no se pudo responder), `ERR` (excepción).
++
++**Recomendación:** reemplazar por **logging estructurado** (`log.atInfo/atWarn/atError` con
++`addKeyValue`), consistente con la estrategia cloud (Cloud Logging) y con lo hecho en op. 24 / op. 71
++—ninguna replicó su traza operativa a GCS. Escribir a un archivo GCS compartido por cada consulta añade
++I/O y contención sin valor claro en cloud. **Confirmar** antes de implementar (§0.2).
++
++---
++
++## §8 — Diseño cloud propuesto
++
++Patrón: **un bean `RequestReplyOperation`** más en el registry de `QueryLaneRequestReplyAdapter` (igual
++que `LoadParamsFrameOperation` / `LastInvoiceFrameOperation`). No toca YAML de suscripciones.
++
++| Componente | Rol |
++|---|---|
++| `CedPadRucQueryFrameOperation implements RequestReplyOperation` | `frameType()="13"`; parsea `body[0]`/`body[1]`, invoca el caso de uso, arma `frameResponse` (`0`/`1`). |
++| `CedPadRucQueryUseCase` (port in) + `CedPadRucQueryService` | Despacha por `tipo`; orquesta lookups; aplica `validaNotNull`. |
++| `CedPadRucQueryRepositoryPort` (port out) + `DbCedPadRucQueryAdapter` (`arts-ec`) | Resuelve `CedRuc` por `CD_CPR`, `Extranjero` por `CD_CPR`, `CedRegElec` por `ID_CPR`. |
++| Entidades de lectura nuevas: `CedRucQueryEntity` (CO_CPR_CER), `ForeignerQueryEntity` (CO_EXT_CER), `CedRegElecQueryEntity` (CO_REL_CER) | Solo-lectura, columnas exactas del §4. |
++| Repos JPA nuevos (`...db.repository`) | `findFirstByCode(...)` (TOP 1 / `Optional`). |
++| Modelos de dominio (records): `CedRucQuery`, `ForeignerQuery`, `ElectoralRecordQuery` | Inmutables. |
++
++Identificadores en **inglés**; comentarios/logs en **español**. `frameType`/códigos se leen de
++`operation-types` (ya cargado); no se queman.
++
++Equivalente `validaNotNull`: helper local `nullToEmpty(String)` (no depender de la util legacy).
++
++---
++
++## §9 — Riesgos / decisiones abiertas
++
++1. **Tramas reales de paridad** — §0.1 (bloqueante para validación byte a byte, no para implementar).
++2. **Log de auditoría** — §0.2 / §7 (recomendado: logging estructurado).
++3. **Acceso cross-catálogo `VotacionCNE`** (tipo 3) — §0.3. La vista `CO_REL_CER` de ARTS_EC lee de
++   `VotacionCNE.dbo.CO_REL_CER`; confirmar que el usuario del datasource `arts-ec` en cloud puede leerla.
++   Si `tipo=3` no ocurre en producción, este acceso podría no ser necesario (confirmar con el usuario).
++4. **`CD_CPR` no único / null-able** — usar `TOP 1` (`findFirst...`) para replicar el `iterate().next()`
++   legacy; no asumir unicidad.
++5. **Entidad de lectura vs. extender la de escritura** — §3; recomendado entidades de lectura dedicadas.
++6. **`Thread.sleep(3000)` legacy** — no se replica.
++
++---
++
++## §10 — Implementación (2026-07-15)
++
++Bean `RequestReplyOperation` nuevo (auto-registrado en `QueryLaneRequestReplyAdapter`; no toca YAML).
++Tipos 1/2/4; tipo 3 eliminado.
++
++| Archivo | Rol |
++|---|---|
++| `service/CedPadRucQueryFrameOperation` | `RequestReplyOperation`, `frameType()="13"`; despacha por `tipo`, formatea (`0`/`1`), `nullToEmpty`. |
++| `service/CedPadRucQueryService` | `CedPadRucQueryUseCase`; delega al puerto de salida. |
++| `domain/port/in/CedPadRucQueryUseCase` | Puerto de entrada (`findCedRuc`, `findForeigner`). |
++| `domain/port/out/CedPadRucQueryRepositoryPort` | Puerto ARTS_EC. |
++| `domain/model/CedRucIdentity`, `ForeignerIdentity` | Records inmutables de resultado. |
++| `.../db/DbCedPadRucQueryAdapter` | Adapter ARTS_EC (mapea entidad → record). |
++| `.../db/entity/CedRucQueryEntity` (CO_CPR_CER), `ForeignerQueryEntity` (CO_EXT_CER) | Entidades de lectura dedicadas. |
++| `.../db/repository/CedRucQueryJpaRepository`, `ForeignerQueryJpaRepository` | `findFirstByCode` (TOP 1). |
++
++**Tests:** `CedPadRucQueryFrameOperationTest` (10) + `CedPadRucQueryServiceTest` (3) — 13/13 verdes.
++
++**Fixture de paridad real** (usuario, 2026-07-15) — tipo 1, cédula encontrada, byte a byte:
++
++| Trama entrada | Respuesta |
++|---|---|
++| `000057S'\|'13'\|'000'\|'0100'\|'0'\|'20250701111018'\|'1'\|'0951178102` | `000121S'\|'13'\|'000'\|'0100'\|'0'\|'20250701111018'\|'0'\|'0951178102'\|'ALEX JOEL FAJARDO DEL PEZO'\|'MAPASINGUE ESTE'\|'0960530656'\|'M` |
++
++**Pendiente (opcional):** tramas reales de tipo 2 (RUC) y tipo 4 (extranjero) para fijar también esas
++variantes; el formato ya está cubierto por tests sintéticos.
++```
+
+
+--- Diff for /.operations/ANALISIS_OperatorUpdateOperation_MIGRACION.md ---
+--- a//.operations/ANALISIS_OperatorUpdateOperation_MIGRACION.md
++++ b//.operations/ANALISIS_OperatorUpdateOperation_MIGRACION.md
+@@ -349,3 +349,42 @@
+ (borrar+insertar el set entrante, que Central envía completo). El **merge posicional** exacto de
+ `updateOperator` (§7.4) queda pendiente del fuente legacy de esa clase del ArmsServerLocal
+ (`com.allc.arms.server.operations.operator.OperatorUpdateOperation`).
++
++---
++
++## Fix de concurrencia — filas duplicadas por `CC_OPERADOR` (2026-07-15)
++
++**Síntoma reportado:** dos filas en `OP_OPERADOR` con el mismo `CC_OPERADOR` (mismo operador,
++distinto `ID_OPERADOR`; una en `STR_ESTADO=3` y otra en `1`), tras llegar la misma trama dos veces.
++
++**Causa raíz — regresión del modelo async, no presente en el legacy:**
++- **Legacy:** las tramas de Central se procesaban **secuencialmente** sobre la misma conexión TCP
++  (además del `Thread.sleep(3000)` final). La 2ª trama del mismo operador veía la fila ya commiteada por
++  la 1ª (`getOperatorsByIdentityDocument → get(0)`) y la **actualizaba** → una sola fila.
++- **Cloud:** `SalesLaneRequestAdapter` despacha cada trama en un **virtual thread** independiente. Dos
++  tramas del mismo operador corren `findFirstByCcOperador → insert` **en paralelo**; ambas no encuentran
++  fila y ambas insertan. Lo habilitan tres cosas: (1) concurrencia, (2) entrega at-least-once de Pub/Sub
++  y/o Central publicando dos veces, (3) **`OP_OPERADOR` no tiene índice único sobre `CC_OPERADOR`**
++  (DDL confirmado: la única restricción única es sobre `ID_OPERADOR`).
++
++**Fix aplicado — lock distribuido por `CC_OPERADOR`:**
++- `OperatorUpdateLock` (service) serializa la sección crítica del upsert por cédula usando la primitiva
++  de lock distribuido en Redis. `OperatorUpdateService` envuelve **solo** `repositoryPort.saveInProcess(...)`
++  (no el push por socket) → lock corto, sin I/O de red bajo el lock. La 2ª trama espera, ve la fila de la
++  1ª y la actualiza → una sola fila (reproduce la serialización del legacy).
++- Ante contención sostenida (timeout de espera) se lanza `OperatorUpdateException` → el carril ventas hace
++  **NACK** → Pub/Sub reentrega cuando el dueño ya liberó. Válvula de seguridad; también cubre si el dueño
++  muere (el lock expira por TTL).
++- **Puerto:** se generalizó `SyncLeaderLockPort` → ahora extiende un `DistributedLockPort` genérico
++  (misma primitiva `SET NX PX` de `RedisSyncLeaderLockAdapter`). El flujo de parámetros no cambia; el lock
++  de operador inyecta `DistributedLockPort`.
++- **Doble push al agente** ante un duplicado: inocuo (idempotente) y también ocurría en el legacy (una
++  trama = un push), por eso el lock no lo abarca.
++
++**Tests:** `OperatorUpdateLockTest` (4: concede/ejecuta+libera, libera ante fallo, timeout→excepción,
++espera+adquiere). `OperatorUpdateServiceTest` actualizado al nuevo constructor. Suite completa 542 verdes.
++
++**Defensa en profundidad (opcional, requiere aprobación + limpieza de duplicados):** índice único
++filtrado sobre `CC_OPERADOR` (`WHERE CC_OPERADOR IS NOT NULL`, es nullable) + captura de
++`DataIntegrityViolationException` re-intentando como update. No implementado (cambio de DDL sobre tabla
++legacy).
+
+
+--- Diff for /.operations/ESTADO_MIGRACION_OPERATIONS.md ---
+--- a//.operations/ESTADO_MIGRACION_OPERATIONS.md
++++ b//.operations/ESTADO_MIGRACION_OPERATIONS.md
+@@ -15,7 +15,7 @@
+ | 7  | `operator.OperatorUpdateOperation` | ventas (sync) | ✅ | `OperatorUpdateLaneOperation` → `OperatorUpdateService` (parse XML `<Operator>` DOM + upsert OPERAC_EC con máquina de estados + push TCP al ArmsAgent, puerto 2040). Ver `.operations/ANALISIS_OperatorUpdateOperation_MIGRACION.md` |
+ | 10 | `tsl.TSLReaderOperation` | ventas (sync) | ✅ | `SaleLaneOperation` → `ProcessSaleService` |
+ | 11 | `el.ELReaderOperation` | ventas (sync) | ✅ | `ElLaneOperation` → `ElReaderService` |
+-| 13 | `cer.cedpadruc.ConsultaCedPadRucOperation` | consultas | ⏳ | |
++| 13 | `cer.cedpadruc.ConsultaCedPadRucOperation` | consultas | ✅ | `CedPadRucQueryFrameOperation` → `CedPadRucQueryService` (consulta identidad tipos 1/2 en `CO_CPR_CER` y tipo 4 en `CO_EXT_CER`, ARTS_EC; **tipo 3 eliminado** — no se usa en prod). Ver `.operations/ANALISIS_ConsultaCedPadRucOperation_MIGRACION.md` |
+ | 14 | `cer.retencion.ConsultaRetencionOperation` | consultas | ⏳ | |
+ | 15 | `cer.itemUpdate.UpdateItemOperation` | ventas (sync) | ⏳ | |
+ | 16 | `cer.suspTrans.GenerateSuspTransOperation` | ventas (sync) | ⏳ | |
+@@ -51,7 +51,7 @@
+ | 68 | `cer.FlejPanaderia.ImpresionPandPos` | ventas (sync) | ⏳ | |
+ | 71 | `cer.factura.FacturaOperation` | consultas | ✅ | `LastInvoiceFrameOperation` → `LastInvoiceService` |
+ 
+-**Resumen:** 38 operations habilitadas · 5 migradas (10, 11, 24, 67, 71) · 33 pendientes.
++**Resumen:** 38 operations habilitadas · 6 migradas (10, 11, 13, 24, 67, 71) · 32 pendientes.
+ 
+ > Al migrar una operation nueva: agregar su bean (`SalesLaneOperation` para carril ventas /
+ > `RequestReplyOperation` para carril consultas), confirmar su documento en `operation-types` y
+
+
+--- Diff for /CLAUDE.md ---
+--- a//CLAUDE.md
++++ b//CLAUDE.md
+@@ -384,7 +384,17 @@
+ 5. Genera el documento XML de la transacción en memoria.
+ 6. Persiste el XML en Firestore junto al registro de la trama.
+ 7. Actualiza el estado de la transacción en Firestore a `XML_GENERATED`.
+-8. Publica un evento Pub/Sub notificando a Distributor Cloud que el XML está disponible.
++8. Publica hacia Distributor Cloud por **dos** tópicos (ambos disparan flujos que leen el XML desde
++   Firestore, sin dependencia entre sí — ver `PubSubDistributorPublisher`):
++   - `retail.local.distributor.request.v1` (`topic-distributor`) — evento JSON `XML_GENERATED` que
++     dispara el guardado TLOG en BD Multi-Local.
++   - `retail.local.distributor.processed.v1` (`topic-distributor-processed`) — `transactionId` en crudo
++     que dispara la **replicación a BD Central**. Antes lo publicaba el propio Distributor tras guardar
++     (publicaba y leía su misma cola); ahora lo publica este servicio y el Distributor solo la consume.
++     Efecto: la replicación central y el guardado local corren en paralelo (antes eran secuenciales); no
++     hay dependencia de datos. Para evitar carrera de estados en Firestore, el flujo TLOG local escribe el
++     campo `status` (`SAVED`/`DUPLICATED`/`ERROR`) y la replicación central escribe su propio campo
++     `replicationStatus` (`PROCESSED_CENTRAL`) — un solo escritor por campo.
+ 
+ ### Operaciones request-reply migradas (Pub/Sub, carril `consultas`)
+ 
+@@ -399,6 +409,7 @@
+ | Operación (clase) | Op. legacy | Qué hace |
+ |-------------------|-----------|----------|
+ | `LoadParamsFrameOperation` → `LoadParamsService` | `LoadParamsOperation` (op. 24) | Consulta parámetros de tienda por ámbito en SAADMIN (`PM_PARVAL`/`PM_PARAM`), arma la trama `<header>'\|'<ámbito>('\|'<clave>=<valor>)*` y la escribe en `frameResponse`. Ver `.operations/ANALISIS_LoadParamsOperation_MIGRACION.md`. |
++| `CedPadRucQueryFrameOperation` → `CedPadRucQueryService` | `ConsultaCedPadRucOperation` (op. 13) | Consulta identidad por `tipo`+`clave` (body[0]/body[1]) en ARTS_EC: tipos 1/2 (cédula/RUC) en `CO_CPR_CER`, tipo 4 (extranjero) en `CO_EXT_CER`, por `CD_CPR`. Respuesta `<header>'\|'0'\|'<campos>` (encontrado) o `<header>'\|'1` (no encontrado). **Tipo 3** (padrón/registro electoral, catálogo `VotacionCNE`) **eliminado** — no se usa en prod: responde `1`. Auditoría legacy → logging estructurado. Ver `.operations/ANALISIS_ConsultaCedPadRucOperation_MIGRACION.md`. |
+ | `LastInvoiceFrameOperation` → `LastInvoiceService` | `FacturaOperation` (op. 71) | Devuelve el último secuencial de factura de un terminal. Migra el SP `SP_CONSULTA_ULTIMA_FACTURA` a Java (sin SP): resuelve unidad de negocio (PA_STR_RTL) y terminal (AS_WS), obtiene `COD_SRI` (SAADMIN.MN_TIENDA) y busca el `SUBSTRING(INVC_NMB,7,9)` más alto en TR_TRN⋈TR_INVC (ventana 90 días + fallback). Responde `<header>'\|'<invcNum>'\|'<0/-1>`. Ver `.operations/ANALISIS_FacturaOperation_MIGRACION.md`. |
+ 
+ Agregar una operación request-reply nueva = un bean `RequestReplyOperation` con su `frameType()`; no toca YAML de suscripciones.
+@@ -411,7 +422,7 @@
+ |-------------------|-----------|----------|
+ | `ElLaneOperation` → `ElReaderService` | `ELReaderOperation` (op. 11) | Procesa una trama **EL** del controlador (movimiento de control de caja: préstamo/retiro/transferencia/carry-forward). Parsea (`ElFrameParserService`) → arma `ElTransaction` (control) → genera XML de control (`ElXmlGeneratorService`, replica `XStreamConfig2` para `TenderControlTransaction`/`ControlTransaction`) → guarda `xmlGenerated` en Firestore → publica a Distributor (igual que venta tipo 10). Sin archivos. Ver `.operations/ANALISIS_ELReaderOperation_MIGRACION.md`. |
+ | `OperatorTimingLaneOperation` → `OperatorTimingService` | `OperatorPerformanceOperation` (op. 67) | Registra tiempos de atención del operador por factura. Parsea (`OperatorTimingFrameParser`) → **dedupe por `NUMERO_FACTURA`** e insert local en `TR_TM_TRN` (ARTS_EC, sin SP; reproduce `SP_TR_TM_TRN`) → genera XML `TM-*.xml` (`OperatorTimingXmlGenerator`, `<Transaction type="OperatorPerformance">`) → lo sube a **GCS** `ARTS/TSLRECORDS/OUT`. **No** publica a Distributor ni escribe Firestore. Desde GCS, **Transaction Cloud (TC-06)** lo comprime (ZIP + `files.json`) y lo envía a la Central (`/transactions/compress`). Ver `.operations/ANALISIS_OperatorPerformanceOperation_MIGRACION.md`. |
+-| `OperatorUpdateLaneOperation` → `OperatorUpdateService` | `OperatorUpdateOperation` (op. 7) | Actualiza un operador (cajero/supervisor) que envía **ArmsServer Central**. Parsea el XML `<Operator>` (`OperatorXmlParser`, DOM) → upsert en **OPERAC_EC** con máquina de estados `OP_OPERADOR.STR_ESTADO` (PROCESAR→EN_PROCESO→PROCESADO; `DbOperatorAdapter`) → arma el `OperatorWrapper` (bitmap de indicats + niveles + password aleatorio) → lo **empuja por socket TCP al ArmsAgent** de la tienda actual y —si aplica— la anterior (`OperatorDealerSocketClient`, puerto 2040). **No** publica a Distributor ni escribe estado en Firestore (Firestore solo aporta el payload). Permisos `OP_OPERAMDA`/`OP_OPERANVA` por estrategia *replace* (merge posicional legacy pendiente). Ver `.operations/ANALISIS_OperatorUpdateOperation_MIGRACION.md`. |
++| `OperatorUpdateLaneOperation` → `OperatorUpdateService` | `OperatorUpdateOperation` (op. 7) | Actualiza un operador (cajero/supervisor) que envía **ArmsServer Central**. Parsea el XML `<Operator>` (`OperatorXmlParser`, DOM) → upsert en **OPERAC_EC** con máquina de estados `OP_OPERADOR.STR_ESTADO` (PROCESAR→EN_PROCESO→PROCESADO; `DbOperatorAdapter`) → arma el `OperatorWrapper` (bitmap de indicats + niveles + password aleatorio) → lo **empuja por socket TCP al ArmsAgent** de la tienda actual y —si aplica— la anterior (`OperatorDealerSocketClient`, puerto 2040). **No** publica a Distributor ni escribe estado en Firestore (Firestore solo aporta el payload). Permisos `OP_OPERAMDA`/`OP_OPERANVA` por estrategia *replace* (merge posicional legacy pendiente). El upsert se **serializa por `CC_OPERADOR`** con un lock distribuido (`OperatorUpdateLock` sobre `DistributedLockPort`) para que tramas concurrentes del mismo operador (duplicado de Central / reentrega Pub/Sub) no inserten filas duplicadas — `OP_OPERADOR` no tiene índice único sobre `CC_OPERADOR`; reproduce la serialización del legacy. Ver `.operations/ANALISIS_OperatorUpdateOperation_MIGRACION.md`. |
+ 
+ Agregar una operación de ventas nueva = un bean `SalesLaneOperation` con su `frameType()`; no toca YAML.
+ 
+@@ -468,7 +479,7 @@
+ | `SyncParametersService` | Por cada ámbito configurado (`app.parameters.scopes`), trae el snapshot completo de BD Central (datasource `central-saadmin`) en una sola consulta y aplica el algoritmo de mayoría: valor global (`DES_CLAVE NULL`) si cubre más de la mitad de las tiendas activas con datos para esa clave, excepciones por tienda para el resto. Modo `dry-run` (`app.parameters.dry-run`, default `true`) solo loggea la clasificación sin escribir. |
+ | `MultiLocalParameterRepositoryAdapter` | Reconcilia las filas decididas en `saadmin.PM_PARAM`/`PM_PARVAL` — upsert de fila global/excepciones y borrado de excepciones obsoletas. |
+ | `RedisParameterProviderAdapter` / `ParameterCachePort` | Cache de lectura runtime (`params:{scope}:{key}` global, `params:{scope}:{store}:{key}` excepción), sin TTL — persiste hasta el próximo sync exitoso. |
+-| `LeaderLockedParameterSync` / `SyncLeaderLockPort` | Lock distribuido efímero en Redis para que solo una réplica del pod ejecute el sync a la vez — evita que las hasta 100 réplicas del HPA repitan el mismo trabajo contra BD Central. Compartido por `ParameterSyncStartupRunner` (arranque) y `ParameterSyncController` (manual). |
++| `LeaderLockedParameterSync` / `SyncLeaderLockPort` | Lock distribuido efímero en Redis para que solo una réplica del pod ejecute el sync a la vez — evita que las hasta 100 réplicas del HPA repitan el mismo trabajo contra BD Central. Compartido por `ParameterSyncStartupRunner` (arranque) y `ParameterSyncController` (manual). `SyncLeaderLockPort` es una especialización de `DistributedLockPort` (primitiva `SET NX PX` de `RedisSyncLeaderLockAdapter`), reutilizada también por `OperatorUpdateLock` (ver abajo). |
+ | `ParameterSyncStartupRunner` | `ApplicationRunner` — dispara el sync una vez al arranque, en un virtual thread, sin bloquear el `Ready` del pod. |
+ | `ParameterSyncController` | `POST /api/v1/parameters/sync` — único `@RestController` de este servicio (excepción documentada, ver sección "Patrones del template NO usados"). |
+ 
+
+
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -15,6 +15,7 @@
+   GCP_PUBSUB_SUB_VENTAS: "retail.local.ventas.request.v1-sub"
+   GCP_PUBSUB_TOPIC_VENTAS: "retail.local.ventas.request.v1"
+   GCP_PUBSUB_TOPIC_DISTRIBUTOR: "retail.local.distributor.request.v1"
++  GCP_PUBSUB_TOPIC_DISTRIBUTOR_PROCESSED: "retail.local.distributor.processed.v1"
+   GCP_PUBSUB_TOPIC_SYNCHRO_CONTROLLER: "retail.local.synchro.controller.v1"
+   GCP_PUBSUB_SUB_SYSCARD_FRAME: "retail.local.syscard.frame.request.v1-sub"
+   GCP_PUBSUB_TOPIC_SYSCARD_FRAME: "retail.local.syscard.frame.request.v1"
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/CedRucIdentity.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/CedRucIdentity.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/CedRucIdentity.java
+@@ -0,0 +1,17 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++/**
++ * Datos de identidad de una cÃ©dula o RUC (tabla {@code CO_CPR_CER}), consultados por la operaciÃ³n 13
++ * ({@code ConsultaCedPadRucOperation}) para los tipos {@code "1"} (cÃ©dula) y {@code "2"} (RUC).
++ * <p>
++ * Los campos reflejan los valores crudos de BD (pueden ser {@code null}); la normalizaciÃ³n a cadena
++ * vacÃ­a (equivalente al {@code Util.validaNotNull} legacy) se aplica al armar la trama de respuesta.
++ */
++public record CedRucIdentity(
++        String code,
++        String name,
++        String address,
++        String phone,
++        String gender
++) {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/ForeignerIdentity.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/ForeignerIdentity.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/ForeignerIdentity.java
+@@ -0,0 +1,16 @@
++package com.elrosado.cersuitecloudlocalcore.domain.model;
++
++/**
++ * Datos de identidad de un extranjero (tabla {@code CO_EXT_CER}), consultados por la operaciÃ³n 13
++ * ({@code ConsultaCedPadRucOperation}) para el tipo {@code "4"}.
++ * <p>
++ * A diferencia de {@link CedRucIdentity}, no incluye gÃ©nero (la respuesta legacy del tipo 4 no lo emite).
++ * Los campos reflejan los valores crudos de BD (pueden ser {@code null}).
++ */
++public record ForeignerIdentity(
++        String code,
++        String name,
++        String address,
++        String phone
++) {
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/CedPadRucQueryUseCase.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/CedPadRucQueryUseCase.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/in/CedPadRucQueryUseCase.java
+@@ -0,0 +1,23 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.in;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.CedRucIdentity;
++import com.elrosado.cersuitecloudlocalcore.domain.model.ForeignerIdentity;
++
++import java.util.Optional;
++
++/**
++ * Caso de uso de consulta de CÃ©dula/RUC/Extranjero (op. 13, migra {@code ConsultaCedPadRucOperation}).
++ * <p>
++ * El despacho por {@code tipo} vive en la operaciÃ³n de trama ({@code CedPadRucQueryFrameOperation}), que
++ * es la que conoce el protocolo: tipos {@code "1"}/{@code "2"} â {@link #findCedRuc(String)}; tipo
++ * {@code "4"} â {@link #findForeigner(String)}. El tipo {@code "3"} (padrÃ³n/registro electoral) se
++ * elimina â no se usa en producciÃ³n (decisiÃ³n del usuario, 2026-07-15) â por lo que no se expone aquÃ­.
++ */
++public interface CedPadRucQueryUseCase {
++
++    /** Consulta una cÃ©dula o RUC por su cÃ³digo ({@code CD_CPR}); vacÃ­o si no existe. */
++    Optional<CedRucIdentity> findCedRuc(String code);
++
++    /** Consulta un extranjero por su cÃ³digo/pasaporte ({@code CD_CPR}); vacÃ­o si no existe. */
++    Optional<ForeignerIdentity> findForeigner(String code);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/CedPadRucQueryRepositoryPort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/CedPadRucQueryRepositoryPort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/CedPadRucQueryRepositoryPort.java
+@@ -0,0 +1,20 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.CedRucIdentity;
++import com.elrosado.cersuitecloudlocalcore.domain.model.ForeignerIdentity;
++
++import java.util.Optional;
++
++/**
++ * Puerto de salida (ARTS_EC) para la consulta de identidad de la op. 13. Reproduce el
++ * {@code CedPadRucDAO} legacy: busca por la columna {@code CD_CPR} (= "codigo") y toma el primer
++ * resultado, ya que {@code CD_CPR} no es Ãºnico ni obligatorio.
++ */
++public interface CedPadRucQueryRepositoryPort {
++
++    /** Primera fila de {@code CO_CPR_CER} con {@code CD_CPR = code}. */
++    Optional<CedRucIdentity> findCedRuc(String code);
++
++    /** Primera fila de {@code CO_EXT_CER} con {@code CD_CPR = code}. */
++    Optional<ForeignerIdentity> findForeigner(String code);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/DistributedLockPort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/DistributedLockPort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/DistributedLockPort.java
+@@ -0,0 +1,26 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import java.time.Duration;
++
++/**
++ * Lock distribuido efÃ­mero (primitiva {@code SET NX PX} en Redis). Permite serializar entre rÃ©plicas
++ * del pod una secciÃ³n crÃ­tica identificada por una clave arbitraria.
++ * <p>
++ * Es la primitiva genÃ©rica reutilizada por dos usos: la elecciÃ³n de lÃ­der de la sincronizaciÃ³n de
++ * parÃ¡metros ({@link SyncLeaderLockPort}) y la serializaciÃ³n por operador de la operaciÃ³n 7
++ * (evita filas duplicadas en {@code OP_OPERADOR} cuando llegan tramas concurrentes del mismo operador).
++ */
++public interface DistributedLockPort {
++
++    /**
++     * Intenta adquirir el lock de forma atÃ³mica. Devuelve {@code true} si esta rÃ©plica/hilo queda como
++     * dueÃ±o; {@code false} si otro ya lo tiene.
++     *
++     * @param lockKey clave del lock
++     * @param ttl     tiempo de vida del lock; si el proceso muere sin liberarlo, expira y no queda bloqueado
++     */
++    boolean tryAcquire(String lockKey, Duration ttl);
++
++    /** Libera el lock si esta rÃ©plica/hilo es el dueÃ±o. Si ya expirÃ³ por TTL, es un no-op. */
++    void release(String lockKey);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/SyncLeaderLockPort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/SyncLeaderLockPort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/SyncLeaderLockPort.java
+@@ -1,20 +1,10 @@
+ package com.elrosado.cersuitecloudlocalcore.domain.port.out;
+ 
+-import java.time.Duration;
+-
+ /**
+- * Lock distribuido efÃ­mero para garantizar que solo una rÃ©plica del pod ejecute la sincronizaciÃ³n de
+- * parÃ¡metros a la vez (ver secciÃ³n 8 del anÃ¡lisis de migraciÃ³n â evita que hasta 100 rÃ©plicas repitan
+- * el mismo trabajo contra BD Central).
++ * EspecializaciÃ³n semÃ¡ntica de {@link DistributedLockPort} para la elecciÃ³n de lÃ­der de la
++ * sincronizaciÃ³n de parÃ¡metros: garantiza que solo una rÃ©plica del pod ejecute el sync a la vez
++ * (ver secciÃ³n 8 del anÃ¡lisis de migraciÃ³n â evita que hasta 100 rÃ©plicas repitan el mismo trabajo
++ * contra BD Central). Hereda las primitivas {@code tryAcquire}/{@code release} sin aÃ±adir mÃ©todos.
+  */
+-public interface SyncLeaderLockPort {
+-
+-    /**
+-     * Intenta adquirir el lock de forma atÃ³mica. Devuelve {@code true} si esta rÃ©plica queda como
+-     * lÃ­der; {@code false} si otra rÃ©plica ya lo tiene.
+-     */
+-    boolean tryAcquire(String lockKey, Duration ttl);
+-
+-    /** Libera el lock. Si expira por TTL antes de llamarse (ej. el proceso muere), no queda bloqueado. */
+-    void release(String lockKey);
++public interface SyncLeaderLockPort extends DistributedLockPort {
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbCedPadRucQueryAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbCedPadRucQueryAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/DbCedPadRucQueryAdapter.java
+@@ -0,0 +1,40 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.CedRucIdentity;
++import com.elrosado.cersuitecloudlocalcore.domain.model.ForeignerIdentity;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.CedPadRucQueryRepositoryPort;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository.CedRucQueryJpaRepository;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository.ForeignerQueryJpaRepository;
++import org.springframework.stereotype.Component;
++
++import java.util.Optional;
++
++/**
++ * Adapter de salida (ARTS_EC) de la consulta de identidad de la op. 13. Busca por {@code CD_CPR} en
++ * {@code CO_CPR_CER} (cÃ©dula/RUC) y {@code CO_EXT_CER} (extranjero), mapeando la entidad al record de
++ * dominio correspondiente.
++ */
++@Component
++public class DbCedPadRucQueryAdapter implements CedPadRucQueryRepositoryPort {
++
++    private final CedRucQueryJpaRepository cedRucRepository;
++    private final ForeignerQueryJpaRepository foreignerRepository;
++
++    public DbCedPadRucQueryAdapter(CedRucQueryJpaRepository cedRucRepository,
++                                   ForeignerQueryJpaRepository foreignerRepository) {
++        this.cedRucRepository = cedRucRepository;
++        this.foreignerRepository = foreignerRepository;
++    }
++
++    @Override
++    public Optional<CedRucIdentity> findCedRuc(String code) {
++        return cedRucRepository.findFirstByCode(code)
++                .map(e -> new CedRucIdentity(e.getCode(), e.getName(), e.getAddress(), e.getPhone(), e.getGender()));
++    }
++
++    @Override
++    public Optional<ForeignerIdentity> findForeigner(String code) {
++        return foreignerRepository.findFirstByCode(code)
++                .map(e -> new ForeignerIdentity(e.getCode(), e.getName(), e.getAddress(), e.getPhone()));
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/CedRucQueryEntity.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/CedRucQueryEntity.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/CedRucQueryEntity.java
+@@ -0,0 +1,59 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++import jakarta.persistence.Table;
++
++/**
++ * Entidad JPA de solo-lectura sobre {@code CO_CPR_CER} (ARTS_EC), para la consulta de la op. 13
++ * (tipos {@code "1"}/{@code "2"}). Distinta de {@code CedRucUpdateEntity} (write-only del proceso
++ * {@code UpdateCedPadRucService}): mapea las columnas que la consulta necesita, incluidas
++ * {@code DIRECCION} y {@code TELEFONO} que la entidad de escritura no expone.
++ */
++@Entity
++@Table(name = "CO_CPR_CER", schema = "dbo")
++public class CedRucQueryEntity {
++
++    @Id
++    @Column(name = "ID_CPR", nullable = false)
++    private Long id;
++
++    @Column(name = "CD_CPR", length = 20)
++    private String code;
++
++    @Column(name = "NOMBRE", length = 250)
++    private String name;
++
++    @Column(name = "DIRECCION", length = 250)
++    private String address;
++
++    @Column(name = "TELEFONO", length = 20)
++    private String phone;
++
++    @Column(name = "GENERO", length = 10)
++    private String gender;
++
++    protected CedRucQueryEntity() {
++    }
++
++    public String getCode() {
++        return code;
++    }
++
++    public String getName() {
++        return name;
++    }
++
++    public String getAddress() {
++        return address;
++    }
++
++    public String getPhone() {
++        return phone;
++    }
++
++    public String getGender() {
++        return gender;
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/ForeignerQueryEntity.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/ForeignerQueryEntity.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/entity/ForeignerQueryEntity.java
+@@ -0,0 +1,52 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++import jakarta.persistence.Table;
++
++/**
++ * Entidad JPA de solo-lectura sobre {@code CO_EXT_CER} (ARTS_EC), para la consulta de la op. 13
++ * (tipo {@code "4"}, extranjero). Se consulta por {@code CD_CPR} (= "codigo"), no por el PK
++ * {@code ID_CPR} (identity). Distinta de {@code ForeignerReplicationEntity} (write-only) y de
++ * {@code CustomerExtEntity} (solo verifica existencia por {@code ID_CPR}).
++ */
++@Entity
++@Table(name = "CO_EXT_CER", schema = "dbo")
++public class ForeignerQueryEntity {
++
++    @Id
++    @Column(name = "ID_CPR", nullable = false)
++    private Long id;
++
++    @Column(name = "CD_CPR", length = 50)
++    private String code;
++
++    @Column(name = "NOMBRE", length = 250)
++    private String name;
++
++    @Column(name = "DIRECCION", length = 250)
++    private String address;
++
++    @Column(name = "TELEFONO", length = 20)
++    private String phone;
++
++    protected ForeignerQueryEntity() {
++    }
++
++    public String getCode() {
++        return code;
++    }
++
++    public String getName() {
++        return name;
++    }
++
++    public String getAddress() {
++        return address;
++    }
++
++    public String getPhone() {
++        return phone;
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/CedRucQueryJpaRepository.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/CedRucQueryJpaRepository.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/CedRucQueryJpaRepository.java
+@@ -0,0 +1,15 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository;
++
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.CedRucQueryEntity;
++import org.springframework.data.jpa.repository.JpaRepository;
++
++import java.util.Optional;
++
++/**
++ * Repositorio de lectura de {@code CO_CPR_CER} para la op. 13. {@code findFirstBy...} aplica
++ * {@code TOP 1}, replicando el {@code iterate().next()} legacy sobre {@code CD_CPR} (no Ãºnico).
++ */
++public interface CedRucQueryJpaRepository extends JpaRepository<CedRucQueryEntity, Long> {
++
++    Optional<CedRucQueryEntity> findFirstByCode(String code);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/ForeignerQueryJpaRepository.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/ForeignerQueryJpaRepository.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/db/repository/ForeignerQueryJpaRepository.java
+@@ -0,0 +1,15 @@
++package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.repository;
++
++import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.entity.ForeignerQueryEntity;
++import org.springframework.data.jpa.repository.JpaRepository;
++
++import java.util.Optional;
++
++/**
++ * Repositorio de lectura de {@code CO_EXT_CER} para la op. 13. {@code findFirstBy...} aplica
++ * {@code TOP 1}, replicando el {@code iterate().next()} legacy sobre {@code CD_CPR} (no Ãºnico).
++ */
++public interface ForeignerQueryJpaRepository extends JpaRepository<ForeignerQueryEntity, Long> {
++
++    Optional<ForeignerQueryEntity> findFirstByCode(String code);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/messaging/PubSubDistributorPublisher.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/messaging/PubSubDistributorPublisher.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/messaging/PubSubDistributorPublisher.java
+@@ -12,8 +12,24 @@
+ import java.util.Map;
+ 
+ /**
+- * Adaptador de salida: publica el evento XML_GENERATED al tÃ³pico de Distributor Cloud.
+- * El payload se serializa como JSON con transactionId, storeCode, eventType y publishedAt.
++ * Adaptador de salida: al generarse el XML notifica a Distributor Cloud por <b>dos</b> tÃ³picos, que
++ * disparan flujos independientes (ambos leen el XML desde Firestore, no dependen entre sÃ­):
++ * <ul>
++ *   <li>{@code topic-distributor} ({@code retail.local.distributor.request.v1}) â TLOG â BD Multi-Local.
++ *       Payload JSON con {@code transactionId}, {@code storeId}, {@code status} y {@code publishedAt}.</li>
++ *   <li>{@code topic-distributor-processed} ({@code retail.local.distributor.processed.v1}) â replicaciÃ³n
++ *       a BD Central. Payload = {@code transactionId} en crudo (formato que espera
++ *       {@code CentralReplicationMessageHandler} del Distributor).</li>
++ * </ul>
++ * Antes, el mensaje de {@code processed.v1} lo publicaba el propio Distributor tras guardar en Multi-Local
++ * (publicaba y leÃ­a la misma cola). Ahora lo publica este servicio, ya que la replicaciÃ³n central solo
++ * necesita el XML de Firestore âque este servicio ya escribiÃ³â y no el guardado local. El Distributor
++ * solo consume {@code processed.v1}.
++ * <p>
++ * <b>Orden:</b> los dos flujos corren en paralelo (antes la replicaciÃ³n central iba despuÃ©s del guardado
++ * local). No hay dependencia de datos, y no hay carrera de estados: el flujo TLOG local actualiza el campo
++ * {@code status} y la replicaciÃ³n central actualiza su propio campo {@code replicationStatus} â un solo
++ * escritor por campo en Firestore.
+  */
+ @Component
+ public class PubSubDistributorPublisher implements EventPublisherPort {
+@@ -27,6 +43,9 @@
+ 
+     @Value("${app.gcp.pubsub.topic-distributor}")
+     private String distributorTopic;
++
++    @Value("${app.gcp.pubsub.topic-distributor-processed}")
++    private String distributorProcessedTopic;
+ 
+     public PubSubDistributorPublisher(IMessagePublisher messagePublisher, ObjectMapper objectMapper) {
+         this.messagePublisher = messagePublisher;
+@@ -67,9 +86,39 @@
+                    }
+                });
+ 
++            publishProcessed(transactionId, storeCode);
++
+         } catch (Exception e) {
+             throw new IllegalStateException(
+                 "Error al serializar o publicar evento XML_GENERATED para transacciÃ³n: " + transactionId, e);
+         }
+     }
++
++    /**
++     * Dispara la replicaciÃ³n a BD Central publicando el {@code transactionId} en crudo en
++     * {@code processed.v1}. No-fatal: un fallo se registra pero no interrumpe el flujo de ventas
++     * (Pub/Sub / el barrido de Firestore permiten recuperaciÃ³n posterior), igual que el evento principal.
++     */
++    private void publishProcessed(String transactionId, String storeCode) {
++        messagePublisher.publishAsync(distributorProcessedTopic, transactionId)
++           .whenComplete((msgId, ex) -> {
++               if (ex != null) {
++                   log.atError()
++                      .setMessage("Error al publicar disparo de replicaciÃ³n central hacia Distributor Cloud")
++                      .addKeyValue("transactionId", transactionId)
++                      .addKeyValue("storeCode", storeCode)
++                      .addKeyValue("topic", distributorProcessedTopic)
++                      .setCause(ex)
++                      .log();
++               } else {
++                   log.atInfo()
++                      .setMessage("Disparo de replicaciÃ³n central publicado hacia Distributor Cloud")
++                      .addKeyValue("transactionId", transactionId)
++                      .addKeyValue("storeCode", storeCode)
++                      .addKeyValue("topic", distributorProcessedTopic)
++                      .addKeyValue("messageId", msgId)
++                      .log();
++               }
++           });
++    }
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/CedPadRucQueryFrameOperation.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/CedPadRucQueryFrameOperation.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/CedPadRucQueryFrameOperation.java
+@@ -0,0 +1,120 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.CedRucIdentity;
++import com.elrosado.cersuitecloudlocalcore.domain.model.ForeignerIdentity;
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.CedPadRucQueryUseCase;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.RequestReplyProperties;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Component;
++
++import java.util.Optional;
++
++/**
++ * OperaciÃ³n request-reply de consulta de CÃ©dula/RUC/Extranjero (op. TCP 13, migra
++ * {@code ConsultaCedPadRucOperation}). Lee {@code tipo} (body[0]) y {@code clave} (body[1]), despacha
++ * por tipo y arma la respuesta framada {@code <header>'|'<message>}.
++ * <p>
++ * Formato del {@code message} (paridad legacy, separador {@code '|'}):
++ * <ul>
++ *   <li>tipo {@code "1"}/{@code "2"} encontrado: {@code 0'|'code'|'name'|'address'|'phone'|'gender}</li>
++ *   <li>tipo {@code "4"} encontrado: {@code 0'|'code'|'name'|'address'|'phone}</li>
++ *   <li>no encontrado (o tipo no soportado): {@code 1}</li>
++ * </ul>
++ * Los campos nulos se emiten como cadena vacÃ­a (equivale a {@code Util.validaNotNull} legacy).
++ * <p>
++ * El tipo {@code "3"} (padrÃ³n/registro electoral) se elimina â no se usa en producciÃ³n (decisiÃ³n del
++ * usuario, 2026-07-15) â y se responde como "no encontrado" ({@code "1"}) con un WARN, sin acceder al
++ * catÃ¡logo {@code VotacionCNE}.
++ * <p>
++ * Ante trama malformada (sin {@code tipo}/{@code clave}) se lanza excepciÃ³n: el
++ * {@code QueryLaneRequestReplyAdapter} hace Ack sin escribir {@code frameResponse}, y el Generador
++ * responde {@code -1} por timeout â igual que el legacy, que no escribe respuesta en ese caso.
++ */
++@Component
++public class CedPadRucQueryFrameOperation implements RequestReplyOperation {
++
++    private static final Logger log = LoggerFactory.getLogger(CedPadRucQueryFrameOperation.class);
++
++    /** Op. TCP 13 (ConsultaCedPadRucOperation legacy). */
++    private static final String FRAME_TYPE = "13";
++
++    /** Ãndice del tipo de consulta (body[0]). */
++    private static final int TYPE_INDEX = FrameProtocol.BODY_START_INDEX;
++    /** Ãndice de la clave a consultar (body[1]). */
++    private static final int KEY_INDEX = FrameProtocol.BODY_START_INDEX + 1;
++
++    private static final String FOUND = "0";
++    private static final String NOT_FOUND = "1";
++
++    private static final String TYPE_ID_CARD = "1";
++    private static final String TYPE_RUC = "2";
++    private static final String TYPE_FOREIGNER = "4";
++
++    private final CedPadRucQueryUseCase queryUseCase;
++    private final RequestReplyProperties properties;
++
++    public CedPadRucQueryFrameOperation(CedPadRucQueryUseCase queryUseCase, RequestReplyProperties properties) {
++        this.queryUseCase = queryUseCase;
++        this.properties = properties;
++    }
++
++    @Override
++    public String frameType() {
++        return FRAME_TYPE;
++    }
++
++    @Override
++    public String buildResponse(String rawPayload) {
++        String[] parts = FrameProtocol.split(rawPayload);
++        if (parts.length <= KEY_INDEX) {
++            throw new IllegalArgumentException(
++                    "Trama op. 13 sin tipo/clave (body[0]/body[1]): " + parts.length + " segmentos");
++        }
++
++        String type = parts[TYPE_INDEX].trim();
++        String key = parts[KEY_INDEX].trim();
++
++        String message = resolveMessage(type, key).orElse(NOT_FOUND);
++        String suffix = FrameProtocol.SEPARATOR + message;
++        return FrameProtocol.buildFramedResponse(parts, suffix, properties.lengthPrefixDigits());
++    }
++
++    /** Despacha por tipo y arma el {@code message} de Ã©xito; vacÃ­o si no hay coincidencia. */
++    private Optional<String> resolveMessage(String type, String key) {
++        return switch (type) {
++            case TYPE_ID_CARD, TYPE_RUC -> queryUseCase.findCedRuc(key).map(this::formatCedRuc);
++            case TYPE_FOREIGNER -> queryUseCase.findForeigner(key).map(this::formatForeigner);
++            default -> {
++                log.atWarn()
++                        .setMessage("Tipo de consulta CedPadRuc no soportado â se responde no encontrado")
++                        .addKeyValue("frameType", FRAME_TYPE)
++                        .addKeyValue("tipo", type)
++                        .log();
++                yield Optional.empty();
++            }
++        };
++    }
++
++    private String formatCedRuc(CedRucIdentity identity) {
++        return FOUND
++                + FrameProtocol.SEPARATOR + nullToEmpty(identity.code())
++                + FrameProtocol.SEPARATOR + nullToEmpty(identity.name())
++                + FrameProtocol.SEPARATOR + nullToEmpty(identity.address())
++                + FrameProtocol.SEPARATOR + nullToEmpty(identity.phone())
++                + FrameProtocol.SEPARATOR + nullToEmpty(identity.gender());
++    }
++
++    private String formatForeigner(ForeignerIdentity identity) {
++        return FOUND
++                + FrameProtocol.SEPARATOR + nullToEmpty(identity.code())
++                + FrameProtocol.SEPARATOR + nullToEmpty(identity.name())
++                + FrameProtocol.SEPARATOR + nullToEmpty(identity.address())
++                + FrameProtocol.SEPARATOR + nullToEmpty(identity.phone());
++    }
++
++    /** Equivale a {@code Util.validaNotNull} legacy: null â cadena vacÃ­a. */
++    private static String nullToEmpty(String value) {
++        return value == null ? "" : value;
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/CedPadRucQueryService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/CedPadRucQueryService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/CedPadRucQueryService.java
+@@ -0,0 +1,34 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.CedRucIdentity;
++import com.elrosado.cersuitecloudlocalcore.domain.model.ForeignerIdentity;
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.CedPadRucQueryUseCase;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.CedPadRucQueryRepositoryPort;
++import org.springframework.stereotype.Service;
++
++import java.util.Optional;
++
++/**
++ * Orquesta la consulta de identidad de la op. 13 (migra {@code ConsultaCedPadRucOperation} +
++ * {@code CedPadRucDAO}). Delega la lectura al puerto de salida (ARTS_EC); el despacho por tipo y el
++ * formato de la respuesta se resuelven en {@link CedPadRucQueryFrameOperation}.
++ */
++@Service
++public class CedPadRucQueryService implements CedPadRucQueryUseCase {
++
++    private final CedPadRucQueryRepositoryPort repository;
++
++    public CedPadRucQueryService(CedPadRucQueryRepositoryPort repository) {
++        this.repository = repository;
++    }
++
++    @Override
++    public Optional<CedRucIdentity> findCedRuc(String code) {
++        return repository.findCedRuc(code);
++    }
++
++    @Override
++    public Optional<ForeignerIdentity> findForeigner(String code) {
++        return repository.findForeigner(code);
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateLock.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateLock.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateLock.java
+@@ -0,0 +1,108 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.exception.OperatorUpdateException;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.DistributedLockPort;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.beans.factory.annotation.Autowired;
++import org.springframework.stereotype.Component;
++
++import java.time.Duration;
++import java.util.function.Supplier;
++
++/**
++ * Serializa el upsert de la operaciÃ³n 7 por {@code CC_OPERADOR} mediante un lock distribuido.
++ * <p>
++ * <b>Por quÃ© existe:</b> el legacy {@code OperatorUpdateOperation} procesaba las tramas de forma
++ * secuencial sobre la misma conexiÃ³n TCP, por lo que una trama duplicada del mismo operador (Central
++ * reenvÃ­a, o Pub/Sub reentrega at-least-once) veÃ­a la fila creada por la anterior y la <em>actualizaba</em>.
++ * En cloud, el carril ventas despacha cada trama en un virtual thread independiente, de modo que dos
++ * tramas del mismo operador corren el {@code findFirstByCcOperador â insert} en paralelo, ambas no
++ * encuentran fila y ambas insertan â dos filas con el mismo {@code CC_OPERADOR} (la tabla no tiene Ã­ndice
++ * Ãºnico sobre esa columna). Este lock reproduce la serializaciÃ³n del legacy: la segunda trama espera,
++ * luego encuentra la fila de la primera y la actualiza.
++ * <p>
++ * Solo envuelve la secciÃ³n crÃ­tica de persistencia (el upsert), no el push por socket al agente, para
++ * mantener el lock corto y no sostenerlo durante I/O de red â el doble push que pudiera ocurrir ante un
++ * duplicado es inocuo (idempotente en el agente) y tambiÃ©n sucedÃ­a en el legacy (una trama = un push).
++ */
++@Component
++public class OperatorUpdateLock {
++
++    private static final Logger log = LoggerFactory.getLogger(OperatorUpdateLock.class);
++
++    private static final String KEY_PREFIX = "operator:update:lock:";
++
++    /** Vida del lock; supera con holgura el upsert (round-trips a OPERAC_EC). Si el hilo muere, expira. */
++    private static final Duration LOCK_TTL = Duration.ofSeconds(20);
++    /** Espera mÃ¡xima de un hilo por el lock; mayor que el TTL para poder tomarlo si el dueÃ±o muriÃ³. */
++    private static final Duration MAX_WAIT = Duration.ofSeconds(25);
++    /** Pausa entre reintentos de adquisiciÃ³n. */
++    private static final Duration RETRY_BACKOFF = Duration.ofMillis(100);
++
++    private final DistributedLockPort lockPort;
++    private final Duration lockTtl;
++    private final Duration maxWait;
++    private final Duration retryBackoff;
++
++    @Autowired
++    public OperatorUpdateLock(DistributedLockPort lockPort) {
++        this(lockPort, LOCK_TTL, MAX_WAIT, RETRY_BACKOFF);
++    }
++
++    /** Constructor con tiempos parametrizables (para pruebas). */
++    OperatorUpdateLock(DistributedLockPort lockPort, Duration lockTtl, Duration maxWait, Duration retryBackoff) {
++        this.lockPort = lockPort;
++        this.lockTtl = lockTtl;
++        this.maxWait = maxWait;
++        this.retryBackoff = retryBackoff;
++    }
++
++    /**
++     * Ejecuta {@code action} con exclusiÃ³n mutua para el operador dado. Si no logra adquirir el lock
++     * dentro de {@link #MAX_WAIT}, lanza {@link OperatorUpdateException} â el carril ventas hace NACK y
++     * Pub/Sub reentrega la trama mÃ¡s tarde, cuando el dueÃ±o ya liberÃ³.
++     *
++     * @param identityDocument cÃ©dula del operador ({@code CC_OPERADOR}), clave de serializaciÃ³n
++     * @param action           secciÃ³n crÃ­tica (el upsert); devuelve el id local del operador
++     */
++    public <T> T runExclusive(int identityDocument, Supplier<T> action) {
++        String lockKey = KEY_PREFIX + identityDocument;
++        if (!acquireWithWait(lockKey, identityDocument)) {
++            throw new OperatorUpdateException(
++                    "No se pudo adquirir el lock del operador " + identityDocument + " tras " + maxWait);
++        }
++        try {
++            return action.get();
++        } finally {
++            lockPort.release(lockKey);
++        }
++    }
++
++    /** Spin-acquire con backoff hasta {@link #MAX_WAIT}; los virtual threads hacen barata la espera. */
++    private boolean acquireWithWait(String lockKey, int identityDocument) {
++        long deadline = System.nanoTime() + maxWait.toNanos();
++        boolean waited = false;
++        while (true) {
++            if (lockPort.tryAcquire(lockKey, lockTtl)) {
++                return true;
++            }
++            if (System.nanoTime() >= deadline) {
++                return false;
++            }
++            if (!waited) {
++                waited = true;
++                log.atInfo()
++                        .setMessage("Trama de operador concurrente â esperando el lock para serializar el upsert")
++                        .addKeyValue("identityDocument", identityDocument)
++                        .log();
++            }
++            try {
++                Thread.sleep(RETRY_BACKOFF.toMillis());
++            } catch (InterruptedException e) {
++                Thread.currentThread().interrupt();
++                return false;
++            }
++        }
++    }
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateService.java
+@@ -50,6 +50,7 @@
+     private final OperatorRepositoryPort repositoryPort;
+     private final OperatorDealerSenderPort senderPort;
+     private final StoreRegistry storeRegistry;
++    private final OperatorUpdateLock operatorUpdateLock;
+     private final SecureRandom random = new SecureRandom();
+ 
+     public OperatorUpdateService(
+@@ -58,13 +59,15 @@
+             OperatorWrapperXmlGenerator xmlGenerator,
+             OperatorRepositoryPort repositoryPort,
+             OperatorDealerSenderPort senderPort,
+-            StoreRegistry storeRegistry) {
++            StoreRegistry storeRegistry,
++            OperatorUpdateLock operatorUpdateLock) {
+         this.firestorePort = firestorePort;
+         this.parser = parser;
+         this.xmlGenerator = xmlGenerator;
+         this.repositoryPort = repositoryPort;
+         this.senderPort = senderPort;
+         this.storeRegistry = storeRegistry;
++        this.operatorUpdateLock = operatorUpdateLock;
+     }
+ 
+     @Override
+@@ -83,7 +86,11 @@
+             Operator operator = parser.parse(xml);
+             MDC.put("storeCode", String.valueOf(operator.codTienda()));
+ 
+-            int operatorId = repositoryPort.saveInProcess(operator);
++            // Upsert serializado por CC_OPERADOR: dos tramas concurrentes del mismo operador (duplicado de
++            // Central / reentrega Pub/Sub) no deben insertar dos filas. La segunda espera, ve la fila de la
++            // primera y la actualiza â reproduce la serializaciÃ³n del legacy. Ver OperatorUpdateLock.
++            int operatorId = operatorUpdateLock.runExclusive(
++                    operator.identityDocument(), () -> repositoryPort.saveInProcess(operator));
+ 
+             boolean connectionError = pushToAgents(operator, operatorId);
+ 
+
+
+--- Diff for /src/main/resources/application-dev.yml ---
+--- a//src/main/resources/application-dev.yml
++++ b//src/main/resources/application-dev.yml
+@@ -181,6 +181,7 @@
+   gcp:
+     pubsub:
+       topic-distributor: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR}
++      topic-distributor-processed: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR_PROCESSED:retail.local.distributor.processed.v1}
+       topic-synchro-controller: ${GCP_PUBSUB_TOPIC_SYNCHRO_CONTROLLER:retail.local.synchro.controller.v1}
+     firestore:
+       collection: ${GCP_FIRESTORE_COLLECTION:frames}
+
+
+--- Diff for /src/main/resources/application-local.yml ---
+--- a//src/main/resources/application-local.yml
++++ b//src/main/resources/application-local.yml
+@@ -235,6 +235,7 @@
+   gcp:
+     pubsub:
+       topic-distributor: retail.local.distributor.request.v1
++      topic-distributor-processed: retail.local.distributor.processed.v1
+       topic-synchro-controller: retail.local.synchro.controller.v1
+     firestore:
+       collection: frames
+
+
+--- Diff for /src/main/resources/application-prod.yml ---
+--- a//src/main/resources/application-prod.yml
++++ b//src/main/resources/application-prod.yml
+@@ -141,6 +141,7 @@
+   gcp:
+     pubsub:
+       topic-distributor: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR}
++      topic-distributor-processed: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR_PROCESSED:retail.local.distributor.processed.v1}
+       topic-synchro-controller: ${GCP_PUBSUB_TOPIC_SYNCHRO_CONTROLLER:retail.local.synchro.controller.v1}
+     firestore:
+       collection: ${GCP_FIRESTORE_COLLECTION:frames}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/CedPadRucQueryFrameOperationTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/CedPadRucQueryFrameOperationTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/CedPadRucQueryFrameOperationTest.java
+@@ -0,0 +1,133 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.CedRucIdentity;
++import com.elrosado.cersuitecloudlocalcore.domain.model.ForeignerIdentity;
++import com.elrosado.cersuitecloudlocalcore.domain.port.in.CedPadRucQueryUseCase;
++import com.elrosado.cersuitecloudlocalcore.infrastructure.config.RequestReplyProperties;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.util.Optional;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertThrows;
++import static org.junit.jupiter.api.Assertions.assertTrue;
++import static org.mockito.Mockito.when;
++
++/**
++ * Verifica el despacho por tipo, el formato de respuesta y el prefijo de longitud de la op. 13
++ * ({@code CedPadRucQueryFrameOperation}). Los fixtures son sintÃ©ticos (construidos con el mismo convenio
++ * del Generador que op. 24/71); pendiente sustituir por tramas reales de producciÃ³n para paridad exacta.
++ */
++@ExtendWith(MockitoExtension.class)
++class CedPadRucQueryFrameOperationTest {
++
++    // Header sintÃ©tico: <tipo>=body[0]=parts[6], <clave>=body[1]=parts[7].
++    private static final String HEADER = "S'|'13'|'000'|'001'|'0'|'20260715120000";
++
++    @Mock
++    CedPadRucQueryUseCase useCase;
++
++    CedPadRucQueryFrameOperation operation;
++
++    @BeforeEach
++    void setUp() {
++        operation = new CedPadRucQueryFrameOperation(useCase, new RequestReplyProperties("sub", 6));
++    }
++
++    /** Antepone el prefijo de longitud de 6 dÃ­gitos, igual que {@code FrameProtocol}. */
++    private static String framed(String body) {
++        return String.format("%06d", body.length()) + body;
++    }
++
++    private static String trama(String type, String key) {
++        return framed(HEADER + "'|'" + type + "'|'" + key);
++    }
++
++    @Test
++    void frameType_es13() {
++        assertEquals("13", operation.frameType());
++    }
++
++    /**
++     * Paridad byte a byte contra una trama real de producciÃ³n (usuario, 2026-07-15): tipo 1, cÃ©dula
++     * encontrada. Fija el formato de respuesta completo, incluido el prefijo de longitud {@code 000121}.
++     */
++    @Test
++    void tramaReal_tipo1_cedulaEncontrada_paridadByteAByte() {
++        String realRequest =
++                "000057S'|'13'|'000'|'0100'|'0'|'20250701111018'|'1'|'0951178102";
++        String realResponse =
++                "000121S'|'13'|'000'|'0100'|'0'|'20250701111018'|'0'|'0951178102'|'"
++                        + "ALEX JOEL FAJARDO DEL PEZO'|'MAPASINGUE ESTE'|'0960530656'|'M";
++
++        when(useCase.findCedRuc("0951178102")).thenReturn(Optional.of(new CedRucIdentity(
++                "0951178102", "ALEX JOEL FAJARDO DEL PEZO", "MAPASINGUE ESTE", "0960530656", "M")));
++
++        assertEquals(realResponse, operation.buildResponse(realRequest));
++    }
++
++    @Test
++    void tipo1_cedulaEncontrada_respondeTodosLosCampos() {
++        when(useCase.findCedRuc("0102030405"))
++                .thenReturn(Optional.of(new CedRucIdentity("0102030405", "JUAN PEREZ", "AV 9 DE OCTUBRE", "0999999999", "M")));
++
++        String body = HEADER + "'|'0'|'0102030405'|'JUAN PEREZ'|'AV 9 DE OCTUBRE'|'0999999999'|'M";
++        assertEquals(framed(body), operation.buildResponse(trama("1", "0102030405")));
++    }
++
++    @Test
++    void tipo2_ruc_usaLaMismaBusquedaQueCedula() {
++        when(useCase.findCedRuc("0999999999001"))
++                .thenReturn(Optional.of(new CedRucIdentity("0999999999001", "COMERCIAL SA", "MALECON", "042222222", "")));
++
++        String body = HEADER + "'|'0'|'0999999999001'|'COMERCIAL SA'|'MALECON'|'042222222'|'";
++        assertEquals(framed(body), operation.buildResponse(trama("2", "0999999999001")));
++    }
++
++    @Test
++    void tipo4_extranjeroEncontrado_sinCampoGenero() {
++        when(useCase.findForeigner("X1234567"))
++                .thenReturn(Optional.of(new ForeignerIdentity("X1234567", "JOHN DOE", "HOTEL", "0980000000")));
++
++        String body = HEADER + "'|'0'|'X1234567'|'JOHN DOE'|'HOTEL'|'0980000000";
++        assertEquals(framed(body), operation.buildResponse(trama("4", "X1234567")));
++    }
++
++    @Test
++    void noEncontrado_respondeUno() {
++        when(useCase.findCedRuc("0000000000")).thenReturn(Optional.empty());
++
++        String body = HEADER + "'|'1";
++        assertEquals(framed(body), operation.buildResponse(trama("1", "0000000000")));
++    }
++
++    @Test
++    void camposNulos_seEmitenComoCadenaVacia() {
++        when(useCase.findCedRuc("0102030405"))
++                .thenReturn(Optional.of(new CedRucIdentity("0102030405", null, null, null, null)));
++
++        String body = HEADER + "'|'0'|'0102030405'|''|''|''|'";
++        assertEquals(framed(body), operation.buildResponse(trama("1", "0102030405")));
++    }
++
++    @Test
++    void tipo3_eliminado_respondeNoEncontrado() {
++        String body = HEADER + "'|'1";
++        assertEquals(framed(body), operation.buildResponse(trama("3", "0102030405")));
++    }
++
++    @Test
++    void tipoDesconocido_respondeNoEncontrado() {
++        assertTrue(operation.buildResponse(trama("9", "abc")).endsWith("'|'1"));
++    }
++
++    @Test
++    void tramaSinClave_lanzaExcepcion() {
++        String malformed = framed(HEADER + "'|'1");
++        assertThrows(IllegalArgumentException.class, () -> operation.buildResponse(malformed));
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/CedPadRucQueryServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/CedPadRucQueryServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/CedPadRucQueryServiceTest.java
+@@ -0,0 +1,55 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.model.CedRucIdentity;
++import com.elrosado.cersuitecloudlocalcore.domain.model.ForeignerIdentity;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.CedPadRucQueryRepositoryPort;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.util.Optional;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertTrue;
++import static org.mockito.Mockito.when;
++
++/**
++ * Verifica que el servicio delega las lecturas al puerto de salida sin transformar los resultados.
++ */
++@ExtendWith(MockitoExtension.class)
++class CedPadRucQueryServiceTest {
++
++    @Mock
++    CedPadRucQueryRepositoryPort repository;
++
++    CedPadRucQueryService service;
++
++    @BeforeEach
++    void setUp() {
++        service = new CedPadRucQueryService(repository);
++    }
++
++    @Test
++    void findCedRuc_delegaAlPuerto() {
++        CedRucIdentity identity = new CedRucIdentity("0102030405", "JUAN", "DIR", "TEL", "M");
++        when(repository.findCedRuc("0102030405")).thenReturn(Optional.of(identity));
++
++        assertEquals(Optional.of(identity), service.findCedRuc("0102030405"));
++    }
++
++    @Test
++    void findForeigner_delegaAlPuerto() {
++        ForeignerIdentity identity = new ForeignerIdentity("X1", "JOHN", "DIR", "TEL");
++        when(repository.findForeigner("X1")).thenReturn(Optional.of(identity));
++
++        assertEquals(Optional.of(identity), service.findForeigner("X1"));
++    }
++
++    @Test
++    void sinCoincidencia_devuelveVacio() {
++        when(repository.findCedRuc("0")).thenReturn(Optional.empty());
++        assertTrue(service.findCedRuc("0").isEmpty());
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateLockTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateLockTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateLockTest.java
+@@ -0,0 +1,97 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.exception.OperatorUpdateException;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.DistributedLockPort;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.time.Duration;
++import java.util.concurrent.atomic.AtomicInteger;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.assertj.core.api.Assertions.assertThatThrownBy;
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.ArgumentMatchers.eq;
++import static org.mockito.Mockito.never;
++import static org.mockito.Mockito.times;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.when;
++
++/**
++ * Verifica que {@link OperatorUpdateLock} serializa por {@code CC_OPERADOR}: ejecuta la acciÃ³n cuando
++ * adquiere el lock, siempre libera, y ante contenciÃ³n sostenida hace timeout con excepciÃ³n (â NACK).
++ */
++@ExtendWith(MockitoExtension.class)
++class OperatorUpdateLockTest {
++
++    private static final int CC_OPERADOR = 77712451;
++    private static final String LOCK_KEY = "operator:update:lock:" + CC_OPERADOR;
++
++    @Mock
++    DistributedLockPort lockPort;
++
++    /** Lock con tiempos pequeÃ±os para que el camino de timeout no ralentice la prueba. */
++    private OperatorUpdateLock newLock() {
++        return new OperatorUpdateLock(
++                lockPort, Duration.ofMillis(200), Duration.ofMillis(120), Duration.ofMillis(20));
++    }
++
++    @Test
++    void runExclusive_lockConcedido_ejecutaAccionYLibera() {
++        when(lockPort.tryAcquire(eq(LOCK_KEY), any(Duration.class))).thenReturn(true);
++        OperatorUpdateLock lock = newLock();
++
++        AtomicInteger calls = new AtomicInteger();
++        int result = lock.runExclusive(CC_OPERADOR, () -> {
++            calls.incrementAndGet();
++            return 5031;
++        });
++
++        assertThat(result).isEqualTo(5031);
++        assertThat(calls.get()).isEqualTo(1);
++        verify(lockPort).release(LOCK_KEY);
++    }
++
++    @Test
++    void runExclusive_liberaAunSiLaAccionFalla() {
++        when(lockPort.tryAcquire(eq(LOCK_KEY), any(Duration.class))).thenReturn(true);
++        OperatorUpdateLock lock = newLock();
++
++        assertThatThrownBy(() -> lock.runExclusive(CC_OPERADOR, () -> {
++            throw new IllegalStateException("boom");
++        })).isInstanceOf(IllegalStateException.class);
++
++        verify(lockPort).release(LOCK_KEY);
++    }
++
++    @Test
++    void runExclusive_contencionSostenida_timeoutLanzaExcepcion() {
++        // El lock nunca se concede â tras agotar la espera se lanza OperatorUpdateException y no se ejecuta.
++        when(lockPort.tryAcquire(eq(LOCK_KEY), any(Duration.class))).thenReturn(false);
++        OperatorUpdateLock lock = newLock();
++
++        AtomicInteger calls = new AtomicInteger();
++        assertThatThrownBy(() -> lock.runExclusive(CC_OPERADOR, () -> {
++            calls.incrementAndGet();
++            return 1;
++        })).isInstanceOf(OperatorUpdateException.class);
++
++        assertThat(calls.get()).isZero();
++        verify(lockPort, never()).release(LOCK_KEY);
++    }
++
++    @Test
++    void runExclusive_segundoIntentoTrasEspera_adquiereYEjecuta() {
++        // Primer intento ocupado, segundo libre: reproduce la trama duplicada que espera y luego procede.
++        when(lockPort.tryAcquire(eq(LOCK_KEY), any(Duration.class))).thenReturn(false, true);
++        OperatorUpdateLock lock = newLock();
++
++        int result = lock.runExclusive(CC_OPERADOR, () -> 5031);
++
++        assertThat(result).isEqualTo(5031);
++        verify(lockPort, times(2)).tryAcquire(eq(LOCK_KEY), any(Duration.class));
++        verify(lockPort).release(LOCK_KEY);
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateServiceTest.java
+@@ -1,6 +1,7 @@
+ package com.elrosado.cersuitecloudlocalcore.service;
+ 
+ import com.elrosado.cersuitecloudlocalcore.domain.exception.OperatorUpdateException;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.DistributedLockPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.OperatorDealerSenderPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.OperatorRepositoryPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.TransactionFirestorePort;
+@@ -36,18 +37,24 @@
+     @Mock OperatorRepositoryPort repositoryPort;
+     @Mock OperatorDealerSenderPort senderPort;
+     @Mock StoreRegistry storeRegistry;
++    @Mock DistributedLockPort lockPort;
+ 
+     OperatorUpdateService service;
+ 
+     @BeforeEach
+     void setUp() {
++        // Lock real con puerto mock que siempre concede: verifica que el servicio ejecuta el upsert dentro
++        // de la secciÃ³n crÃ­tica sin alterar el comportamiento observado por el resto de los tests.
++        lenient().when(lockPort.tryAcquire(org.mockito.ArgumentMatchers.anyString(),
++                org.mockito.ArgumentMatchers.any())).thenReturn(true);
+         service = new OperatorUpdateService(
+                 firestorePort,
+                 new OperatorXmlParser(),
+                 new OperatorWrapperXmlGenerator(),
+                 repositoryPort,
+                 senderPort,
+-                storeRegistry);
++                storeRegistry,
++                new OperatorUpdateLock(lockPort));
+         lenient().when(repositoryPort.saveInProcess(org.mockito.ArgumentMatchers.any())).thenReturn(LOCAL_ID);
+     }
+ 
+
+

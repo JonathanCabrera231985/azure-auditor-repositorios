@@ -1,0 +1,337 @@
+--- Diff for /.operations/ANALISIS_OperatorUpdateOperation_MIGRACION.md ---
+--- a//.operations/ANALISIS_OperatorUpdateOperation_MIGRACION.md
++++ b//.operations/ANALISIS_OperatorUpdateOperation_MIGRACION.md
+@@ -349,3 +349,42 @@
+ (borrar+insertar el set entrante, que Central envía completo). El **merge posicional** exacto de
+ `updateOperator` (§7.4) queda pendiente del fuente legacy de esa clase del ArmsServerLocal
+ (`com.allc.arms.server.operations.operator.OperatorUpdateOperation`).
++
++---
++
++## Fix de concurrencia — filas duplicadas por `CC_OPERADOR` (2026-07-15)
++
++**Síntoma reportado:** dos filas en `OP_OPERADOR` con el mismo `CC_OPERADOR` (mismo operador,
++distinto `ID_OPERADOR`; una en `STR_ESTADO=3` y otra en `1`), tras llegar la misma trama dos veces.
++
++**Causa raíz — regresión del modelo async, no presente en el legacy:**
++- **Legacy:** las tramas de Central se procesaban **secuencialmente** sobre la misma conexión TCP
++  (además del `Thread.sleep(3000)` final). La 2ª trama del mismo operador veía la fila ya commiteada por
++  la 1ª (`getOperatorsByIdentityDocument → get(0)`) y la **actualizaba** → una sola fila.
++- **Cloud:** `SalesLaneRequestAdapter` despacha cada trama en un **virtual thread** independiente. Dos
++  tramas del mismo operador corren `findFirstByCcOperador → insert` **en paralelo**; ambas no encuentran
++  fila y ambas insertan. Lo habilitan tres cosas: (1) concurrencia, (2) entrega at-least-once de Pub/Sub
++  y/o Central publicando dos veces, (3) **`OP_OPERADOR` no tiene índice único sobre `CC_OPERADOR`**
++  (DDL confirmado: la única restricción única es sobre `ID_OPERADOR`).
++
++**Fix aplicado — lock distribuido por `CC_OPERADOR`:**
++- `OperatorUpdateLock` (service) serializa la sección crítica del upsert por cédula usando la primitiva
++  de lock distribuido en Redis. `OperatorUpdateService` envuelve **solo** `repositoryPort.saveInProcess(...)`
++  (no el push por socket) → lock corto, sin I/O de red bajo el lock. La 2ª trama espera, ve la fila de la
++  1ª y la actualiza → una sola fila (reproduce la serialización del legacy).
++- Ante contención sostenida (timeout de espera) se lanza `OperatorUpdateException` → el carril ventas hace
++  **NACK** → Pub/Sub reentrega cuando el dueño ya liberó. Válvula de seguridad; también cubre si el dueño
++  muere (el lock expira por TTL).
++- **Puerto:** se generalizó `SyncLeaderLockPort` → ahora extiende un `DistributedLockPort` genérico
++  (misma primitiva `SET NX PX` de `RedisSyncLeaderLockAdapter`). El flujo de parámetros no cambia; el lock
++  de operador inyecta `DistributedLockPort`.
++- **Doble push al agente** ante un duplicado: inocuo (idempotente) y también ocurría en el legacy (una
++  trama = un push), por eso el lock no lo abarca.
++
++**Tests:** `OperatorUpdateLockTest` (4: concede/ejecuta+libera, libera ante fallo, timeout→excepción,
++espera+adquiere). `OperatorUpdateServiceTest` actualizado al nuevo constructor. Suite completa 542 verdes.
++
++**Defensa en profundidad (opcional, requiere aprobación + limpieza de duplicados):** índice único
++filtrado sobre `CC_OPERADOR` (`WHERE CC_OPERADOR IS NOT NULL`, es nullable) + captura de
++`DataIntegrityViolationException` re-intentando como update. No implementado (cambio de DDL sobre tabla
++legacy).
+
+
+--- Diff for /CLAUDE.md ---
+--- a//CLAUDE.md
++++ b//CLAUDE.md
+@@ -386,7 +386,17 @@
+ 5. Genera el documento XML de la transacción en memoria.
+ 6. Persiste el XML en Firestore junto al registro de la trama.
+ 7. Actualiza el estado de la transacción en Firestore a `XML_GENERATED`.
+-8. Publica un evento Pub/Sub notificando a Distributor Cloud que el XML está disponible.
++8. Publica hacia Distributor Cloud por **dos** tópicos (ambos disparan flujos que leen el XML desde
++   Firestore, sin dependencia entre sí — ver `PubSubDistributorPublisher`):
++   - `retail.local.distributor.request.v1` (`topic-distributor`) — evento JSON `XML_GENERATED` que
++     dispara el guardado TLOG en BD Multi-Local.
++   - `retail.local.distributor.processed.v1` (`topic-distributor-processed`) — `transactionId` en crudo
++     que dispara la **replicación a BD Central**. Antes lo publicaba el propio Distributor tras guardar
++     (publicaba y leía su misma cola); ahora lo publica este servicio y el Distributor solo la consume.
++     Efecto: la replicación central y el guardado local corren en paralelo (antes eran secuenciales); no
++     hay dependencia de datos. Para evitar carrera de estados en Firestore, el flujo TLOG local escribe el
++     campo `status` (`SAVED`/`DUPLICATED`/`ERROR`) y la replicación central escribe su propio campo
++     `replicationStatus` (`PROCESSED_CENTRAL`) — un solo escritor por campo.
+ 
+ ### Operaciones request-reply migradas (Pub/Sub, carril `consultas`)
+ 
+@@ -414,7 +424,7 @@
+ |-------------------|-----------|----------|
+ | `ElLaneOperation` → `ElReaderService` | `ELReaderOperation` (op. 11) | Procesa una trama **EL** del controlador (movimiento de control de caja: préstamo/retiro/transferencia/carry-forward). Parsea (`ElFrameParserService`) → arma `ElTransaction` (control) → genera XML de control (`ElXmlGeneratorService`, replica `XStreamConfig2` para `TenderControlTransaction`/`ControlTransaction`) → guarda `xmlGenerated` en Firestore → publica a Distributor (igual que venta tipo 10). Sin archivos. Ver `.operations/ANALISIS_ELReaderOperation_MIGRACION.md`. |
+ | `OperatorTimingLaneOperation` → `OperatorTimingService` | `OperatorPerformanceOperation` (op. 67) | Registra tiempos de atención del operador por factura. Parsea (`OperatorTimingFrameParser`) → **dedupe por `NUMERO_FACTURA`** e insert local en `TR_TM_TRN` (ARTS_EC, sin SP; reproduce `SP_TR_TM_TRN`) → genera XML `TM-*.xml` (`OperatorTimingXmlGenerator`, `<Transaction type="OperatorPerformance">`) → lo sube a **GCS** `ARTS/TSLRECORDS/OUT`. **No** publica a Distributor ni escribe Firestore. Desde GCS, **Transaction Cloud (TC-06)** lo comprime (ZIP + `files.json`) y lo envía a la Central (`/transactions/compress`). Ver `.operations/ANALISIS_OperatorPerformanceOperation_MIGRACION.md`. |
+-| `OperatorUpdateLaneOperation` → `OperatorUpdateService` | `OperatorUpdateOperation` (op. 7) | Actualiza un operador (cajero/supervisor) que envía **ArmsServer Central**. Parsea el XML `<Operator>` (`OperatorXmlParser`, DOM) → upsert en **OPERAC_EC** con máquina de estados `OP_OPERADOR.STR_ESTADO` (PROCESAR→EN_PROCESO→PROCESADO; `DbOperatorAdapter`) → arma el `OperatorWrapper` (bitmap de indicats + niveles + password aleatorio) → lo **empuja por socket TCP al ArmsAgent** de la tienda actual y —si aplica— la anterior (`OperatorDealerSocketClient`, puerto 2040). **No** publica a Distributor ni escribe estado en Firestore (Firestore solo aporta el payload). Permisos `OP_OPERAMDA`/`OP_OPERANVA` por estrategia *replace* (merge posicional legacy pendiente). Ver `.operations/ANALISIS_OperatorUpdateOperation_MIGRACION.md`. |
++| `OperatorUpdateLaneOperation` → `OperatorUpdateService` | `OperatorUpdateOperation` (op. 7) | Actualiza un operador (cajero/supervisor) que envía **ArmsServer Central**. Parsea el XML `<Operator>` (`OperatorXmlParser`, DOM) → upsert en **OPERAC_EC** con máquina de estados `OP_OPERADOR.STR_ESTADO` (PROCESAR→EN_PROCESO→PROCESADO; `DbOperatorAdapter`) → arma el `OperatorWrapper` (bitmap de indicats + niveles + password aleatorio) → lo **empuja por socket TCP al ArmsAgent** de la tienda actual y —si aplica— la anterior (`OperatorDealerSocketClient`, puerto 2040). **No** publica a Distributor ni escribe estado en Firestore (Firestore solo aporta el payload). Permisos `OP_OPERAMDA`/`OP_OPERANVA` por estrategia *replace* (merge posicional legacy pendiente). El upsert se **serializa por `CC_OPERADOR`** con un lock distribuido (`OperatorUpdateLock` sobre `DistributedLockPort`) para que tramas concurrentes del mismo operador (duplicado de Central / reentrega Pub/Sub) no inserten filas duplicadas — `OP_OPERADOR` no tiene índice único sobre `CC_OPERADOR`; reproduce la serialización del legacy. Ver `.operations/ANALISIS_OperatorUpdateOperation_MIGRACION.md`. |
+ 
+ Agregar una operación de ventas nueva = un bean `SalesLaneOperation` con su `frameType()`; no toca YAML.
+ 
+@@ -471,7 +481,7 @@
+ | `SyncParametersService` | Por cada ámbito configurado (`app.parameters.scopes`), trae el snapshot completo de BD Central (datasource `central-saadmin`) en una sola consulta y aplica el algoritmo de mayoría: valor global (`DES_CLAVE NULL`) si cubre más de la mitad de las tiendas activas con datos para esa clave, excepciones por tienda para el resto. Modo `dry-run` (`app.parameters.dry-run`, default `true`) solo loggea la clasificación sin escribir. |
+ | `MultiLocalParameterRepositoryAdapter` | Reconcilia las filas decididas en `saadmin.PM_PARAM`/`PM_PARVAL` — upsert de fila global/excepciones y borrado de excepciones obsoletas. |
+ | `RedisParameterProviderAdapter` / `ParameterCachePort` | Cache de lectura runtime (`params:{scope}:{key}` global, `params:{scope}:{store}:{key}` excepción), sin TTL — persiste hasta el próximo sync exitoso. |
+-| `LeaderLockedParameterSync` / `SyncLeaderLockPort` | Lock distribuido efímero en Redis para que solo una réplica del pod ejecute el sync a la vez — evita que las hasta 100 réplicas del HPA repitan el mismo trabajo contra BD Central. Compartido por `ParameterSyncStartupRunner` (arranque) y `ParameterSyncController` (manual). |
++| `LeaderLockedParameterSync` / `SyncLeaderLockPort` | Lock distribuido efímero en Redis para que solo una réplica del pod ejecute el sync a la vez — evita que las hasta 100 réplicas del HPA repitan el mismo trabajo contra BD Central. Compartido por `ParameterSyncStartupRunner` (arranque) y `ParameterSyncController` (manual). `SyncLeaderLockPort` es una especialización de `DistributedLockPort` (primitiva `SET NX PX` de `RedisSyncLeaderLockAdapter`), reutilizada también por `OperatorUpdateLock` (ver abajo). |
+ | `ParameterSyncStartupRunner` | `ApplicationRunner` — dispara el sync una vez al arranque, en un virtual thread, sin bloquear el `Ready` del pod. |
+ | `ParameterSyncController` | `POST /api/v1/parameters/sync` — único `@RestController` de este servicio (excepción documentada, ver sección "Patrones del template NO usados"). |
+ 
+
+
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -15,6 +15,7 @@
+   GCP_PUBSUB_SUB_VENTAS: "retail.local.ventas.request.v1-sub"
+   GCP_PUBSUB_TOPIC_VENTAS: "retail.local.ventas.request.v1"
+   GCP_PUBSUB_TOPIC_DISTRIBUTOR: "retail.local.distributor.request.v1"
++  GCP_PUBSUB_TOPIC_DISTRIBUTOR_PROCESSED: "retail.local.distributor.processed.v1"
+   GCP_PUBSUB_TOPIC_SYNCHRO_CONTROLLER: "retail.local.synchro.controller.v1"
+   GCP_PUBSUB_SUB_SYSCARD_FRAME: "retail.local.syscard.frame.request.v1-sub"
+   GCP_PUBSUB_TOPIC_SYSCARD_FRAME: "retail.local.syscard.frame.request.v1"
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/SyncLeaderLockPort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/SyncLeaderLockPort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/SyncLeaderLockPort.java
+@@ -1,20 +1,10 @@
+ package com.elrosado.cersuitecloudlocalcore.domain.port.out;
+ 
+-import java.time.Duration;
+-
+ /**
+- * Lock distribuido efÃ­mero para garantizar que solo una rÃ©plica del pod ejecute la sincronizaciÃ³n de
+- * parÃ¡metros a la vez (ver secciÃ³n 8 del anÃ¡lisis de migraciÃ³n â evita que hasta 100 rÃ©plicas repitan
+- * el mismo trabajo contra BD Central).
++ * EspecializaciÃ³n semÃ¡ntica de {@link DistributedLockPort} para la elecciÃ³n de lÃ­der de la
++ * sincronizaciÃ³n de parÃ¡metros: garantiza que solo una rÃ©plica del pod ejecute el sync a la vez
++ * (ver secciÃ³n 8 del anÃ¡lisis de migraciÃ³n â evita que hasta 100 rÃ©plicas repitan el mismo trabajo
++ * contra BD Central). Hereda las primitivas {@code tryAcquire}/{@code release} sin aÃ±adir mÃ©todos.
+  */
+-public interface SyncLeaderLockPort {
+-
+-    /**
+-     * Intenta adquirir el lock de forma atÃ³mica. Devuelve {@code true} si esta rÃ©plica queda como
+-     * lÃ­der; {@code false} si otra rÃ©plica ya lo tiene.
+-     */
+-    boolean tryAcquire(String lockKey, Duration ttl);
+-
+-    /** Libera el lock. Si expira por TTL antes de llamarse (ej. el proceso muere), no queda bloqueado. */
+-    void release(String lockKey);
++public interface SyncLeaderLockPort extends DistributedLockPort {
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/messaging/PubSubDistributorPublisher.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/messaging/PubSubDistributorPublisher.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/messaging/PubSubDistributorPublisher.java
+@@ -12,8 +12,24 @@
+ import java.util.Map;
+ 
+ /**
+- * Adaptador de salida: publica el evento XML_GENERATED al tÃ³pico de Distributor Cloud.
+- * El payload se serializa como JSON con transactionId, storeCode, eventType y publishedAt.
++ * Adaptador de salida: al generarse el XML notifica a Distributor Cloud por <b>dos</b> tÃ³picos, que
++ * disparan flujos independientes (ambos leen el XML desde Firestore, no dependen entre sÃ­):
++ * <ul>
++ *   <li>{@code topic-distributor} ({@code retail.local.distributor.request.v1}) â TLOG â BD Multi-Local.
++ *       Payload JSON con {@code transactionId}, {@code storeId}, {@code status} y {@code publishedAt}.</li>
++ *   <li>{@code topic-distributor-processed} ({@code retail.local.distributor.processed.v1}) â replicaciÃ³n
++ *       a BD Central. Payload = {@code transactionId} en crudo (formato que espera
++ *       {@code CentralReplicationMessageHandler} del Distributor).</li>
++ * </ul>
++ * Antes, el mensaje de {@code processed.v1} lo publicaba el propio Distributor tras guardar en Multi-Local
++ * (publicaba y leÃ­a la misma cola). Ahora lo publica este servicio, ya que la replicaciÃ³n central solo
++ * necesita el XML de Firestore âque este servicio ya escribiÃ³â y no el guardado local. El Distributor
++ * solo consume {@code processed.v1}.
++ * <p>
++ * <b>Orden:</b> los dos flujos corren en paralelo (antes la replicaciÃ³n central iba despuÃ©s del guardado
++ * local). No hay dependencia de datos, y no hay carrera de estados: el flujo TLOG local actualiza el campo
++ * {@code status} y la replicaciÃ³n central actualiza su propio campo {@code replicationStatus} â un solo
++ * escritor por campo en Firestore.
+  */
+ @Component
+ public class PubSubDistributorPublisher implements EventPublisherPort {
+@@ -26,6 +42,9 @@
+ 
+     @Value("${app.gcp.pubsub.topic-distributor}")
+     private String distributorTopic;
++
++    @Value("${app.gcp.pubsub.topic-distributor-processed}")
++    private String distributorProcessedTopic;
+ 
+     public PubSubDistributorPublisher(IMessagePublisher messagePublisher, ObjectMapper objectMapper) {
+         this.messagePublisher = messagePublisher;
+@@ -66,9 +85,39 @@
+                    }
+                });
+ 
++            publishProcessed(transactionId, storeCode);
++
+         } catch (Exception e) {
+             throw new IllegalStateException(
+                 "Error al serializar o publicar evento XML_GENERATED para transacciÃ³n: " + transactionId, e);
+         }
+     }
++
++    /**
++     * Dispara la replicaciÃ³n a BD Central publicando el {@code transactionId} en crudo en
++     * {@code processed.v1}. No-fatal: un fallo se registra pero no interrumpe el flujo de ventas
++     * (Pub/Sub / el barrido de Firestore permiten recuperaciÃ³n posterior), igual que el evento principal.
++     */
++    private void publishProcessed(String transactionId, String storeCode) {
++        messagePublisher.publishAsync(distributorProcessedTopic, transactionId)
++           .whenComplete((msgId, ex) -> {
++               if (ex != null) {
++                   log.atError()
++                      .setMessage("Error al publicar disparo de replicaciÃ³n central hacia Distributor Cloud")
++                      .addKeyValue("transactionId", transactionId)
++                      .addKeyValue("storeCode", storeCode)
++                      .addKeyValue("topic", distributorProcessedTopic)
++                      .setCause(ex)
++                      .log();
++               } else {
++                   log.atInfo()
++                      .setMessage("Disparo de replicaciÃ³n central publicado hacia Distributor Cloud")
++                      .addKeyValue("transactionId", transactionId)
++                      .addKeyValue("storeCode", storeCode)
++                      .addKeyValue("topic", distributorProcessedTopic)
++                      .addKeyValue("messageId", msgId)
++                      .log();
++               }
++           });
++    }
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateService.java
+@@ -48,6 +48,7 @@
+     private final OperatorRepositoryPort repositoryPort;
+     private final OperatorDealerSenderPort senderPort;
+     private final StoreRegistry storeRegistry;
++    private final OperatorUpdateLock operatorUpdateLock;
+     private final SecureRandom random = new SecureRandom();
+ 
+     public OperatorUpdateService(
+@@ -56,13 +57,15 @@
+             OperatorWrapperXmlGenerator xmlGenerator,
+             OperatorRepositoryPort repositoryPort,
+             OperatorDealerSenderPort senderPort,
+-            StoreRegistry storeRegistry) {
++            StoreRegistry storeRegistry,
++            OperatorUpdateLock operatorUpdateLock) {
+         this.firestorePort = firestorePort;
+         this.parser = parser;
+         this.xmlGenerator = xmlGenerator;
+         this.repositoryPort = repositoryPort;
+         this.senderPort = senderPort;
+         this.storeRegistry = storeRegistry;
++        this.operatorUpdateLock = operatorUpdateLock;
+     }
+ 
+     @Override
+@@ -81,7 +84,11 @@
+             Operator operator = parser.parse(xml);
+             MDC.put("storeCode", String.valueOf(operator.codTienda()));
+ 
+-            int operatorId = repositoryPort.saveInProcess(operator);
++            // Upsert serializado por CC_OPERADOR: dos tramas concurrentes del mismo operador (duplicado de
++            // Central / reentrega Pub/Sub) no deben insertar dos filas. La segunda espera, ve la fila de la
++            // primera y la actualiza â reproduce la serializaciÃ³n del legacy. Ver OperatorUpdateLock.
++            int operatorId = operatorUpdateLock.runExclusive(
++                    operator.identityDocument(), () -> repositoryPort.saveInProcess(operator));
+ 
+             boolean connectionError = pushToAgents(operator, operatorId);
+ 
+
+
+--- Diff for /src/main/resources/application-dev.yml ---
+--- a//src/main/resources/application-dev.yml
++++ b//src/main/resources/application-dev.yml
+@@ -181,6 +181,7 @@
+   gcp:
+     pubsub:
+       topic-distributor: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR}
++      topic-distributor-processed: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR_PROCESSED:retail.local.distributor.processed.v1}
+       topic-synchro-controller: ${GCP_PUBSUB_TOPIC_SYNCHRO_CONTROLLER:retail.local.synchro.controller.v1}
+     firestore:
+       collection: ${GCP_FIRESTORE_COLLECTION:frames}
+
+
+--- Diff for /src/main/resources/application-local.yml ---
+--- a//src/main/resources/application-local.yml
++++ b//src/main/resources/application-local.yml
+@@ -235,6 +235,7 @@
+   gcp:
+     pubsub:
+       topic-distributor: retail.local.distributor.request.v1
++      topic-distributor-processed: retail.local.distributor.processed.v1
+       topic-synchro-controller: retail.local.synchro.controller.v1
+     firestore:
+       collection: frames
+
+
+--- Diff for /src/main/resources/application-prod.yml ---
+--- a//src/main/resources/application-prod.yml
++++ b//src/main/resources/application-prod.yml
+@@ -141,6 +141,7 @@
+   gcp:
+     pubsub:
+       topic-distributor: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR}
++      topic-distributor-processed: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR_PROCESSED:retail.local.distributor.processed.v1}
+       topic-synchro-controller: ${GCP_PUBSUB_TOPIC_SYNCHRO_CONTROLLER:retail.local.synchro.controller.v1}
+     firestore:
+       collection: ${GCP_FIRESTORE_COLLECTION:frames}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateServiceTest.java
+@@ -1,6 +1,7 @@
+ package com.elrosado.cersuitecloudlocalcore.service;
+ 
+ import com.elrosado.cersuitecloudlocalcore.domain.exception.OperatorUpdateException;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.DistributedLockPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.OperatorDealerSenderPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.OperatorRepositoryPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.TransactionFirestorePort;
+@@ -36,18 +37,24 @@
+     @Mock OperatorRepositoryPort repositoryPort;
+     @Mock OperatorDealerSenderPort senderPort;
+     @Mock StoreRegistry storeRegistry;
++    @Mock DistributedLockPort lockPort;
+ 
+     OperatorUpdateService service;
+ 
+     @BeforeEach
+     void setUp() {
++        // Lock real con puerto mock que siempre concede: verifica que el servicio ejecuta el upsert dentro
++        // de la secciÃ³n crÃ­tica sin alterar el comportamiento observado por el resto de los tests.
++        lenient().when(lockPort.tryAcquire(org.mockito.ArgumentMatchers.anyString(),
++                org.mockito.ArgumentMatchers.any())).thenReturn(true);
+         service = new OperatorUpdateService(
+                 firestorePort,
+                 new OperatorXmlParser(),
+                 new OperatorWrapperXmlGenerator(),
+                 repositoryPort,
+                 senderPort,
+-                storeRegistry);
++                storeRegistry,
++                new OperatorUpdateLock(lockPort));
+         lenient().when(repositoryPort.saveInProcess(org.mockito.ArgumentMatchers.any())).thenReturn(LOCAL_ID);
+     }
+ 
+
+

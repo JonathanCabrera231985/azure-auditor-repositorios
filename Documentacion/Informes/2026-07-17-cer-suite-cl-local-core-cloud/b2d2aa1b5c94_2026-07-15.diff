@@ -1,0 +1,21 @@
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateLock.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateLock.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateLock.java
+@@ -4,6 +4,7 @@
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.DistributedLockPort;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
++import org.springframework.beans.factory.annotation.Autowired;
+ import org.springframework.stereotype.Component;
+ 
+ import java.time.Duration;
+@@ -44,6 +45,7 @@
+     private final Duration maxWait;
+     private final Duration retryBackoff;
+ 
++    @Autowired
+     public OperatorUpdateLock(DistributedLockPort lockPort) {
+         this(lockPort, LOCK_TTL, MAX_WAIT, RETRY_BACKOFF);
+     }
+
+

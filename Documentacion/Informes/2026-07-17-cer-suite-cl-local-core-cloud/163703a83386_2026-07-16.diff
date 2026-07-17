@@ -1,0 +1,28 @@
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -54,6 +54,8 @@
+   # y se envía con operación 47 tal como el legacy (sin corregir a 51).
+   TRAMA_POS_OUTBOX_ENABLED: "true"
+ 
++  JOURNAL_FILE_FTP_ENABLED: "true"
++
+   # PinPadConfigurationProcess — actualización de configuración de red de pinpads físicos (CFG_PINPAD,
+   # datasource eyes/EYES_EC). Conexión TCP directa a cada pinpad (conectividad GKE→LAN de tienda
+   # confirmada por el usuario), no a Central.
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/OperatorPasswordUpdateSchedulerAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/OperatorPasswordUpdateSchedulerAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/OperatorPasswordUpdateSchedulerAdapter.java
+@@ -23,8 +23,6 @@
+ 
+     @Scheduled(fixedDelayString = "${operator-password-update.timesleep:30000}")
+     public void execute() {
+-        log.atInfo().setMessage("Iniciando ciclo de distribuciÃ³n de claves de supervisores").log();
+         useCase.processAllPendingUpdates();
+-        log.atInfo().setMessage("Ciclo de distribuciÃ³n de claves de supervisores finalizado").log();
+     }
+ }
+
+

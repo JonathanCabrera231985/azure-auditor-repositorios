@@ -1,0 +1,16 @@
+--- Diff for /k8s/hpa.yaml ---
+--- a//k8s/hpa.yaml
++++ b//k8s/hpa.yaml
+@@ -10,8 +10,8 @@
+     apiVersion: apps/v1
+     kind: Deployment
+     name: cer-suite-local-core-deployment
+-  minReplicas: 2
+-  maxReplicas: 10
++  minReplicas: 1
++  maxReplicas: 5
+   metrics:
+     - type: Resource
+       resource:
+
+

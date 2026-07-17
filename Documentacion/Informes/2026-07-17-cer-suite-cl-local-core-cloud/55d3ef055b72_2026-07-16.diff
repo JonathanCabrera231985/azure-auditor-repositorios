@@ -1,0 +1,218 @@
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/TslTransactionHeader.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/TslTransactionHeader.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/TslTransactionHeader.java
+@@ -35,7 +35,8 @@
+     String customerId,              // de "99|27" INVOICE_DATA â RUC/cÃ©dula cliente
+     String customerIdType,          // de "99|27" â "RUC","CEDULA","PASAPORTE"
+     long grossPositiveAmountCents,  // f[8] GROSSPOS en centavos crudos
+-    String receiptNumber            // de "99|06|20" field[8] â nÃºmero de comprobante
++    String receiptNumber,           // de "99|06|20" field[8] â nÃºmero de comprobante
++    Integer signOffQuantityOfTransactions  // op.17 SignOff: NUMSTRING f[5]; null = sin <SignOff>
+ ) {
+     public TslTransactionHeader {
+         customerId         = (customerId != null)         ? customerId         : "";
+@@ -48,6 +49,25 @@
+         operatorId         = (operatorId != null)         ? operatorId         : "";
+     }
+ 
++    /**
++     * Constructor de compatibilidad para cabeceras sin SignOff (la mayorÃ­a de las tramas).
++     * Delega en el constructor canÃ³nico con {@code signOffQuantityOfTransactions = null}.
++     */
++    public TslTransactionHeader(
++        String workstationId, String sequenceNumber, LocalDateTime endDateTime,
++        LocalDateTime beginDateTime, String businessDayDate, Integer ringElapsedTime,
++        Integer tenderElapsedTime, int idleElapsedTime, Integer lockElapsedTime,
++        String transactionSubType, int xmlTransactionTypeCode, boolean cancelFlag,
++        boolean voidedFlag, boolean trainingModeFlag, String operatorId, String customerId,
++        String customerIdType, long grossPositiveAmountCents, String receiptNumber
++    ) {
++        this(workstationId, sequenceNumber, endDateTime, beginDateTime, businessDayDate,
++             ringElapsedTime, tenderElapsedTime, idleElapsedTime, lockElapsedTime,
++             transactionSubType, xmlTransactionTypeCode, cancelFlag, voidedFlag,
++             trainingModeFlag, operatorId, customerId, customerIdType,
++             grossPositiveAmountCents, receiptNumber, null);
++    }
++
+     public boolean isConsumidorFinal() {
+         return "99999999".equals(customerId);
+     }
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/TslFrameParserService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/TslFrameParserService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/TslFrameParserService.java
+@@ -35,6 +35,12 @@
+     private static final String REDEMPTION_PROMOTION_ITEM_CODE = "811099999996";
+     /** Terminal del controlador para el cierre de tienda (legacy ELConstants.TerminalCode.CONTROLLER_TERM). */
+     private static final String CONTROLLER_TERMINAL_CODE = "0";
++    /** Registro "00": Ã­ndice de NUMSTRING (cantidad de transacciones del SignOff, op.17). */
++    private static final int TYPE00_NUMSTRING_INDEX = 5;
++    /** Registro "00": Ã­ndice de INDICAT1. */
++    private static final int TYPE00_INDICAT1_INDEX = 14;
++    /** INDICAT1 bit 4 encendido â SignOffIsFalse: no se emite el elemento <SignOff> (legacy). */
++    private static final int SIGN_OFF_IS_FALSE_BIT_POSITION = 4;
+ 
+     private final Clock clock;
+ 
+@@ -177,6 +183,21 @@
+         b.xmlTransactionTypeCode = txType.xmlTypeCode;
+         b.voidedFlag             = txType.isVoided();
+         b.trainingModeFlag       = txType.trainingMode;
++
++        // SignOff del operador (op.17 â ControlTransaction): cantidad de transacciones desde NUMSTRING.
++        // Si INDICAT1 bit 4 estÃ¡ encendido (SignOffIsFalse) el legacy NO emite <SignOff>.
++        if (txType == TslTransactionType.OPERATOR_SIGN_OFF) {
++            b.signOffQuantityOfTransactions = resolveSignOffQuantity(f);
++        }
++    }
++
++    /** Cantidad de transacciones del SignOff (NUMSTRING f[5]); null si SignOffIsFalse (INDICAT1 bit 4). */
++    private Integer resolveSignOffQuantity(String[] f) {
++        long indicat1 = parseLong(safeGet(f, TYPE00_INDICAT1_INDEX));
++        if (isBitOn(indicat1, SIGN_OFF_IS_FALSE_BIT_POSITION)) {
++            return null;
++        }
++        return parseIntOrNull(safeGet(f, TYPE00_NUMSTRING_INDEX));
+     }
+ 
+     /**
+@@ -1118,6 +1139,7 @@
+         Integer lockElapsedTime      = null;  // f[12] SPECIAL del registro "00"
+         int idleElapsedTime          = 0;
+         String operatorId             = "";
++        Integer signOffQuantityOfTransactions = null;  // op.17 SignOff; null = sin <SignOff>
+         long grossPositiveAmountCents = 0L;
+         long grossNegativeAmountCents = 0L;  // f[9] del registro "00" (ISSUE-P2)
+         long positiveDiscountCents    = 0L;  // itemType=7 no-promo VoidFlag=false (ISSUE-P3)
+@@ -1299,7 +1321,8 @@
+                 customerId,
+                 customerIdType,
+                 grossPositiveAmountCents,
+-                receiptNumber
++                receiptNumber,
++                signOffQuantityOfTransactions
+             );
+ 
+             return new SaleTransaction(
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorService.java
+@@ -323,10 +323,16 @@
+             child(doc, ct, "FlgConciliacion", 1);
+             ct.appendChild(elem(doc, "BusinessEOD"));
+         } else {
+-            // SignOff (subtipos 15/17): comportamiento previo conservado.
+-            attr(ct, ATTR_TYPE_CODE, "SignOff");
+-            child(doc, ct, "BusinessEOD",     tx.isStoreClosing());
+-            child(doc, ct, "FlgConciliacion", false);
++            // ControlTransaction genÃ©rico (SignOff op.17, reimpresiÃ³n op.15): SIN atributo TypeCode
++            // y con FlgConciliacion=1 por defecto (legacy). El <SignOff> se emite solo cuando el
++            // parser resolviÃ³ la cantidad de transacciones (null = SignOffIsFalse o reimpresiÃ³n).
++            child(doc, ct, "FlgConciliacion", 1);
++            Integer signOffQty = tx.header().signOffQuantityOfTransactions();
++            if (signOffQty != null) {
++                Element signOff = elem(doc, "SignOff");
++                child(doc, signOff, "quantityOfTransactions", signOffQty);
++                ct.appendChild(signOff);
++            }
+         }
+         return ct;
+     }
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/TslFrameParserServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/TslFrameParserServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/TslFrameParserServiceTest.java
+@@ -28,6 +28,12 @@
+     // Sin registro "00": la cabecera se arma en processStoreClosing.
+     static final String TRAMA_STORE_CLOSING =
+             "000076S'|'10'|'000'|'100'|'1'|'20260716144152'|'21|2607161434|02|63|30|'|'20260714";
++
++    // Trama de SIGN OFF de operador (registro "00", TRANTYPE=17) â ControlTransaction con <SignOff>.
++    static final String TRAMA_SIGN_OFF =
++            "000128S'|'10'|'000'|'100'|'1'|'20260716171729'|'" +
++                    "00|0001|0011|2607161717|17|0004|77712451|99999999|0634|00|1915|01||02|00|00" +
++                    "'|'20260716";
+ 
+     // Trama 2: CHECKOUT TRANTYPE=00 â RetailTransaction simple
+     // Fuente: tramas_type_10.txt lÃ­nea 18
+@@ -283,6 +289,21 @@
+         assertEquals("2026-07-16T14:34", tx.header().beginDateTime().toString());
+     }
+ 
++    @Test
++    void buildTransaction_signOff_buildsControlWithQuantity() {
++        TslFrame frame = service.parseFrame(TRAMA_SIGN_OFF);
++        SaleTransaction tx = service.buildTransaction("trx-signoff-001", frame, sampleStore);
++
++        assertFalse(tx.isStoreClosing(), "El SignOff no es cierre de tienda");
++        assertEquals(2, tx.header().xmlTransactionTypeCode(),
++                "TRANTYPE=17 debe producir xmlTypeCode=2 (ControlTransaction)");
++        assertEquals("0001", tx.header().workstationId());
++        assertEquals("11", tx.header().sequenceNumber());
++        assertEquals("77712451", tx.header().operatorId());
++        // NUMSTRING (f[5]=0004) â quantityOfTransactions=4; INDICAT1 (f[14]=00) bit4 off â SignOff presente.
++        assertEquals(4, tx.header().signOffQuantityOfTransactions());
++    }
++
+     // -----------------------------------------------------------------------
+     // buildTransaction â CHECKOUT (RetailTransaction)
+     // -----------------------------------------------------------------------
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorServiceTest.java
+@@ -622,6 +622,47 @@
+                 "FlgConciliacion debe preceder a BusinessEOD");
+     }
+ 
++    @Test
++    void generate_controlTransaction_signOff_structure() throws Exception {
++        // SignOff (TRANTYPE=17): ControlTransaction SIN TypeCode, FlgConciliacion=1 y
++        // <SignOff><quantityOfTransactions>4</quantityOfTransactions></SignOff>.
++        TslTransactionHeader signOffHeader = new TslTransactionHeader(
++                "0001", "11",
++                LocalDateTime.of(2026, 7, 16, 17, 17),
++                LocalDateTime.of(2026, 7, 16, 16, 45, 4),
++                "20260716",
++                1915, 1, 2,
++                null,     // lockElapsedTime
++                "17", 2,
++                false, false, false,
++                "77712451", "", "", 0L, "",
++                4         // signOffQuantityOfTransactions
++        );
++        SaleTransaction signOffTx = new SaleTransaction(
++                "trx-signoff-001", "100", sampleStore,
++                signOffHeader,
++                List.of(), List.of(), List.of(),
++                0L, false,
++                "", "", "", "", "", "",
++                List.of(), Map.of(), null, null, null, null,
++                List.of(), List.of(), List.of(), "", List.of(),
++                List.of(), List.of(), null, null, List.of(), List.of(), List.of(), List.of(),
++                0L, 0L, 0L, 0L, 0L, 0L, 0L, List.of()
++        );
++
++        String xml = generator.generate(signOffTx);
++
++        assertEquals("2", xmlText(xml, "TransactionTypeCode"));
++        assertTrue(xml.contains("<ControlTransaction>"),
++                "ControlTransaction del SignOff NO debe llevar atributo TypeCode");
++        assertFalse(xml.contains("<BusinessEOD"), "El SignOff no debe emitir BusinessEOD");
++        assertTrue(xml.contains("<FlgConciliacion>1</FlgConciliacion>"), "FlgConciliacion debe ser 1");
++        assertTrue(xml.contains("<SignOff><quantityOfTransactions>4</quantityOfTransactions></SignOff>"),
++                "Debe emitir SignOff con quantityOfTransactions=4");
++        assertTrue(xml.indexOf("<FlgConciliacion>") < xml.indexOf("<SignOff>"),
++                "FlgConciliacion debe preceder a SignOff");
++    }
++
+     // -----------------------------------------------------------------------
+     // TenderControlTransaction (tipo 3 â TillChange)
+     // -----------------------------------------------------------------------
+
+

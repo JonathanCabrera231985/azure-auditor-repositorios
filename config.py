@@ -12,10 +12,13 @@ AZURE_DEVOPS_REPOSITORY_NAME = os.getenv("AZURE_DEVOPS_REPOSITORY_NAME")
 AZURE_DEVOPS_PAT = os.getenv("AZURE_DEVOPS_PAT")
 LLM_API_KEY = os.getenv("LLM_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")
+
 try:
     DAYS_TO_EXTRACT = int(os.getenv("DAYS_TO_EXTRACT", "1"))
 except ValueError:
     DAYS_TO_EXTRACT = 1
 
-if not all([AZURE_DEVOPS_INSTANCE, AZURE_DEVOPS_COLLECTION, AZURE_DEVOPS_PROJECT, AZURE_DEVOPS_REPOSITORY_NAME, AZURE_DEVOPS_PAT, LLM_API_KEY]):
-    raise ValueError("One or more required environment variables are missing.")
+if not all([AZURE_DEVOPS_INSTANCE, AZURE_DEVOPS_COLLECTION, AZURE_DEVOPS_PROJECT, AZURE_DEVOPS_REPOSITORY_NAME, AZURE_DEVOPS_PAT]):
+    raise ValueError("One or more required Azure DevOps environment variables are missing.")

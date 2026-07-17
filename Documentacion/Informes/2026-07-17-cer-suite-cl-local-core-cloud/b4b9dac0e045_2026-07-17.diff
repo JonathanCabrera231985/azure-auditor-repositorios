@@ -1,0 +1,43 @@
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -8,6 +8,9 @@
+ data:
+   SPRING_PROFILES_ACTIVE: "dev"
+   SERVER_PORT: "8080"
++  # Zona horaria del contenedor/JVM — la imagen base (eclipse-temurin:25-jre) no trae TZ seteado y
++  # cae a UTC por defecto, aunque el nodo tenga NTP sincronizado en hora local.
++  TZ: "America/Guayaquil"
+   # Identificación de Proyecto en Google Cloud Platform
+   GCP_PROJECT_ID: "modern-suite-cloud-inf"
+   
+
+
+--- Diff for /k8s/hpa.yaml ---
+--- a//k8s/hpa.yaml
++++ b//k8s/hpa.yaml
+@@ -1,17 +1,17 @@
+ apiVersion: autoscaling/v2
+ kind: HorizontalPodAutoscaler
+ metadata:
+-  name: modern-gcp-microservice-hpa
++  name: cer-suite-local-core-hpa
+   namespace: ns-cer-suite-dev
+   labels:
+-    app: modern-gcp-microservice
++    app: cer-suite-local-core
+ spec:
+   scaleTargetRef:
+     apiVersion: apps/v1
+     kind: Deployment
+-    name: modern-gcp-microservice-deployment
+-  minReplicas: 2
+-  maxReplicas: 10
++    name: cer-suite-local-core-deployment
++  minReplicas: 1
++  maxReplicas: 5
+   metrics:
+     - type: Resource
+       resource:
+
+

@@ -1,0 +1,158 @@
+--- Diff for /CLAUDE.md ---
+--- a//CLAUDE.md
++++ b//CLAUDE.md
+@@ -386,7 +386,17 @@
+ 5. Genera el documento XML de la transacción en memoria.
+ 6. Persiste el XML en Firestore junto al registro de la trama.
+ 7. Actualiza el estado de la transacción en Firestore a `XML_GENERATED`.
+-8. Publica un evento Pub/Sub notificando a Distributor Cloud que el XML está disponible.
++8. Publica hacia Distributor Cloud por **dos** tópicos (ambos disparan flujos que leen el XML desde
++   Firestore, sin dependencia entre sí — ver `PubSubDistributorPublisher`):
++   - `retail.local.distributor.request.v1` (`topic-distributor`) — evento JSON `XML_GENERATED` que
++     dispara el guardado TLOG en BD Multi-Local.
++   - `retail.local.distributor.processed.v1` (`topic-distributor-processed`) — `transactionId` en crudo
++     que dispara la **replicación a BD Central**. Antes lo publicaba el propio Distributor tras guardar
++     (publicaba y leía su misma cola); ahora lo publica este servicio y el Distributor solo la consume.
++     Efecto: la replicación central y el guardado local corren en paralelo (antes eran secuenciales); no
++     hay dependencia de datos. Para evitar carrera de estados en Firestore, el flujo TLOG local escribe el
++     campo `status` (`SAVED`/`DUPLICATED`/`ERROR`) y la replicación central escribe su propio campo
++     `replicationStatus` (`PROCESSED_CENTRAL`) — un solo escritor por campo.
+ 
+ ### Operaciones request-reply migradas (Pub/Sub, carril `consultas`)
+ 
+
+
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -15,6 +15,7 @@
+   GCP_PUBSUB_SUB_VENTAS: "retail.local.ventas.request.v1-sub"
+   GCP_PUBSUB_TOPIC_VENTAS: "retail.local.ventas.request.v1"
+   GCP_PUBSUB_TOPIC_DISTRIBUTOR: "retail.local.distributor.request.v1"
++  GCP_PUBSUB_TOPIC_DISTRIBUTOR_PROCESSED: "retail.local.distributor.processed.v1"
+   GCP_PUBSUB_TOPIC_SYNCHRO_CONTROLLER: "retail.local.synchro.controller.v1"
+   GCP_PUBSUB_SUB_SYSCARD_FRAME: "retail.local.syscard.frame.request.v1-sub"
+   GCP_PUBSUB_TOPIC_SYSCARD_FRAME: "retail.local.syscard.frame.request.v1"
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/messaging/PubSubDistributorPublisher.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/messaging/PubSubDistributorPublisher.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/messaging/PubSubDistributorPublisher.java
+@@ -12,8 +12,24 @@
+ import java.util.Map;
+ 
+ /**
+- * Adaptador de salida: publica el evento XML_GENERATED al tÃ³pico de Distributor Cloud.
+- * El payload se serializa como JSON con transactionId, storeCode, eventType y publishedAt.
++ * Adaptador de salida: al generarse el XML notifica a Distributor Cloud por <b>dos</b> tÃ³picos, que
++ * disparan flujos independientes (ambos leen el XML desde Firestore, no dependen entre sÃ­):
++ * <ul>
++ *   <li>{@code topic-distributor} ({@code retail.local.distributor.request.v1}) â TLOG â BD Multi-Local.
++ *       Payload JSON con {@code transactionId}, {@code storeId}, {@code status} y {@code publishedAt}.</li>
++ *   <li>{@code topic-distributor-processed} ({@code retail.local.distributor.processed.v1}) â replicaciÃ³n
++ *       a BD Central. Payload = {@code transactionId} en crudo (formato que espera
++ *       {@code CentralReplicationMessageHandler} del Distributor).</li>
++ * </ul>
++ * Antes, el mensaje de {@code processed.v1} lo publicaba el propio Distributor tras guardar en Multi-Local
++ * (publicaba y leÃ­a la misma cola). Ahora lo publica este servicio, ya que la replicaciÃ³n central solo
++ * necesita el XML de Firestore âque este servicio ya escribiÃ³â y no el guardado local. El Distributor
++ * solo consume {@code processed.v1}.
++ * <p>
++ * <b>Orden:</b> los dos flujos corren en paralelo (antes la replicaciÃ³n central iba despuÃ©s del guardado
++ * local). No hay dependencia de datos, y no hay carrera de estados: el flujo TLOG local actualiza el campo
++ * {@code status} y la replicaciÃ³n central actualiza su propio campo {@code replicationStatus} â un solo
++ * escritor por campo en Firestore.
+  */
+ @Component
+ public class PubSubDistributorPublisher implements EventPublisherPort {
+@@ -26,6 +42,9 @@
+ 
+     @Value("${app.gcp.pubsub.topic-distributor}")
+     private String distributorTopic;
++
++    @Value("${app.gcp.pubsub.topic-distributor-processed}")
++    private String distributorProcessedTopic;
+ 
+     public PubSubDistributorPublisher(IMessagePublisher messagePublisher, ObjectMapper objectMapper) {
+         this.messagePublisher = messagePublisher;
+@@ -66,9 +85,39 @@
+                    }
+                });
+ 
++            publishProcessed(transactionId, storeCode);
++
+         } catch (Exception e) {
+             throw new IllegalStateException(
+                 "Error al serializar o publicar evento XML_GENERATED para transacciÃ³n: " + transactionId, e);
+         }
+     }
++
++    /**
++     * Dispara la replicaciÃ³n a BD Central publicando el {@code transactionId} en crudo en
++     * {@code processed.v1}. No-fatal: un fallo se registra pero no interrumpe el flujo de ventas
++     * (Pub/Sub / el barrido de Firestore permiten recuperaciÃ³n posterior), igual que el evento principal.
++     */
++    private void publishProcessed(String transactionId, String storeCode) {
++        messagePublisher.publishAsync(distributorProcessedTopic, transactionId)
++           .whenComplete((msgId, ex) -> {
++               if (ex != null) {
++                   log.atError()
++                      .setMessage("Error al publicar disparo de replicaciÃ³n central hacia Distributor Cloud")
++                      .addKeyValue("transactionId", transactionId)
++                      .addKeyValue("storeCode", storeCode)
++                      .addKeyValue("topic", distributorProcessedTopic)
++                      .setCause(ex)
++                      .log();
++               } else {
++                   log.atInfo()
++                      .setMessage("Disparo de replicaciÃ³n central publicado hacia Distributor Cloud")
++                      .addKeyValue("transactionId", transactionId)
++                      .addKeyValue("storeCode", storeCode)
++                      .addKeyValue("topic", distributorProcessedTopic)
++                      .addKeyValue("messageId", msgId)
++                      .log();
++               }
++           });
++    }
+ }
+
+
+--- Diff for /src/main/resources/application-dev.yml ---
+--- a//src/main/resources/application-dev.yml
++++ b//src/main/resources/application-dev.yml
+@@ -181,6 +181,7 @@
+   gcp:
+     pubsub:
+       topic-distributor: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR}
++      topic-distributor-processed: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR_PROCESSED:retail.local.distributor.processed.v1}
+       topic-synchro-controller: ${GCP_PUBSUB_TOPIC_SYNCHRO_CONTROLLER:retail.local.synchro.controller.v1}
+     firestore:
+       collection: ${GCP_FIRESTORE_COLLECTION:frames}
+
+
+--- Diff for /src/main/resources/application-local.yml ---
+--- a//src/main/resources/application-local.yml
++++ b//src/main/resources/application-local.yml
+@@ -235,6 +235,7 @@
+   gcp:
+     pubsub:
+       topic-distributor: retail.local.distributor.request.v1
++      topic-distributor-processed: retail.local.distributor.processed.v1
+       topic-synchro-controller: retail.local.synchro.controller.v1
+     firestore:
+       collection: frames
+
+
+--- Diff for /src/main/resources/application-prod.yml ---
+--- a//src/main/resources/application-prod.yml
++++ b//src/main/resources/application-prod.yml
+@@ -141,6 +141,7 @@
+   gcp:
+     pubsub:
+       topic-distributor: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR}
++      topic-distributor-processed: ${GCP_PUBSUB_TOPIC_DISTRIBUTOR_PROCESSED:retail.local.distributor.processed.v1}
+       topic-synchro-controller: ${GCP_PUBSUB_TOPIC_SYNCHRO_CONTROLLER:retail.local.synchro.controller.v1}
+     firestore:
+       collection: ${GCP_FIRESTORE_COLLECTION:frames}
+
+

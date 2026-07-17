@@ -1,0 +1,2420 @@
+--- Diff for /.claude_rules/vulnerabilities.md ---
+--- a//.claude_rules/vulnerabilities.md
++++ b//.claude_rules/vulnerabilities.md
+@@ -39,11 +39,11 @@
+ |     |     |         | BDO             | PORTFOLIO_UNCLASSIFIED                    |
+ |     |     | Notes:  | ITCqure - Test  | PORTFOLIO_UNCLASSIFIED                    |
+ |     |     |         | BMI             | PORTFOLIO_UNCLASSIFIED                    |
+-• unparsed files are the source code files of your  Times analyzed 1
++� unparsed files are the source code files of your  Times analyzed 1
+ application that kiuwan engine couldn't read
+ | during the analysis process. |     |     | Model Info |     |
+ | ---------------------------- | --- | --- | ---------- | --- |
+-• unrecognized files are the ones that were in  model name CQM
++� unrecognized files are the ones that were in  model name CQM
+ your analyzed path but they aren't source code  model version q13659
+ or they contains code in languages that Kiuwan  engine version master.p713.q13659.a1914.i682
+ |     | doesn't support yet. |     | active rules   | 521 |
+@@ -132,15 +132,15 @@
+ 3 Defects in file cer-suite-cl-local-core-cloud/src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/
+ FrameReproFirestoreAdapter.java
+ |
+-129 throw new IllegalStateException("Error eliminando frames_repro: " + reproId, e.getCause());
+-|
+-152 throw new IllegalStateException("Error liberando frames_repro: " + reproId, e.getCause());
++129 throw new IllegalStateException("Error eliminando frames-repro: " + reproId, e.getCause());
++|
++152 throw new IllegalStateException("Error liberando frames-repro: " + reproId, e.getCause());
+ 
+ VULNERABILITIES REPORT
+ Application:cer-sipecom-cer-suite-cl-local-core-cloud | Analysis label:from_cli_gcp | Analysis date:2026/07/02 17:23 | Pag. 7
+ Report date:2026/07/02 10:44
+ |
+-73 throw new IllegalStateException("Error consultando frames_repro pendientes", e.getCause());
++73 throw new IllegalStateException("Error consultando frames-repro pendientes", e.getCause());
+ 1 Defects in file cer-suite-cl-local-core-cloud/src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/
+ MotoProcessErrorFirestoreAdapter.java
+ |
+@@ -334,4 +334,4 @@
+ Report date:2026/07/02 10:44
+ THANK YOU!
+ contact@kiuwan.com | Partnership:partners@kiuwan.com | +1 6176073353
+-© Kiuwan Software S.L. – All rights reserved
++� Kiuwan Software S.L. � All rights reserved
+
+
+--- Diff for /.operations/CONTRATO_TRAMA_POS_OUTBOX.md ---
+--- a//.operations/CONTRATO_TRAMA_POS_OUTBOX.md
++++ b//.operations/CONTRATO_TRAMA_POS_OUTBOX.md
+@@ -5,8 +5,8 @@
+ > `SendTramaFromPosToCentralProcess` y `SendTramaFromServerProcess` son procesos **independientes, sin
+ > relación entre sí**, a pesar de que ambos reenvían tramas con formato tageado similar (`MT=...'|'BM1=...`)
+ > a Central. Deben trabajar de forma **aislada**, cada uno con su propia cola técnica Firestore + Pub/Sub —
+-> igual que ya ocurre con la familia de puntos (`puntos_outbound_frames`) y la familia de respuesta de
+-> consumo (`syscard_response_outbound_frames`), que tampoco comparten colección/topic con el outbox
++> igual que ya ocurre con la familia de puntos (`puntos-outbound-frames`) y la familia de respuesta de
++> consumo (`syscard-response-outbound-frames`), que tampoco comparten colección/topic con el outbox
+ > Syscard aunque el patrón de implementación sea el mismo.
+ >
+ > Este documento fija el contrato de esa cola técnica propia — nombres, esquema de documento, formato del
+@@ -41,7 +41,7 @@
+ |---|---|---|
+ | Topic Pub/Sub | `retail.local.trama.pos.request.v1` | **Confirmado por el usuario** |
+ | Subscription Pub/Sub | `retail.local.trama.pos.request.v1-sub` | Propuesto — mismo patrón `-sub` que las 3 familias existentes |
+-| Colección Firestore | `trama_pos_outbound_frames` | **Propuesto en este documento** — sigue el patrón `syscard_outbound_frames`/`puntos_outbound_frames`/`syscard_response_outbound_frames` |
++| Colección Firestore | `trama-pos-outbound-frames` | **Propuesto en este documento** — sigue el patrón `syscard-outbound-frames`/`puntos-outbound-frames`/`syscard-response-outbound-frames` |
+ | Prefijo de configuración | `tramaPosOutbox` | Propuesto — mismo patrón `syscardOutbox`/`puntosOutbox`/`syscardResponseOutbox` en `application-*.yml` |
+ | Env var colección | `GCP_FIRESTORE_COLLECTION_TRAMA_POS_OUTBOX` | Propuesto |
+ | Env var topic | `GCP_PUBSUB_TOPIC_TRAMA_POS_FRAME` | Propuesto |
+@@ -57,9 +57,9 @@
+ 
+ ---
+ 
+-## 3. Estructura del documento Firestore (`trama_pos_outbound_frames`)
+-
+-Mismo patrón de esquema que `puntos_outbound_frames` (la familia más cercana en forma, ver sección 5): sin
++## 3. Estructura del documento Firestore (`trama-pos-outbound-frames`)
++
++Mismo patrón de esquema que `puntos-outbound-frames` (la familia más cercana en forma, ver sección 5): sin
+ campo `status` al crear (= pendiente), `attempts` en `0`, timestamps `createdAt`/`claimedAt`/`sentAt`
+ gestionados por el adapter, nunca por el productor.
+ 
+@@ -200,7 +200,7 @@
+ | BLQ-2 | Prioridad/momento de migración de `RegisterTramaFromPosOperation` (productor, op. 49) | **Deferido a propósito** — este documento se enfoca en el consumidor/cola técnica; el productor se analiza formalmente después, reutilizando este contrato |
+ | BLQ-6 | Código de operación 47 vs 51 | **RESUELTO** — se mantiene 47, de forma aislada, replicando el legacy tal cual (no es un bug a corregir en este componente) |
+ | BLQ-7 | DDL de `SYS_FRM_DT` no confirmado | **RESUELTO** — disponible en `.migration/EYES_EC/SYS_FRM_DT.sql` (sección 8). Sigue abierta la pregunta de negocio (¿se mantiene el INSERT local?), pero ya no es un bloqueante de DDL |
+-| BLQ-8 (nuevo) | Nombre de colección Firestore `trama_pos_outbound_frames` es una **propuesta** de este documento, no una confirmación explícita del usuario como sí lo es el topic | Bajo impacto — confirmar en la próxima interacción antes de implementar, o aceptar tácitamente si no hay objeción |
++| BLQ-8 (nuevo) | Nombre de colección Firestore `trama-pos-outbound-frames` es una **propuesta** de este documento, no una confirmación explícita del usuario como sí lo es el topic | Bajo impacto — confirmar en la próxima interacción antes de implementar, o aceptar tácitamente si no hay objeción |
+ 
+ ---
+ 
+
+
+--- Diff for /.operations/DISENO_RECEIVEPUNTOSOPERATION_FUTURO.md ---
+--- a//.operations/DISENO_RECEIVEPUNTOSOPERATION_FUTURO.md
++++ b//.operations/DISENO_RECEIVEPUNTOSOPERATION_FUTURO.md
+@@ -33,7 +33,7 @@
+ 3. **El reenvío a Central se hace vía outbox Firestore + Pub/Sub, nunca vía archivo local** (confirmado,
+    Q_DISEÑO1). Esta es la restricción de diseño principal de este documento.
+ 4. **Nombres de la cola técnica ya confirmados** (B5, 2026-07-04): colección Firestore
+-   `puntos_outbound_frames`, topic Pub/Sub `retail.local.puntos.frame.request.v1` (subscription
++   `puntos-outbound-frames`, topic Pub/Sub `retail.local.puntos.frame.request.v1` (subscription
+    `retail.local.puntos.frame.request.v1-sub`). `ReceivePuntosOperation` debe encolar en esta misma
+    colección — no crear una colección/topic distintos.
+ 5. **`eyes.store.code` NO se utilizará (confirmado 2026-07-05)** — resuelve la alerta `EYES_STORE_CODE`
+@@ -55,7 +55,7 @@
+   1. Parsear la trama entrante (terminal|trxNum|item:ordNum:ptos:cdPromo|...)
+   2. INSERT local en CO_PTS_DT (datasource arts-ec, ya configurado — mismo patrón que ya usa
+      SaveTransactionsProcess para esta tabla)
+-  3. Encolar un documento en la colección Firestore `puntos_outbound_frames`:
++  3. Encolar un documento en la colección Firestore `puntos-outbound-frames`:
+      PuntosOutboxPort.enqueue(PuntosOutboundFrame(storeCode, linea, fechaNegocio))
+   4. Publicar evento Pub/Sub al topic `retail.local.puntos.frame.request.v1`:
+      PuntosFrameEventPort.publishFrameEnqueued(docId)
+
+
+--- Diff for /.operations/DISENO_RECEIVERESPONSESYSCARDOPERATION_FUTURO.md ---
+--- a//.operations/DISENO_RECEIVERESPONSESYSCARDOPERATION_FUTURO.md
++++ b//.operations/DISENO_RECEIVERESPONSESYSCARDOPERATION_FUTURO.md
+@@ -42,8 +42,8 @@
+    `.operations/CONTRATO_FIRESTORE_PUBSUB_OPERATIONS_FUTUROS.md`: insertar el documento con su
+    `storeCode` real y **luego** publicar el evento Pub/Sub.
+ 5. **Nombres de la cola técnica**: PENDIENTE de confirmar con el usuario (colección Firestore y
+-   topic/subscription Pub/Sub propios — no reutilizar `syscard_outbound_frames` ni
+-   `puntos_outbound_frames`, formato de cuerpo y destino distintos). Actualizar este documento en cuanto
++   topic/subscription Pub/Sub propios — no reutilizar `syscard-outbound-frames` ni
++   `puntos-outbound-frames`, formato de cuerpo y destino distintos). Actualizar este documento en cuanto
+    se confirmen.
+ 
+ ---
+
+
+--- Diff for /.operations/FLUJO_REVERSO_Y_OUTBOX_SYSCARD_CENTRAL.md ---
+--- a//.operations/FLUJO_REVERSO_Y_OUTBOX_SYSCARD_CENTRAL.md
++++ b//.operations/FLUJO_REVERSO_Y_OUTBOX_SYSCARD_CENTRAL.md
+@@ -52,7 +52,7 @@
+                                                             │  PublishSyscardFrameService           │
+                                                             │  1. SyscardFrameFormatter.format*Body │
+                                                             │  2. outboxPort.enqueue(frame)          │
+-                                                            │     → Firestore: syscard_outbound_frames│
++                                                            │     → Firestore: syscard-outbound-frames│
+                                                             │       (doc SIN campo "status" = pendiente)│
+                                                             │  3. eventPort.publishFrameEnqueued(docId)│
+                                                             │     → Pub/Sub: retail.local.syscard.    │
+@@ -123,7 +123,7 @@
+ 
+ ## 4. El outbox (productor → Firestore → Pub/Sub → consumidor)
+ 
+-### Formato del documento Firestore (colección `syscard_outbound_frames`)
++### Formato del documento Firestore (colección `syscard-outbound-frames`)
+ 
+ | Campo | Contenido |
+ |---|---|
+@@ -150,7 +150,7 @@
+ | Propiedad | Env var | Default |
+ |---|---|---|
+ | `enabled` | `SYSCARD_OUTBOX_ENABLED` | `true` |
+-| `collection` | `GCP_FIRESTORE_COLLECTION_SYSCARD_OUTBOX` | `syscard_outbound_frames` |
++| `collection` | `GCP_FIRESTORE_COLLECTION_SYSCARD_OUTBOX` | `syscard-outbound-frames` |
+ | `pubsub.topic` | `GCP_PUBSUB_TOPIC_SYSCARD_FRAME` | `retail.local.syscard.frame.request.v1` |
+ | `pubsub.subscription` | `GCP_PUBSUB_SUB_SYSCARD_FRAME` | `retail.local.syscard.frame.request.v1-sub` |
+ | `central-port` | `SYSCARD_CENTRAL_PORT` | `8000` |
+
+
+--- Diff for /AGENTS.md ---
+--- a//AGENTS.md
++++ b//AGENTS.md
+@@ -34,7 +34,7 @@
+ - **GCS routes**: check `.claude_rules/GCS_ROUTES_INVENTORY.md`; if a route is missing, stop and request the exact value. From 2026-06-24, new GCS prefixes use UPPER_CASE.
+ - **DDL gate**: do not add Entity/Repository/DTO/Projection/Query/Mapper for legacy tables without exact DDL.
+ - **Schedulers**: migrated Phase-1 processes use `@Scheduled`; no Pub/Sub, `@Async`, `ExecutorService`, manual threads, or infinite loops in Phase 1.
+-- **process_error collection**: Phase-1 error tracking writes to Firestore collection `process_error` (configured via `app.gcp.firestore.collection-process-error`).
++- **Error tracking (removed 2026-07-16)**: migrated processes no longer write a Firestore `process-error` record on failure — that mechanism was write-only (nothing ever read it back) and duplicated structured Cloud Logging. Use `log.atError()...setCause(e)` only.
+ - **Future phases**: Redis parameter flow is Central DB -> Redis -> application; DB secrets stay in Kubernetes Secrets until the future Secret Manager phase.
+ - **Adding a new process**: read `.claude_analytics/PROMPT_BASE_MIGRACION_PROCESOS_LEGACY.md` first. Every migration follows the same pattern: analysis → ports → service → adapters → scheduler → tests.
+ 
+
+
+--- Diff for /CLAUDE.md ---
+--- a//CLAUDE.md
++++ b//CLAUDE.md
+@@ -138,7 +138,7 @@
+ 4. **XmlGeneratorService** serializa el modelo de dominio a XML usando la API DOM del JDK (sin XStream/JAXB).
+ 
+ **Procesos legacy tipo polling (`@Scheduled`, dirigidos por GCS):**
+-Cada proceso migrado tiene su propio adapter scheduler, servicio, ports y adapters GCS/DB. El reprocesamiento de errores (`FrameReproSchedulerAdapter` + `ReproService`) hace poll de la colección Firestore `frames_repro` con claim atómico por réplica.
++Cada proceso migrado tiene su propio adapter scheduler, servicio, ports y adapters GCS/DB. El reprocesamiento de errores (`FrameReproSchedulerAdapter` + `ReproService`) hace poll de la colección Firestore `frames-repro` con claim atómico por réplica.
+ 
+ ### Fuentes de datos SQL (multi-datasource)
+ 
+@@ -287,7 +287,7 @@
+ 
+ ## Infraestructura GCP
+ 
+-- **Firestore**: máquina de estados de la transacción (`IN_PROCESS` → `XML_GENERATED`) y almacenamiento de payload; colas outbox (`frames_repro`, outbox Syscard/Puntos); tracking de errores (`process_error`).
++- **Firestore**: máquina de estados de la transacción (`IN_PROCESS` → `XML_GENERATED`) y almacenamiento de payload; colas outbox (`frames-repro`, outbox Syscard/Puntos).
+ - **Pub/Sub**: eventos de transacción de entrada + distribución de XML de salida + disparos de outbox hacia Central.
+ - **Cloud SQL (SQL Server)**: multi-datasource (ver tabla arriba).
+ - **GCS**: todo almacenamiento de archivos de negocio (ver `GCS_ROUTES_INVENTORY.md`).
+@@ -466,7 +466,7 @@
+ ### Reprocesamiento de errores
+ | Servicio | Qué hace |
+ |----------|----------|
+-| `ReproService` (`FrameReproSchedulerAdapter`) | Hace poll de la colección Firestore `frames_repro` con claim atómico por réplica y reprocesa cada documento en exactamente una réplica. |
++| `ReproService` (`FrameReproSchedulerAdapter`) | Hace poll de la colección Firestore `frames-repro` con claim atómico por réplica y reprocesa cada documento en exactamente una réplica. |
+ 
+ ### Sincronización de parámetros (BD Central → BD Multi Local → Redis)
+ 
+@@ -511,7 +511,7 @@
+ - **Fase 1**: los componentes `Process`/`Operation` legacy migrados que usan valores de `ArmsServerConf.properties` deben registrar esos valores solo en `k8s/properties.yaml`, nunca en el ConfigMap principal.
+ - **Fase 1**: las rutas de archivo deben usar GCS y verificarse contra `.claude_rules/GCS_ROUTES_INVENTORY.md`; las rutas faltantes detienen la migración hasta que se provea el valor exacto.
+ - **Fase 1**: el polling legacy programado usa Spring `@Scheduled`; no usar Pub/Sub, `@Async`, `ExecutorService`, `Thread` manual ni bucles infinitos salvo que una fase posterior cambie la regla explícitamente.
+-- **Fase 1**: el tracking de errores en Firestore para todos los procesos migrados usa la colección genérica `process_error`. Cada adapter escribe vía su propia implementación `*ErrorTrackerPort`. El nombre se resuelve desde `app.gcp.firestore.collection-process-error` (env `GCP_FIRESTORE_COLLECTION_PROCESS_ERROR`, default `process_error`).
++- **Fase 1 (revertida 2026-07-16)**: el tracking de errores para procesos migrados (`UpdateCedPadRucService`, `UpdateMotoService`, `SearchInventarioStickerService`, `JournalFileService`, `SyncParametersService`) ya no persiste en Firestore. Se eliminaron los 5 `*ErrorTrackerPort`, sus adapters Firestore y la colección genérica `process-error` — el mecanismo era de solo escritura (nada lo leía de vuelta) y duplicaba lo que ya queda en Cloud Logging estructurado (`log.atError()...setCause(e)`), que sigue siendo la única fuente de auditoría de errores para estos procesos.
+ - **Fase 1 (superada 2026-07-14 para credenciales de BD)**: originalmente las credenciales de base de datos permanecían en Kubernetes Secrets. Ya migraron a GCP Secret Manager en dev/prod — ver "Secret Manager" más abajo. El perfil `local` sigue sin usar Secret Manager (valores estáticos en `application-local.yml`).
+ - **Gate DDL**: no crear ni actualizar entidades JPA, repositorios, DTOs, proyecciones, queries o mappers sin el DDL exacto de cada tabla involucrada.
+ - **Fase 2**: Pub/Sub solo se permite tras definir el productor de archivos upstream y el contrato de eventos. (El patrón outbox de reenvío a Central ya usa Pub/Sub como disparo, con barrido scheduler de respaldo.)
+
+
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -27,12 +27,11 @@
+   GCP_PUBSUB_TOPIC_TRAMA_POS_FRAME: "retail.local.trama.pos.request.v1"
+   FIRESTORE_DATABASE_ID: "cer-suite-multilocal"
+   GCP_FIRESTORE_COLLECTION: "frames"
+-  GCP_FIRESTORE_COLLECTION_REPRO: "frames_repro"
+-  GCP_FIRESTORE_COLLECTION_PROCESS_ERROR: "process_error"
+-  GCP_FIRESTORE_COLLECTION_SYSCARD_OUTBOX: "syscard_outbound_frames"
+-  GCP_FIRESTORE_COLLECTION_PUNTOS_OUTBOX: "puntos_outbound_frames"
+-  GCP_FIRESTORE_COLLECTION_SYSCARD_RESPONSE_OUTBOX: "syscard_response_outbound_frames"
+-  GCP_FIRESTORE_COLLECTION_TRAMA_POS_OUTBOX: "trama_pos_outbound_frames"
++  GCP_FIRESTORE_COLLECTION_REPRO: "frames-repro"
++  GCP_FIRESTORE_COLLECTION_SYSCARD_OUTBOX: "syscard-outbound-frames"
++  GCP_FIRESTORE_COLLECTION_PUNTOS_OUTBOX: "puntos-outbound-frames"
++  GCP_FIRESTORE_COLLECTION_SYSCARD_RESPONSE_OUTBOX: "syscard-response-outbound-frames"
++  GCP_FIRESTORE_COLLECTION_TRAMA_POS_OUTBOX: "trama-pos-outbound-frames"
+ 
+   # Outbox Syscard hacia Central (reemplaza tramaFromServer*.dat del legacy SendTramaFromServerProcess).
+   # Fase 5 (2026-07-13): puerto/timeout/prefijo de longitud (serverSocket.port/.timeOutConnection,
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/FrameRepro.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/FrameRepro.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/FrameRepro.java
+@@ -1,10 +1,10 @@
+ package com.elrosado.cersuitecloudlocalcore.domain.model;
+ 
+ /**
+- * Representa un documento de la colecciÃ³n frames_repro.
++ * Representa un documento de la colecciÃ³n frames-repro.
+  * El operador inserta solo id_repro; el campo status lo agrega la rÃ©plica que lo toma.
+  */
+ public record FrameRepro(
+-        String reproId,       // ID del documento en frames_repro
++        String reproId,       // ID del documento en frames-repro
+         String transactionId  // id_repro â transactionId en colecciÃ³n frames
+ ) {}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/JournalErrorRecord.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/JournalErrorRecord.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/JournalErrorRecord.java
+@@ -1,33 +0,0 @@
+-package com.elrosado.cersuitecloudlocalcore.domain.model;
+-
+-import java.time.Instant;
+-
+-/**
+- * Registro de error para la colecciÃ³n Firestore compartida {@code process_error}.
+- * Mismo shape que {@link MotoErrorRecord} para mantener consistencia entre procesos migrados.
+- */
+-public record JournalErrorRecord(
+-        String processName,
+-        String processType,
+-        String executionId,
+-        String storeCode,
+-        String fileName,
+-        String bucket,
+-        String gcsPath,
+-        String stage,
+-        String operation,
+-        String errorType,
+-        String errorCode,
+-        String errorMessage,
+-        String stackTrace,
+-        int retry,
+-        int maxRetries,
+-        boolean stopRetries,
+-        String status,
+-        Instant createdAt,
+-        Instant updatedAt,
+-        String hostname,
+-        String podName,
+-        String schedulerExecutionId
+-) {
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/MotoErrorRecord.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/MotoErrorRecord.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/MotoErrorRecord.java
+@@ -1,29 +0,0 @@
+-package com.elrosado.cersuitecloudlocalcore.domain.model;
+-
+-import java.time.Instant;
+-
+-public record MotoErrorRecord(
+-        String processName,
+-        String processType,
+-        String executionId,
+-        String storeCode,
+-        String fileName,
+-        String bucket,
+-        String gcsPath,
+-        String stage,
+-        String operation,
+-        String errorType,
+-        String errorCode,
+-        String errorMessage,
+-        String stackTrace,
+-        int retry,
+-        int maxRetries,
+-        boolean stopRetries,
+-        String status,
+-        Instant createdAt,
+-        Instant updatedAt,
+-        String hostname,
+-        String podName,
+-        String schedulerExecutionId
+-) {
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/ParameterSyncErrorRecord.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/ParameterSyncErrorRecord.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/ParameterSyncErrorRecord.java
+@@ -1,19 +0,0 @@
+-package com.elrosado.cersuitecloudlocalcore.domain.model;
+-
+-import java.time.Instant;
+-
+-/**
+- * Registro de error de la sincronizaciÃ³n de parÃ¡metros BD Central -> BD Multi Local -> Redis, para la
+- * colecciÃ³n genÃ©rica {@code process_error} (regla de Fase 1).
+- */
+-public record ParameterSyncErrorRecord(
+-        String executionId,
+-        Integer scope,
+-        String key,
+-        Integer storeCode,
+-        String errorType,
+-        String errorMessage,
+-        String stackTrace,
+-        Instant createdAt
+-) {
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/StickerErrorRecord.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/StickerErrorRecord.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/StickerErrorRecord.java
+@@ -1,34 +0,0 @@
+-package com.elrosado.cersuitecloudlocalcore.domain.model;
+-
+-import java.time.Instant;
+-
+-/**
+- * Registro de error para la colecciÃ³n Firestore compartida {@code process_error}.
+- * Mismo shape que {@link JournalErrorRecord}/{@link MotoErrorRecord} para mantener
+- * consistencia entre procesos migrados.
+- */
+-public record StickerErrorRecord(
+-        String processName,
+-        String processType,
+-        String executionId,
+-        String storeCode,
+-        String fileName,
+-        String bucket,
+-        String gcsPath,
+-        String stage,
+-        String operation,
+-        String errorType,
+-        String errorCode,
+-        String errorMessage,
+-        String stackTrace,
+-        int retry,
+-        int maxRetries,
+-        boolean stopRetries,
+-        String status,
+-        Instant createdAt,
+-        Instant updatedAt,
+-        String hostname,
+-        String podName,
+-        String schedulerExecutionId
+-) {
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/TramaPosOutboundFrame.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/TramaPosOutboundFrame.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/TramaPosOutboundFrame.java
+@@ -3,7 +3,7 @@
+ /**
+  * Trama Syscard proveniente del POS pendiente de reenvÃ­o a Central (operaciÃ³n ArmsServer 47),
+  * persistida en un outbox de Firestore propio e independiente del outbox Syscard
+- * ({@code syscard_outbound_frames}). Reemplaza al archivo local {@code tramasFromPos{yyyyMMdd}.dat}
++ * ({@code syscard-outbound-frames}). Reemplaza al archivo local {@code tramasFromPos{yyyyMMdd}.dat}
+  * y su puntero {@code tramasFromPosSeek.dat} del legacy {@code SendTramaFromPosToCentralProcess}.
+  *
+  * @param storeId      CÃ³digo de tienda de origen, resuelto del header real de la trama TCP entrante
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/UpdateCedPadRucErrorRecord.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/UpdateCedPadRucErrorRecord.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/model/UpdateCedPadRucErrorRecord.java
+@@ -1,18 +0,0 @@
+-package com.elrosado.cersuitecloudlocalcore.domain.model;
+-
+-import java.time.Instant;
+-
+-public record UpdateCedPadRucErrorRecord(
+-        String processId,
+-        Instant executionDate,
+-        String fileName,
+-        String bucket,
+-        String sourceObjectName,
+-        String errorObjectName,
+-        String errorType,
+-        String errorMessage,
+-        String stackTrace,
+-        UpdateCedPadRucProcessingStage processingStage,
+-        Instant createdAt
+-) {
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/FrameReproFirestorePort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/FrameReproFirestorePort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/FrameReproFirestorePort.java
+@@ -5,7 +5,7 @@
+ import java.util.List;
+ 
+ /**
+- * Puerto de salida para operaciones sobre la colecciÃ³n frames_repro.
++ * Puerto de salida para operaciones sobre la colecciÃ³n frames-repro.
+  */
+ public interface FrameReproFirestorePort {
+ 
+@@ -23,7 +23,7 @@
+     boolean claimDocument(String reproId, String instanceId);
+ 
+     /**
+-     * Elimina el documento frames_repro tras procesamiento exitoso.
++     * Elimina el documento frames-repro tras procesamiento exitoso.
+      * La eliminaciÃ³n garantiza que no sea procesado nuevamente.
+      */
+     void deleteDocument(String reproId);
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/JournalErrorTrackerPort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/JournalErrorTrackerPort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/JournalErrorTrackerPort.java
+@@ -1,11 +0,0 @@
+-package com.elrosado.cersuitecloudlocalcore.domain.port.out;
+-
+-import com.elrosado.cersuitecloudlocalcore.domain.model.JournalErrorRecord;
+-
+-/**
+- * Puerto de tracking de errores hacia la colecciÃ³n Firestore compartida {@code process_error}.
+- */
+-public interface JournalErrorTrackerPort {
+-
+-    void recordError(JournalErrorRecord errorRecord);
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/MotoErrorTrackerPort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/MotoErrorTrackerPort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/MotoErrorTrackerPort.java
+@@ -1,8 +0,0 @@
+-package com.elrosado.cersuitecloudlocalcore.domain.port.out;
+-
+-import com.elrosado.cersuitecloudlocalcore.domain.model.MotoErrorRecord;
+-
+-public interface MotoErrorTrackerPort {
+-
+-    void recordError(MotoErrorRecord errorRecord);
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/ParameterSyncErrorTrackerPort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/ParameterSyncErrorTrackerPort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/ParameterSyncErrorTrackerPort.java
+@@ -1,8 +0,0 @@
+-package com.elrosado.cersuitecloudlocalcore.domain.port.out;
+-
+-import com.elrosado.cersuitecloudlocalcore.domain.model.ParameterSyncErrorRecord;
+-
+-public interface ParameterSyncErrorTrackerPort {
+-
+-    void recordError(ParameterSyncErrorRecord errorRecord);
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/StickerErrorTrackerPort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/StickerErrorTrackerPort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/StickerErrorTrackerPort.java
+@@ -1,11 +0,0 @@
+-package com.elrosado.cersuitecloudlocalcore.domain.port.out;
+-
+-import com.elrosado.cersuitecloudlocalcore.domain.model.StickerErrorRecord;
+-
+-/**
+- * Puerto de tracking de errores hacia la colecciÃ³n Firestore compartida {@code process_error}.
+- */
+-public interface StickerErrorTrackerPort {
+-
+-    void recordError(StickerErrorRecord errorRecord);
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/UpdateCedPadRucErrorTrackerPort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/UpdateCedPadRucErrorTrackerPort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/UpdateCedPadRucErrorTrackerPort.java
+@@ -1,8 +0,0 @@
+-package com.elrosado.cersuitecloudlocalcore.domain.port.out;
+-
+-import com.elrosado.cersuitecloudlocalcore.domain.model.UpdateCedPadRucErrorRecord;
+-
+-public interface UpdateCedPadRucErrorTrackerPort {
+-
+-    void recordError(UpdateCedPadRucErrorRecord errorRecord);
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/FrameReproSchedulerAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/FrameReproSchedulerAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/FrameReproSchedulerAdapter.java
+@@ -13,7 +13,7 @@
+ import java.util.List;
+ 
+ /**
+- * Poller periÃ³dico de la colecciÃ³n frames_repro.
++ * Poller periÃ³dico de la colecciÃ³n frames-repro.
+  * Cada rÃ©plica ejecuta este mÃ©todo de forma independiente; el claim atÃ³mico en Firestore
+  * garantiza que cada documento sea procesado por exactamente una rÃ©plica.
+  */
+@@ -45,12 +45,12 @@
+         List<FrameRepro> pending = reproFirestorePort.queryPending(reproProperties.batchSize());
+ 
+         if (pending.isEmpty()) {
+-            log.atDebug().setMessage("Sin documentos frames_repro pendientes").log();
++            log.atDebug().setMessage("Sin documentos frames-repro pendientes").log();
+             return;
+         }
+ 
+         log.atInfo()
+-                .setMessage("Documentos frames_repro detectados")
++                .setMessage("Documentos frames-repro detectados")
+                 .addKeyValue("count", pending.size())
+                 .addKeyValue("instanceId", INSTANCE_ID)
+                 .log();
+@@ -65,7 +65,7 @@
+ 
+         if (!claimed) {
+             log.atDebug()
+-                    .setMessage("frames_repro ya tomado por otra rÃ©plica â skip")
++                    .setMessage("frames-repro ya tomado por otra rÃ©plica â skip")
+                     .addKeyValue("reproId", repro.reproId())
+                     .log();
+             return;
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestorePuntosOutboxAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestorePuntosOutboxAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestorePuntosOutboxAdapter.java
+@@ -34,7 +34,7 @@
+ 
+     private final Firestore firestore;
+ 
+-    @Value("${puntosOutbox.collection:puntos_outbound_frames}")
++    @Value("${puntosOutbox.collection:puntos-outbound-frames}")
+     private String collection;
+ 
+     public FirestorePuntosOutboxAdapter(Firestore firestore) {
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestoreSyscardOutboxAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestoreSyscardOutboxAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestoreSyscardOutboxAdapter.java
+@@ -35,7 +35,7 @@
+ 
+     private final Firestore firestore;
+ 
+-    @Value("${syscardOutbox.collection:syscard_outbound_frames}")
++    @Value("${syscardOutbox.collection:syscard-outbound-frames}")
+     private String collection;
+ 
+     public FirestoreSyscardOutboxAdapter(Firestore firestore) {
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestoreSyscardResponseOutboxAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestoreSyscardResponseOutboxAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestoreSyscardResponseOutboxAdapter.java
+@@ -35,7 +35,7 @@
+ 
+     private final Firestore firestore;
+ 
+-    @Value("${syscardResponseOutbox.collection:syscard_response_outbound_frames}")
++    @Value("${syscardResponseOutbox.collection:syscard-response-outbound-frames}")
+     private String collection;
+ 
+     public FirestoreSyscardResponseOutboxAdapter(Firestore firestore) {
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestoreTramaPosOutboxAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestoreTramaPosOutboxAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestoreTramaPosOutboxAdapter.java
+@@ -25,7 +25,7 @@
+  * <p>
+  * Mismo patrÃ³n que {@code FirestorePuntosOutboxAdapter}/{@code FirestoreSyscardOutboxAdapter}: bean
+  * {@link Firestore} inyectado directamente, sin campo {@code status} al crear (= pendiente), claim
+- * atÃ³mico vÃ­a transacciÃ³n. ColecciÃ³n independiente ({@code trama_pos_outbound_frames}).
++ * atÃ³mico vÃ­a transacciÃ³n. ColecciÃ³n independiente ({@code trama-pos-outbound-frames}).
+  */
+ @Component
+ public class FirestoreTramaPosOutboxAdapter implements TramaPosOutboxPort {
+@@ -35,7 +35,7 @@
+ 
+     private final Firestore firestore;
+ 
+-    @Value("${trama-pos-outbox.collection:trama_pos_outbound_frames}")
++    @Value("${trama-pos-outbox.collection:trama-pos-outbound-frames}")
+     private String collection;
+ 
+     public FirestoreTramaPosOutboxAdapter(Firestore firestore) {
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FrameReproFirestoreAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FrameReproFirestoreAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FrameReproFirestoreAdapter.java
+@@ -20,7 +20,7 @@
+ import java.util.concurrent.ExecutionException;
+ 
+ /**
+- * Operaciones Firestore sobre la coleccion frames_repro.
++ * Operaciones Firestore sobre la coleccion frames-repro.
+  * Usa el bean Firestore directamente (Spring Cloud GCP auto-config) para
+  * queries con filtro null y transacciones atomicas.
+  */
+@@ -33,7 +33,7 @@
+ 
+     private final Firestore firestore;
+ 
+-    @Value("${app.gcp.firestore.collection-repro:frames_repro}")
++    @Value("${app.gcp.firestore.collection-repro:frames-repro}")
+     private String reproCollection;
+ 
+     public FrameReproFirestoreAdapter(Firestore firestore) {
+@@ -63,7 +63,7 @@
+ 
+         } catch (InterruptedException e) {
+             Thread.currentThread().interrupt();
+-            throw new IllegalStateException("Consulta frames_repro interrumpida", e);
++            throw new IllegalStateException("Consulta frames-repro interrumpida", e);
+         } catch (ExecutionException e) {
+             if (e.getCause() instanceof NotFoundException) {
+                 log.atWarn()
+@@ -72,7 +72,7 @@
+                         .log();
+                 return List.of();
+             }
+-            throw new IllegalStateException("Error consultando frames_repro pendientes", e);
++            throw new IllegalStateException("Error consultando frames-repro pendientes", e);
+         }
+     }
+ 
+@@ -101,7 +101,7 @@
+ 
+         } catch (InterruptedException e) {
+             Thread.currentThread().interrupt();
+-            throw new IllegalStateException("Claim frames_repro interrumpido", e);
++            throw new IllegalStateException("Claim frames-repro interrumpido", e);
+         } catch (ExecutionException e) {
+             log.atWarn()
+                     .setMessage("Conflicto de claim - otra replica gano")
+@@ -120,7 +120,7 @@
+                     .get();
+ 
+             log.atInfo()
+-                    .setMessage("Documento frames_repro eliminado tras reproceso exitoso")
++                    .setMessage("Documento frames-repro eliminado tras reproceso exitoso")
+                     .addKeyValue(FIELD_REPRO_ID, reproId)
+                     .log();
+ 
+@@ -128,7 +128,7 @@
+             Thread.currentThread().interrupt();
+             throw new IllegalStateException("deleteDocument interrumpido", e);
+         } catch (ExecutionException e) {
+-            throw new IllegalStateException("Error eliminando frames_repro", e);
++            throw new IllegalStateException("Error eliminando frames-repro", e);
+         }
+     }
+ 
+@@ -143,7 +143,7 @@
+                     .get();
+ 
+             log.atWarn()
+-                    .setMessage("Documento frames_repro liberado para reintento")
++                    .setMessage("Documento frames-repro liberado para reintento")
+                     .addKeyValue(FIELD_REPRO_ID, reproId)
+                     .log();
+ 
+@@ -151,7 +151,7 @@
+             Thread.currentThread().interrupt();
+             throw new IllegalStateException("releaseDocument interrumpido", e);
+         } catch (ExecutionException e) {
+-            throw new IllegalStateException("Error liberando frames_repro", e);
++            throw new IllegalStateException("Error liberando frames-repro", e);
+         }
+     }
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/JournalProcessErrorFirestoreAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/JournalProcessErrorFirestoreAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/JournalProcessErrorFirestoreAdapter.java
+@@ -1,73 +0,0 @@
+-package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.firestore;
+-
+-import com.elrosado.cersuitecloudlocalcore.domain.model.JournalErrorRecord;
+-import com.elrosado.cersuitecloudlocalcore.domain.port.out.JournalErrorTrackerPort;
+-import com.google.cloud.Timestamp;
+-import com.google.cloud.firestore.Firestore;
+-import org.springframework.beans.factory.annotation.Value;
+-import org.springframework.stereotype.Component;
+-
+-import java.time.Instant;
+-import java.util.LinkedHashMap;
+-import java.util.Map;
+-import java.util.concurrent.ExecutionException;
+-
+-@Component
+-public class JournalProcessErrorFirestoreAdapter implements JournalErrorTrackerPort {
+-
+-    private final Firestore firestore;
+-
+-    @Value("${app.gcp.firestore.collection-process-error:process_error}")
+-    private String collection;
+-
+-    public JournalProcessErrorFirestoreAdapter(Firestore firestore) {
+-        this.firestore = firestore;
+-    }
+-
+-    @Override
+-    public void recordError(JournalErrorRecord errorRecord) {
+-        Map<String, Object> document = new LinkedHashMap<>();
+-        document.put("processName", errorRecord.processName());
+-        document.put("processType", errorRecord.processType());
+-        document.put("executionId", errorRecord.executionId());
+-        document.put("storeCode", errorRecord.storeCode());
+-        document.put("fileName", errorRecord.fileName());
+-        document.put("bucket", errorRecord.bucket());
+-        document.put("gcsPath", errorRecord.gcsPath());
+-        document.put("stage", errorRecord.stage());
+-        document.put("operation", valueOrDefault(errorRecord.operation()));
+-        document.put("errorType", valueOrDefault(errorRecord.errorType()));
+-        document.put("errorCode", valueOrDefault(errorRecord.errorCode()));
+-        document.put("errorMessage", valueOrDefault(errorRecord.errorMessage()));
+-        document.put("stackTrace", valueOrDefault(errorRecord.stackTrace()));
+-        document.put("retry", errorRecord.retry());
+-        document.put("maxRetries", errorRecord.maxRetries());
+-        document.put("stopRetries", errorRecord.stopRetries());
+-        document.put("status", errorRecord.status());
+-        document.put("createdAt", toTimestamp(errorRecord.createdAt()));
+-        document.put("updatedAt", toTimestamp(errorRecord.updatedAt()));
+-        document.put("hostname", valueOrDefault(errorRecord.hostname()));
+-        document.put("podName", valueOrDefault(errorRecord.podName()));
+-        document.put("schedulerExecutionId", valueOrDefault(errorRecord.schedulerExecutionId()));
+-
+-        try {
+-            firestore.collection(collection)
+-                    .document(errorRecord.executionId())
+-                    .set(document)
+-                    .get();
+-        } catch (InterruptedException e) {
+-            Thread.currentThread().interrupt();
+-            throw new IllegalStateException("Firestore Journal error registration interrupted", e);
+-        } catch (ExecutionException e) {
+-            throw new IllegalStateException("Error registering Firestore Journal error", e);
+-        }
+-    }
+-
+-    private Timestamp toTimestamp(Instant instant) {
+-        return Timestamp.ofTimeSecondsAndNanos(instant.getEpochSecond(), instant.getNano());
+-    }
+-
+-    private String valueOrDefault(String value) {
+-        return value == null ? "" : value;
+-    }
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/MotoProcessErrorFirestoreAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/MotoProcessErrorFirestoreAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/MotoProcessErrorFirestoreAdapter.java
+@@ -1,72 +0,0 @@
+-package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.firestore;
+-
+-import com.elrosado.cersuitecloudlocalcore.domain.model.MotoErrorRecord;
+-import com.elrosado.cersuitecloudlocalcore.domain.port.out.MotoErrorTrackerPort;
+-import com.google.cloud.Timestamp;
+-import com.google.cloud.firestore.Firestore;
+-import org.springframework.beans.factory.annotation.Value;
+-import org.springframework.stereotype.Component;
+-
+-import java.util.LinkedHashMap;
+-import java.util.Map;
+-import java.util.concurrent.ExecutionException;
+-
+-@Component
+-public class MotoProcessErrorFirestoreAdapter implements MotoErrorTrackerPort {
+-
+-    private final Firestore firestore;
+-
+-    @Value("${app.gcp.firestore.collection-process-error:process_error}")
+-    private String collection;
+-
+-    public MotoProcessErrorFirestoreAdapter(Firestore firestore) {
+-        this.firestore = firestore;
+-    }
+-
+-    @Override
+-    public void recordError(MotoErrorRecord errorRecord) {
+-        Map<String, Object> document = new LinkedHashMap<>();
+-        document.put("processName", errorRecord.processName());
+-        document.put("processType", errorRecord.processType());
+-        document.put("executionId", errorRecord.executionId());
+-        document.put("storeCode", errorRecord.storeCode());
+-        document.put("fileName", errorRecord.fileName());
+-        document.put("bucket", errorRecord.bucket());
+-        document.put("gcsPath", errorRecord.gcsPath());
+-        document.put("stage", errorRecord.stage());
+-        document.put("operation", valueOrDefault(errorRecord.operation()));
+-        document.put("errorType", valueOrDefault(errorRecord.errorType()));
+-        document.put("errorCode", valueOrDefault(errorRecord.errorCode()));
+-        document.put("errorMessage", valueOrDefault(errorRecord.errorMessage()));
+-        document.put("stackTrace", valueOrDefault(errorRecord.stackTrace()));
+-        document.put("retry", errorRecord.retry());
+-        document.put("maxRetries", errorRecord.maxRetries());
+-        document.put("stopRetries", errorRecord.stopRetries());
+-        document.put("status", errorRecord.status());
+-        document.put("createdAt", toTimestamp(errorRecord.createdAt()));
+-        document.put("updatedAt", toTimestamp(errorRecord.updatedAt()));
+-        document.put("hostname", valueOrDefault(errorRecord.hostname()));
+-        document.put("podName", valueOrDefault(errorRecord.podName()));
+-        document.put("schedulerExecutionId", valueOrDefault(errorRecord.schedulerExecutionId()));
+-
+-        try {
+-            firestore.collection(collection)
+-                    .document(errorRecord.executionId())
+-                    .set(document)
+-                    .get();
+-        } catch (InterruptedException e) {
+-            Thread.currentThread().interrupt();
+-            throw new IllegalStateException("Firestore MOTO error registration interrupted", e);
+-        } catch (ExecutionException e) {
+-            throw new IllegalStateException("Error registering Firestore MOTO error", e);
+-        }
+-    }
+-
+-    private Timestamp toTimestamp(java.time.Instant instant) {
+-        return Timestamp.ofTimeSecondsAndNanos(instant.getEpochSecond(), instant.getNano());
+-    }
+-
+-    private String valueOrDefault(String value) {
+-        return value == null ? "" : value;
+-    }
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/ParameterSyncProcessErrorFirestoreAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/ParameterSyncProcessErrorFirestoreAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/ParameterSyncProcessErrorFirestoreAdapter.java
+@@ -1,61 +0,0 @@
+-package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.firestore;
+-
+-import com.elrosado.cersuitecloudlocalcore.domain.model.ParameterSyncErrorRecord;
+-import com.elrosado.cersuitecloudlocalcore.domain.port.out.ParameterSyncErrorTrackerPort;
+-import com.google.cloud.Timestamp;
+-import com.google.cloud.firestore.Firestore;
+-import org.springframework.beans.factory.annotation.Value;
+-import org.springframework.stereotype.Component;
+-
+-import java.util.LinkedHashMap;
+-import java.util.Map;
+-import java.util.UUID;
+-import java.util.concurrent.ExecutionException;
+-
+-@Component
+-public class ParameterSyncProcessErrorFirestoreAdapter implements ParameterSyncErrorTrackerPort {
+-
+-    private final Firestore firestore;
+-
+-    @Value("${app.gcp.firestore.collection-process-error:process_error}")
+-    private String collection;
+-
+-    public ParameterSyncProcessErrorFirestoreAdapter(Firestore firestore) {
+-        this.firestore = firestore;
+-    }
+-
+-    @Override
+-    public void recordError(ParameterSyncErrorRecord errorRecord) {
+-        Map<String, Object> document = new LinkedHashMap<>();
+-        document.put("processName", "ParameterSync");
+-        document.put("processType", "parameters-sync");
+-        document.put("executionId", errorRecord.executionId());
+-        document.put("scope", errorRecord.scope());
+-        document.put("key", errorRecord.key());
+-        document.put("storeCode", errorRecord.storeCode());
+-        document.put("errorType", valueOrDefault(errorRecord.errorType()));
+-        document.put("errorMessage", valueOrDefault(errorRecord.errorMessage()));
+-        document.put("stackTrace", valueOrDefault(errorRecord.stackTrace()));
+-        document.put("createdAt", toTimestamp(errorRecord.createdAt()));
+-
+-        try {
+-            firestore.collection(collection)
+-                    .document(errorRecord.executionId() + "-" + UUID.randomUUID())
+-                    .set(document)
+-                    .get();
+-        } catch (InterruptedException e) {
+-            Thread.currentThread().interrupt();
+-            throw new IllegalStateException("Firestore ParameterSync error registration interrupted", e);
+-        } catch (ExecutionException e) {
+-            throw new IllegalStateException("Error registering Firestore ParameterSync error", e);
+-        }
+-    }
+-
+-    private Timestamp toTimestamp(java.time.Instant instant) {
+-        return Timestamp.ofTimeSecondsAndNanos(instant.getEpochSecond(), instant.getNano());
+-    }
+-
+-    private String valueOrDefault(String value) {
+-        return value == null ? "" : value;
+-    }
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/StickerProcessErrorFirestoreAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/StickerProcessErrorFirestoreAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/StickerProcessErrorFirestoreAdapter.java
+@@ -1,73 +0,0 @@
+-package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.firestore;
+-
+-import com.elrosado.cersuitecloudlocalcore.domain.model.StickerErrorRecord;
+-import com.elrosado.cersuitecloudlocalcore.domain.port.out.StickerErrorTrackerPort;
+-import com.google.cloud.Timestamp;
+-import com.google.cloud.firestore.Firestore;
+-import org.springframework.beans.factory.annotation.Value;
+-import org.springframework.stereotype.Component;
+-
+-import java.time.Instant;
+-import java.util.LinkedHashMap;
+-import java.util.Map;
+-import java.util.concurrent.ExecutionException;
+-
+-@Component
+-public class StickerProcessErrorFirestoreAdapter implements StickerErrorTrackerPort {
+-
+-    private final Firestore firestore;
+-
+-    @Value("${app.gcp.firestore.collection-process-error:process_error}")
+-    private String collection;
+-
+-    public StickerProcessErrorFirestoreAdapter(Firestore firestore) {
+-        this.firestore = firestore;
+-    }
+-
+-    @Override
+-    public void recordError(StickerErrorRecord errorRecord) {
+-        Map<String, Object> document = new LinkedHashMap<>();
+-        document.put("processName", errorRecord.processName());
+-        document.put("processType", errorRecord.processType());
+-        document.put("executionId", errorRecord.executionId());
+-        document.put("storeCode", errorRecord.storeCode());
+-        document.put("fileName", errorRecord.fileName());
+-        document.put("bucket", errorRecord.bucket());
+-        document.put("gcsPath", errorRecord.gcsPath());
+-        document.put("stage", errorRecord.stage());
+-        document.put("operation", valueOrDefault(errorRecord.operation()));
+-        document.put("errorType", valueOrDefault(errorRecord.errorType()));
+-        document.put("errorCode", valueOrDefault(errorRecord.errorCode()));
+-        document.put("errorMessage", valueOrDefault(errorRecord.errorMessage()));
+-        document.put("stackTrace", valueOrDefault(errorRecord.stackTrace()));
+-        document.put("retry", errorRecord.retry());
+-        document.put("maxRetries", errorRecord.maxRetries());
+-        document.put("stopRetries", errorRecord.stopRetries());
+-        document.put("status", errorRecord.status());
+-        document.put("createdAt", toTimestamp(errorRecord.createdAt()));
+-        document.put("updatedAt", toTimestamp(errorRecord.updatedAt()));
+-        document.put("hostname", valueOrDefault(errorRecord.hostname()));
+-        document.put("podName", valueOrDefault(errorRecord.podName()));
+-        document.put("schedulerExecutionId", valueOrDefault(errorRecord.schedulerExecutionId()));
+-
+-        try {
+-            firestore.collection(collection)
+-                    .document(errorRecord.executionId())
+-                    .set(document)
+-                    .get();
+-        } catch (InterruptedException e) {
+-            Thread.currentThread().interrupt();
+-            throw new IllegalStateException("Firestore Sticker error registration interrupted", e);
+-        } catch (ExecutionException e) {
+-            throw new IllegalStateException("Error registering Firestore Sticker error", e);
+-        }
+-    }
+-
+-    private Timestamp toTimestamp(Instant instant) {
+-        return Timestamp.ofTimeSecondsAndNanos(instant.getEpochSecond(), instant.getNano());
+-    }
+-
+-    private String valueOrDefault(String value) {
+-        return value == null ? "" : value;
+-    }
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/UpdateCedPadRucErrorFirestoreAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/UpdateCedPadRucErrorFirestoreAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/UpdateCedPadRucErrorFirestoreAdapter.java
+@@ -1,61 +0,0 @@
+-package com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.firestore;
+-
+-import com.elrosado.cersuitecloudlocalcore.domain.model.UpdateCedPadRucErrorRecord;
+-import com.elrosado.cersuitecloudlocalcore.domain.port.out.UpdateCedPadRucErrorTrackerPort;
+-import com.google.cloud.Timestamp;
+-import com.google.cloud.firestore.Firestore;
+-import org.springframework.beans.factory.annotation.Value;
+-import org.springframework.stereotype.Component;
+-
+-import java.util.LinkedHashMap;
+-import java.util.Map;
+-import java.util.concurrent.ExecutionException;
+-
+-@Component
+-public class UpdateCedPadRucErrorFirestoreAdapter implements UpdateCedPadRucErrorTrackerPort {
+-
+-    private final Firestore firestore;
+-
+-    @Value("${app.gcp.firestore.collection-process-error:process_error}")
+-    private String collection;
+-
+-    public UpdateCedPadRucErrorFirestoreAdapter(Firestore firestore) {
+-        this.firestore = firestore;
+-    }
+-
+-    @Override
+-    public void recordError(UpdateCedPadRucErrorRecord errorRecord) {
+-        Map<String, Object> document = new LinkedHashMap<>();
+-        document.put("processId", errorRecord.processId());
+-        document.put("executionDate", Timestamp.ofTimeSecondsAndNanos(
+-                errorRecord.executionDate().getEpochSecond(),
+-                errorRecord.executionDate().getNano()));
+-        document.put("fileName", errorRecord.fileName());
+-        document.put("bucket", errorRecord.bucket());
+-        document.put("sourceObjectName", errorRecord.sourceObjectName());
+-        document.put("errorObjectName", errorRecord.errorObjectName());
+-        document.put("errorType", valueOrDefault(errorRecord.errorType()));
+-        document.put("errorMessage", valueOrDefault(errorRecord.errorMessage()));
+-        document.put("stackTrace", valueOrDefault(errorRecord.stackTrace()));
+-        document.put("processingStage", errorRecord.processingStage().name());
+-        document.put("createdAt", Timestamp.ofTimeSecondsAndNanos(
+-                errorRecord.createdAt().getEpochSecond(),
+-                errorRecord.createdAt().getNano()));
+-
+-        try {
+-            firestore.collection(collection)
+-                    .document(errorRecord.processId())
+-                    .set(document)
+-                    .get();
+-        } catch (InterruptedException e) {
+-            Thread.currentThread().interrupt();
+-            throw new IllegalStateException("Registro Firestore UpdateCedPadRuc interrumpido", e);
+-        } catch (ExecutionException e) {
+-            throw new IllegalStateException("Error registrando Firestore UpdateCedPadRuc", e);
+-        }
+-    }
+-
+-    private String valueOrDefault(String value) {
+-        return value == null ? "" : value;
+-    }
+-}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/messaging/PubSubSyscardFrameEventAdapter.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/messaging/PubSubSyscardFrameEventAdapter.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/messaging/PubSubSyscardFrameEventAdapter.java
+@@ -11,7 +11,7 @@
+  * Publica el ID del documento del outbox Syscard reciÃ©n encolado, para disparar su reenvÃ­o
+  * inmediato a Central. El payload es el {@code docId} en texto plano â el documento completo ya
+  * vive en Firestore, el mensaje solo dispara la relectura (mismo criterio que el scheduler de
+- * {@code frames_repro}, aquÃ­ disparado por evento en vez de solo por polling).
++ * {@code frames-repro}, aquÃ­ disparado por evento en vez de solo por polling).
+  */
+ @Component
+ public class PubSubSyscardFrameEventAdapter implements SyscardFrameEventPort {
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/PuntosOutboxProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/PuntosOutboxProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/PuntosOutboxProperties.java
+@@ -19,7 +19,7 @@
+         int sweepBatchSize
+ ) {
+     public PuntosOutboxProperties {
+-        if (collection == null || collection.isBlank()) collection = "puntos_outbound_frames";
++        if (collection == null || collection.isBlank()) collection = "puntos-outbound-frames";
+         if (pubsub == null) pubsub = new Pubsub("", "");
+         if (sweepIntervalMs <= 0) sweepIntervalMs = 60_000;
+         if (sweepBatchSize <= 0) sweepBatchSize = 50;
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/ReproProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/ReproProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/ReproProperties.java
+@@ -3,7 +3,7 @@
+ import org.springframework.boot.context.properties.ConfigurationProperties;
+ 
+ /**
+- * Propiedades de configuraciÃ³n del scheduler de reproceso frames_repro.
++ * Propiedades de configuraciÃ³n del scheduler de reproceso frames-repro.
+  * Prefijo: {@code app.repro.*} en application.yml.
+  */
+ @ConfigurationProperties(prefix = "app.repro")
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SyscardOutboxProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SyscardOutboxProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SyscardOutboxProperties.java
+@@ -20,7 +20,7 @@
+         int sweepBatchSize
+ ) {
+     public SyscardOutboxProperties {
+-        if (collection == null || collection.isBlank()) collection = "syscard_outbound_frames";
++        if (collection == null || collection.isBlank()) collection = "syscard-outbound-frames";
+         if (pubsub == null) pubsub = new Pubsub("", "");
+         if (sweepIntervalMs <= 0) sweepIntervalMs = 60_000;
+         if (sweepBatchSize <= 0) sweepBatchSize = 50;
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SyscardResponseOutboxProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SyscardResponseOutboxProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/SyscardResponseOutboxProperties.java
+@@ -20,7 +20,7 @@
+         int sweepBatchSize
+ ) {
+     public SyscardResponseOutboxProperties {
+-        if (collection == null || collection.isBlank()) collection = "syscard_response_outbound_frames";
++        if (collection == null || collection.isBlank()) collection = "syscard-response-outbound-frames";
+         if (pubsub == null) pubsub = new Pubsub("", "");
+         if (sweepIntervalMs <= 0) sweepIntervalMs = 60_000;
+         if (sweepBatchSize <= 0) sweepBatchSize = 50;
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/TramaPosOutboxProperties.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/TramaPosOutboxProperties.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/infrastructure/config/TramaPosOutboxProperties.java
+@@ -20,7 +20,7 @@
+         int sweepBatchSize
+ ) {
+     public TramaPosOutboxProperties {
+-        if (collection == null || collection.isBlank()) collection = "trama_pos_outbound_frames";
++        if (collection == null || collection.isBlank()) collection = "trama-pos-outbound-frames";
+         if (pubsub == null) pubsub = new Pubsub("", "");
+         if (sweepIntervalMs <= 0) sweepIntervalMs = 60_000;
+         if (sweepBatchSize <= 0) sweepBatchSize = 50;
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/JournalFileService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/JournalFileService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/JournalFileService.java
+@@ -4,7 +4,6 @@
+ import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
+ import com.elrosado.cersuitecloudlocalcore.domain.model.JournalEntry;
+ import com.elrosado.cersuitecloudlocalcore.domain.model.JournalErrorPending;
+-import com.elrosado.cersuitecloudlocalcore.domain.model.JournalErrorRecord;
+ import com.elrosado.cersuitecloudlocalcore.domain.model.JournalFileFtpStage;
+ import com.elrosado.cersuitecloudlocalcore.domain.model.JournalMonthCode;
+ import com.elrosado.cersuitecloudlocalcore.domain.model.JournalPendingDate;
+@@ -13,7 +12,6 @@
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.JournalControlPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.JournalControllerPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.JournalErrorPort;
+-import com.elrosado.cersuitecloudlocalcore.domain.port.out.JournalErrorTrackerPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.JournalEventPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.JournalStoragePort;
+ import com.elrosado.cersuitecloudlocalcore.infrastructure.config.SendJournalFileFtpProperties;
+@@ -57,7 +55,6 @@
+     private final JournalControllerPort controllerPort;
+     private final JournalStoragePort storagePort;
+     private final JournalEventPort eventPort;
+-    private final JournalErrorTrackerPort errorTrackerPort;
+     private final JournalParserService parserService;
+     private final StoreRegistry storeRegistry;
+     private final SendJournalFileFtpProperties properties;
+@@ -71,7 +68,6 @@
+             JournalControllerPort controllerPort,
+             JournalStoragePort storagePort,
+             JournalEventPort eventPort,
+-            JournalErrorTrackerPort errorTrackerPort,
+             JournalParserService parserService,
+             StoreRegistry storeRegistry,
+             SendJournalFileFtpProperties properties,
+@@ -83,7 +79,6 @@
+         this.controllerPort = controllerPort;
+         this.storagePort = storagePort;
+         this.eventPort = eventPort;
+-        this.errorTrackerPort = errorTrackerPort;
+         this.parserService = parserService;
+         this.storeRegistry = storeRegistry;
+         this.properties = properties;
+@@ -255,7 +250,6 @@
+         try {
+             zipRef = storagePort.uploadZip(storeCode, zipName, zipContent);
+         } catch (RuntimeException e) {
+-            recordError(storeCode, date, JournalFileFtpStage.GCS_UPLOAD, e);
+             throw new JournalFileFtpException(JournalFileFtpStage.GCS_UPLOAD,
+                     "Error subiendo ZIP de journal a GCS", e);
+         }
+@@ -263,7 +257,13 @@
+         try {
+             eventPort.publishZipReady(storeCode, zipRef.objectName());
+         } catch (RuntimeException e) {
+-            recordError(storeCode, date, JournalFileFtpStage.PUBLISH, e);
++            log.atError()
++                    .setMessage("Error publicando evento de ZIP de journal generado")
++                    .addKeyValue(FIELD_STORE_CODE, storeCode)
++                    .addKeyValue("zipName", zipName)
++                    .addKeyValue("stage", JournalFileFtpStage.PUBLISH)
++                    .setCause(e)
++                    .log();
+         }
+ 
+         log.atInfo()
+@@ -280,7 +280,6 @@
+             List<String> lines = new String(content, java.nio.charset.StandardCharsets.ISO_8859_1).lines().toList();
+             return parserService.parse(lines, date.anio(), codStore);
+         } catch (RuntimeException e) {
+-            recordError(storeCode, date, JournalFileFtpStage.PARSE, e);
+             log.atWarn()
+                     .setMessage("Error parseando archivo journal - se omite")
+                     .addKeyValue(FIELD_STORE_CODE, storeCode)
+@@ -325,39 +324,4 @@
+                 .orElseThrow(() -> new IllegalStateException(
+                         "ParÃ¡metro requerido no disponible para JournalFileFtp: " + key));
+     }
+-
+-    private void recordError(String storeCode, JournalPendingDate date, JournalFileFtpStage stage, Exception e) {
+-        try {
+-            errorTrackerPort.recordError(new JournalErrorRecord(
+-                    "JournalFileFtp",
+-                    "SCHEDULED",
+-                    java.util.UUID.randomUUID().toString(),
+-                    storeCode,
+-                    "",
+-                    "",
+-                    "",
+-                    stage.name(),
+-                    "",
+-                    e.getClass().getSimpleName(),
+-                    "",
+-                    e.getMessage() == null ? "" : e.getMessage(),
+-                    "",
+-                    0,
+-                    MAX_DOWNLOAD_ATTEMPTS,
+-                    false,
+-                    "ERROR",
+-                    java.time.Instant.now(),
+-                    java.time.Instant.now(),
+-                    System.getenv().getOrDefault("HOSTNAME", ""),
+-                    System.getenv().getOrDefault("POD_NAME", ""),
+-                    "%s-%d-%s-%d".formatted(storeCode, date.anio(), date.mes(), date.dia())
+-            ));
+-        } catch (RuntimeException trackerFailure) {
+-            log.atError()
+-                    .setMessage("No se pudo registrar el error de JournalFileFtp en Firestore")
+-                    .addKeyValue(FIELD_STORE_CODE, storeCode)
+-                    .setCause(trackerFailure)
+-                    .log();
+-        }
+-    }
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/SearchInventarioStickerService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/SearchInventarioStickerService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/SearchInventarioStickerService.java
+@@ -1,13 +1,10 @@
+ package com.elrosado.cersuitecloudlocalcore.service;
+ 
+-import com.elrosado.cersuitecloudlocalcore.domain.exception.SearchInventarioStickerException;
+ import com.elrosado.cersuitecloudlocalcore.domain.model.SearchInventarioStickerStage;
+-import com.elrosado.cersuitecloudlocalcore.domain.model.StickerErrorRecord;
+ import com.elrosado.cersuitecloudlocalcore.domain.model.StickerInventoryLine;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.in.ParameterProviderPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.in.SearchInventarioStickerUseCase;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.StickerControllerFilePort;
+-import com.elrosado.cersuitecloudlocalcore.domain.port.out.StickerErrorTrackerPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.StickerInventoryPersistencePort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.StickerInventoryStoragePort;
+ import com.elrosado.cersuitecloudlocalcore.infrastructure.config.SearchInventarioStickerProperties;
+@@ -19,12 +16,10 @@
+ import org.springframework.stereotype.Service;
+ 
+ import java.nio.charset.StandardCharsets;
+-import java.time.Instant;
+ import java.time.LocalDate;
+ import java.time.format.DateTimeFormatter;
+ import java.util.List;
+ import java.util.Optional;
+-import java.util.UUID;
+ import java.util.concurrent.CompletableFuture;
+ 
+ /**
+@@ -40,13 +35,11 @@
+     private static final DateTimeFormatter FILE_DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
+     private static final String FIELD_STORE_CODE = "storeCode";
+     private static final String FIELD_FILE_NAME = "fileName";
+-    private static final int MAX_RETRIES = 3;
+     private static final int AMBITO_ARMS_SERVER_PARAMS = 4;
+ 
+     private final StickerControllerFilePort controllerPort;
+     private final StickerInventoryStoragePort storagePort;
+     private final StickerInventoryPersistencePort persistencePort;
+-    private final StickerErrorTrackerPort errorTrackerPort;
+     private final StickerInventoryParserService parserService;
+     private final StoreRegistry storeRegistry;
+     private final SearchInventarioStickerProperties properties;
+@@ -57,7 +50,6 @@
+             StickerControllerFilePort controllerPort,
+             StickerInventoryStoragePort storagePort,
+             StickerInventoryPersistencePort persistencePort,
+-            StickerErrorTrackerPort errorTrackerPort,
+             StickerInventoryParserService parserService,
+             StoreRegistry storeRegistry,
+             SearchInventarioStickerProperties properties,
+@@ -66,7 +58,6 @@
+         this.controllerPort = controllerPort;
+         this.storagePort = storagePort;
+         this.persistencePort = persistencePort;
+-        this.errorTrackerPort = errorTrackerPort;
+         this.parserService = parserService;
+         this.storeRegistry = storeRegistry;
+         this.properties = properties;
+@@ -200,7 +191,6 @@
+     }
+ 
+     private void recordError(String storeCode, String fileName, SearchInventarioStickerStage stage, Exception e) {
+-        SearchInventarioStickerException wrapped = new SearchInventarioStickerException(stage, e.getMessage(), e);
+         log.atError()
+                 .setMessage("Error procesando inventario de sticker")
+                 .addKeyValue(FIELD_STORE_CODE, storeCode)
+@@ -208,37 +198,5 @@
+                 .addKeyValue("stage", stage.name())
+                 .setCause(e)
+                 .log();
+-        try {
+-            errorTrackerPort.recordError(new StickerErrorRecord(
+-                    "SearchInventarioSticker",
+-                    "SCHEDULED",
+-                    UUID.randomUUID().toString(),
+-                    storeCode,
+-                    fileName,
+-                    "",
+-                    "",
+-                    stage.name(),
+-                    "",
+-                    wrapped.getClass().getSimpleName(),
+-                    "",
+-                    wrapped.getMessage() == null ? "" : wrapped.getMessage(),
+-                    "",
+-                    0,
+-                    MAX_RETRIES,
+-                    false,
+-                    "ERROR",
+-                    Instant.now(),
+-                    Instant.now(),
+-                    System.getenv().getOrDefault("HOSTNAME", ""),
+-                    System.getenv().getOrDefault("POD_NAME", ""),
+-                    "%s-%s".formatted(storeCode, fileName)
+-            ));
+-        } catch (RuntimeException trackerFailure) {
+-            log.atError()
+-                    .setMessage("No se pudo registrar el error de SearchInventarioSticker en Firestore")
+-                    .addKeyValue(FIELD_STORE_CODE, storeCode)
+-                    .setCause(trackerFailure)
+-                    .log();
+-        }
+     }
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/SyncParametersService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/SyncParametersService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/SyncParametersService.java
+@@ -1,13 +1,11 @@
+ package com.elrosado.cersuitecloudlocalcore.service;
+ 
+ import com.elrosado.cersuitecloudlocalcore.domain.model.BusinessParameter;
+-import com.elrosado.cersuitecloudlocalcore.domain.model.ParameterSyncErrorRecord;
+ import com.elrosado.cersuitecloudlocalcore.domain.model.ParameterSyncResult;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.in.SyncParametersUseCase;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.ParameterCachePort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.ParameterRepositoryPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.ParameterSourcePort;
+-import com.elrosado.cersuitecloudlocalcore.domain.port.out.ParameterSyncErrorTrackerPort;
+ import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.cache.ParameterCacheKeys;
+ import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.saadmin.entity.StoreEntity;
+ import com.elrosado.cersuitecloudlocalcore.infrastructure.config.ParameterSyncProperties;
+@@ -16,7 +14,6 @@
+ import lombok.extern.slf4j.Slf4j;
+ import org.springframework.stereotype.Service;
+ 
+-import java.time.Instant;
+ import java.util.Comparator;
+ import java.util.HashMap;
+ import java.util.List;
+@@ -50,7 +47,6 @@
+     private final ParameterRepositoryPort repositoryPort;
+     private final ParameterCachePort cachePort;
+     private final StoreRegistry storeRegistry;
+-    private final ParameterSyncErrorTrackerPort errorTrackerPort;
+     private final ParameterSyncProperties properties;
+ 
+     @Override
+@@ -91,7 +87,6 @@
+                         parametersWritten += reconcileKey(executionId, scope, entry.getKey(), entry.getValue());
+                     } catch (Exception e) {
+                         errors++;
+-                        recordError(executionId, scope, entry.getKey(), null, e);
+                         log.atError()
+                                 .setMessage("Fallo al reconciliar clave de parÃ¡metro")
+                                 .addKeyValue(FIELD_EXECUTION_ID, executionId)
+@@ -103,7 +98,6 @@
+                 }
+             } catch (Exception e) {
+                 errors++;
+-                recordError(executionId, scope, null, null, e);
+                 log.atError()
+                         .setMessage("Fallo al sincronizar Ã¡mbito completo")
+                         .addKeyValue(FIELD_EXECUTION_ID, executionId)
+@@ -202,22 +196,4 @@
+         }
+     }
+ 
+-    private void recordError(String executionId, Integer scope, String key, Integer storeCode, Exception e) {
+-        errorTrackerPort.recordError(new ParameterSyncErrorRecord(
+-                executionId,
+-                scope,
+-                key,
+-                storeCode,
+-                e.getClass().getSimpleName(),
+-                e.getMessage(),
+-                stackTraceOf(e),
+-                Instant.now()
+-        ));
+-    }
+-
+-    private String stackTraceOf(Exception e) {
+-        java.io.StringWriter sw = new java.io.StringWriter();
+-        e.printStackTrace(new java.io.PrintWriter(sw));
+-        return sw.toString();
+-    }
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/UpdateCedPadRucService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/UpdateCedPadRucService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/UpdateCedPadRucService.java
+@@ -5,13 +5,11 @@
+ import com.elrosado.cersuitecloudlocalcore.domain.model.CedulaUpdateRecord;
+ import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
+ import com.elrosado.cersuitecloudlocalcore.domain.model.PadronUpdateRecord;
+-import com.elrosado.cersuitecloudlocalcore.domain.model.UpdateCedPadRucErrorRecord;
+ import com.elrosado.cersuitecloudlocalcore.domain.model.UpdateCedPadRucFile;
+ import com.elrosado.cersuitecloudlocalcore.domain.model.UpdateCedPadRucFileType;
+ import com.elrosado.cersuitecloudlocalcore.domain.model.UpdateCedPadRucProcessingResult;
+ import com.elrosado.cersuitecloudlocalcore.domain.model.UpdateCedPadRucProcessingStage;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.in.UpdateCedPadRucUseCase;
+-import com.elrosado.cersuitecloudlocalcore.domain.port.out.UpdateCedPadRucErrorTrackerPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.UpdateCedPadRucPersistencePort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.UpdateCedPadRucStoragePort;
+ import com.elrosado.cersuitecloudlocalcore.infrastructure.config.UpdateCedPadRucProperties;
+@@ -21,7 +19,6 @@
+ 
+ import java.io.BufferedReader;
+ import java.io.IOException;
+-import java.time.Instant;
+ import java.util.ArrayList;
+ import java.util.List;
+ import java.util.UUID;
+@@ -31,26 +28,22 @@
+ 
+     private static final Logger log = LoggerFactory.getLogger(UpdateCedPadRucService.class);
+     private static final int MAX_ATTEMPTS = 3;
+-    private static final int STACKTRACE_MAX_LINES = 8;
+     private static final String FIELD_PROCESS_ID = "processId";
+     private static final String FIELD_FILE_NAME = "fileName";
+     private static final String FIELD_STAGE = "stage";
+ 
+     private final UpdateCedPadRucStoragePort storagePort;
+     private final UpdateCedPadRucPersistencePort persistencePort;
+-    private final UpdateCedPadRucErrorTrackerPort errorTrackerPort;
+     private final UpdateCedPadRucParser parser;
+     private final UpdateCedPadRucProperties properties;
+ 
+     public UpdateCedPadRucService(
+             UpdateCedPadRucStoragePort storagePort,
+             UpdateCedPadRucPersistencePort persistencePort,
+-            UpdateCedPadRucErrorTrackerPort errorTrackerPort,
+             UpdateCedPadRucParser parser,
+             UpdateCedPadRucProperties properties) {
+         this.storagePort = storagePort;
+         this.persistencePort = persistencePort;
+-        this.errorTrackerPort = errorTrackerPort;
+         this.parser = parser;
+         this.properties = properties;
+     }
+@@ -87,7 +80,6 @@
+ 
+     private void processWithRetry(UpdateCedPadRucFile file) {
+         String processId = UUID.randomUUID().toString();
+-        Instant executionDate = Instant.now();
+ 
+         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+             try {
+@@ -118,7 +110,7 @@
+                     continue;
+                 }
+ 
+-                handleFinalFailure(file, processId, executionDate, stage, e);
++                handleFinalFailure(file, processId, stage, e);
+             }
+         }
+     }
+@@ -312,7 +304,6 @@
+     private void handleFinalFailure(
+             UpdateCedPadRucFile file,
+             String processId,
+-            Instant executionDate,
+             UpdateCedPadRucProcessingStage stage,
+             UpdateCedPadRucProcessingException error) {
+         GcsObjectReference errorObject;
+@@ -329,30 +320,6 @@
+             return;
+         }
+ 
+-        try {
+-            errorTrackerPort.recordError(new UpdateCedPadRucErrorRecord(
+-                    processId,
+-                    executionDate,
+-                    file.fileName(),
+-                    file.location().bucket(),
+-                    file.location().objectName(),
+-                    errorObject.objectName(),
+-                    error.getClass().getSimpleName(),
+-                    safeErrorMessage(error),
+-                    summarizeStackTrace(error),
+-                    stage,
+-                    Instant.now()
+-            ));
+-        } catch (RuntimeException trackingError) {
+-            log.atError()
+-                    .setMessage("Archivo UpdateCedPadRuc movido a error sin registro Firestore")
+-                    .addKeyValue(FIELD_PROCESS_ID, processId)
+-                    .addKeyValue(FIELD_FILE_NAME, file.fileName())
+-                    .addKeyValue("errorObject", errorObject.toUri())
+-                    .setCause(trackingError)
+-                    .log();
+-        }
+-
+         log.atError()
+                 .setMessage("Archivo UpdateCedPadRuc enviado a error")
+                 .addKeyValue(FIELD_PROCESS_ID, processId)
+@@ -370,17 +337,4 @@
+         return UpdateCedPadRucProcessingStage.UNKNOWN;
+     }
+ 
+-    private String safeErrorMessage(UpdateCedPadRucProcessingException error) {
+-        return "Fallo controlado en etapa " + error.stage();
+-    }
+-
+-    private String summarizeStackTrace(UpdateCedPadRucProcessingException error) {
+-        StringBuilder summary = new StringBuilder(error.getClass().getName());
+-        StackTraceElement[] stackTrace = error.getStackTrace();
+-        int max = Math.min(stackTrace.length, STACKTRACE_MAX_LINES);
+-        for (int i = 0; i < max; i++) {
+-            summary.append(System.lineSeparator()).append("at ").append(stackTrace[i]);
+-        }
+-        return summary.toString();
+-    }
+ }
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/UpdateMotoService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/UpdateMotoService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/UpdateMotoService.java
+@@ -2,13 +2,11 @@
+ 
+ import com.elrosado.cersuitecloudlocalcore.domain.exception.MotoProcessingException;
+ import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
+-import com.elrosado.cersuitecloudlocalcore.domain.model.MotoErrorRecord;
+ import com.elrosado.cersuitecloudlocalcore.domain.model.MotoFile;
+ import com.elrosado.cersuitecloudlocalcore.domain.model.MotoProcessingResult;
+ import com.elrosado.cersuitecloudlocalcore.domain.model.MotoProcessingStage;
+ import com.elrosado.cersuitecloudlocalcore.domain.model.MotoRecord;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.in.UpdateMotoUseCase;
+-import com.elrosado.cersuitecloudlocalcore.domain.port.out.MotoErrorTrackerPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.MotoPersistencePort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.MotoStoragePort;
+ import com.elrosado.cersuitecloudlocalcore.infrastructure.config.StoreRegistry;
+@@ -21,7 +19,6 @@
+ 
+ import java.io.BufferedReader;
+ import java.io.IOException;
+-import java.time.Instant;
+ import java.util.ArrayList;
+ import java.util.List;
+ import java.util.Map;
+@@ -34,9 +31,6 @@
+ 
+     private static final Logger log = LoggerFactory.getLogger(UpdateMotoService.class);
+     private static final int MAX_ATTEMPTS = 3;
+-    private static final int STACKTRACE_MAX_LINES = 8;
+-    private static final String PROCESS_NAME = "UpdateMotoProcess";
+-    private static final String PROCESS_TYPE = "SCHEDULER";
+     private static final String FIELD_STORE_CODE = "storeCode";
+     private static final String FIELD_PROCESS_ID = "processId";
+     private static final String FIELD_FILE_NAME = "fileName";
+@@ -45,7 +39,6 @@
+ 
+     private final MotoStoragePort storagePort;
+     private final MotoPersistencePort persistencePort;
+-    private final MotoErrorTrackerPort errorTrackerPort;
+     private final MotoFileParser parser;
+     private final UpdateMotoProperties properties;
+     private final StoreRegistry storeRegistry;
+@@ -54,14 +47,12 @@
+     public UpdateMotoService(
+             MotoStoragePort storagePort,
+             MotoPersistencePort persistencePort,
+-            MotoErrorTrackerPort errorTrackerPort,
+             MotoFileParser parser,
+             UpdateMotoProperties properties,
+             StoreRegistry storeRegistry,
+             @Qualifier("virtualThreadTaskExecutor") AsyncTaskExecutor virtualThreadTaskExecutor) {
+         this.storagePort = storagePort;
+         this.persistencePort = persistencePort;
+-        this.errorTrackerPort = errorTrackerPort;
+         this.parser = parser;
+         this.properties = properties;
+         this.storeRegistry = storeRegistry;
+@@ -145,7 +136,6 @@
+ 
+     private void processWithRetry(MotoFile file) {
+         String processId = UUID.randomUUID().toString();
+-        Instant executionDate = Instant.now();
+ 
+         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+             try {
+@@ -178,14 +168,12 @@
+                     continue;
+                 }
+ 
+-                handleFinalFailure(file, processId, executionDate, stage, e);
++                handleFinalFailure(file, processId, stage, e);
+             }
+         }
+     }
+ 
+     private void moveUnknownStoreToError(MotoFile file, int storeCode) {
+-        String processId = UUID.randomUUID().toString();
+-        Instant now = Instant.now();
+         String storeCodeStr = String.format("%03d", storeCode);
+ 
+         GcsObjectReference errorObject;
+@@ -199,40 +187,6 @@
+                     .setCause(e)
+                     .log();
+             return;
+-        }
+-
+-        try {
+-            errorTrackerPort.recordError(new MotoErrorRecord(
+-                    PROCESS_NAME,
+-                    PROCESS_TYPE,
+-                    processId,
+-                    storeCodeStr,
+-                    file.fileName(),
+-                    file.location().bucket(),
+-                    file.location().toUri(),
+-                    MotoProcessingStage.UNKNOWN.name(),
+-                    "",
+-                    "UnknownStoreCode",
+-                    "",
+-                    "Store code " + storeCodeStr + " not found in active multi-local registry",
+-                    "",
+-                    0,
+-                    0,
+-                    true,
+-                    "UNKNOWN_STORE",
+-                    now,
+-                    now,
+-                    System.getenv().getOrDefault("HOSTNAME", ""),
+-                    System.getenv().getOrDefault("POD_NAME", ""),
+-                    processId
+-            ));
+-        } catch (IllegalStateException | IllegalArgumentException e) {
+-            log.atError()
+-                    .setMessage("Unknown-store MOTO file moved to error without Firestore record")
+-                    .addKeyValue(FIELD_STORE_CODE, storeCodeStr)
+-                    .addKeyValue(FIELD_ERROR_OBJECT, errorObject.toUri())
+-                    .setCause(e)
+-                    .log();
+         }
+ 
+         log.atWarn()
+@@ -320,7 +274,6 @@
+     private void handleFinalFailure(
+             MotoFile file,
+             String processId,
+-            Instant executionDate,
+             MotoProcessingStage stage,
+             MotoProcessingException error) {
+         GcsObjectReference errorObject;
+@@ -338,43 +291,7 @@
+             return;
+         }
+ 
+-        Instant now = Instant.now();
+         String storeCodeStr = String.format("%03d", file.storeCode());
+-        try {
+-            errorTrackerPort.recordError(new MotoErrorRecord(
+-                    PROCESS_NAME,
+-                    PROCESS_TYPE,
+-                    processId,
+-                    storeCodeStr,
+-                    file.fileName(),
+-                    file.location().bucket(),
+-                    file.location().toUri(),
+-                    stage.name(),
+-                    "",
+-                    error.getClass().getSimpleName(),
+-                    "",
+-                    safeErrorMessage(error),
+-                    summarizeStackTrace(error),
+-                    MAX_ATTEMPTS,
+-                    MAX_ATTEMPTS,
+-                    true,
+-                    "EXHAUSTED",
+-                    executionDate,
+-                    now,
+-                    System.getenv().getOrDefault("HOSTNAME", ""),
+-                    System.getenv().getOrDefault("POD_NAME", ""),
+-                    processId
+-            ));
+-        } catch (RuntimeException trackingError) {
+-            log.atError()
+-                    .setMessage("MOTO file moved to error without Firestore record")
+-                    .addKeyValue(FIELD_PROCESS_ID, processId)
+-                    .addKeyValue(FIELD_STORE_CODE, storeCodeStr)
+-                    .addKeyValue(FIELD_FILE_NAME, file.fileName())
+-                    .addKeyValue(FIELD_ERROR_OBJECT, errorObject.toUri())
+-                    .setCause(trackingError)
+-                    .log();
+-        }
+ 
+         log.atError()
+                 .setMessage("MOTO file sent to error bucket")
+@@ -394,17 +311,4 @@
+         return MotoProcessingStage.UNKNOWN;
+     }
+ 
+-    private String safeErrorMessage(MotoProcessingException error) {
+-        return "Fallo controlado en etapa " + error.stage();
+-    }
+-
+-    private String summarizeStackTrace(MotoProcessingException error) {
+-        StringBuilder summary = new StringBuilder(error.getClass().getName());
+-        StackTraceElement[] stackTrace = error.getStackTrace();
+-        int max = Math.min(stackTrace.length, STACKTRACE_MAX_LINES);
+-        for (int i = 0; i < max; i++) {
+-            summary.append(System.lineSeparator()).append("at ").append(stackTrace[i]);
+-        }
+-        return summary.toString();
+-    }
+ }
+
+
+--- Diff for /src/main/resources/application-dev.yml ---
+--- a//src/main/resources/application-dev.yml
++++ b//src/main/resources/application-dev.yml
+@@ -61,7 +61,7 @@
+ 
+ syscardOutbox:
+   enabled: ${SYSCARD_OUTBOX_ENABLED:true}
+-  collection: ${GCP_FIRESTORE_COLLECTION_SYSCARD_OUTBOX:syscard_outbound_frames}
++  collection: ${GCP_FIRESTORE_COLLECTION_SYSCARD_OUTBOX:syscard-outbound-frames}
+   pubsub:
+     topic: ${GCP_PUBSUB_TOPIC_SYSCARD_FRAME:retail.local.syscard.frame.request.v1}
+     subscription: ${GCP_PUBSUB_SUB_SYSCARD_FRAME:retail.local.syscard.frame.request.v1-sub}
+@@ -70,7 +70,7 @@
+ 
+ puntosOutbox:
+   enabled: ${PUNTOS_OUTBOX_ENABLED:true}
+-  collection: ${GCP_FIRESTORE_COLLECTION_PUNTOS_OUTBOX:puntos_outbound_frames}
++  collection: ${GCP_FIRESTORE_COLLECTION_PUNTOS_OUTBOX:puntos-outbound-frames}
+   pubsub:
+     topic: ${GCP_PUBSUB_TOPIC_PUNTOS_FRAME:retail.local.puntos.frame.request.v1}
+     subscription: ${GCP_PUBSUB_SUB_PUNTOS_FRAME:retail.local.puntos.frame.request.v1-sub}
+@@ -79,7 +79,7 @@
+ 
+ syscardResponseOutbox:
+   enabled: ${SYSCARD_RESPONSE_OUTBOX_ENABLED:true}
+-  collection: ${GCP_FIRESTORE_COLLECTION_SYSCARD_RESPONSE_OUTBOX:syscard_response_outbound_frames}
++  collection: ${GCP_FIRESTORE_COLLECTION_SYSCARD_RESPONSE_OUTBOX:syscard-response-outbound-frames}
+   pubsub:
+     topic: ${GCP_PUBSUB_TOPIC_SYSCARD_RESPONSE_FRAME:retail.local.syscard.response.request.v1}
+     subscription: ${GCP_PUBSUB_SUB_SYSCARD_RESPONSE_FRAME:retail.local.syscard.response.request.v1-sub}
+@@ -88,7 +88,7 @@
+ 
+ trama-pos-outbox:
+   enabled: ${TRAMA_POS_OUTBOX_ENABLED:true}
+-  collection: ${GCP_FIRESTORE_COLLECTION_TRAMA_POS_OUTBOX:trama_pos_outbound_frames}
++  collection: ${GCP_FIRESTORE_COLLECTION_TRAMA_POS_OUTBOX:trama-pos-outbound-frames}
+   pubsub:
+     topic: ${GCP_PUBSUB_TOPIC_TRAMA_POS_FRAME:retail.local.trama.pos.request.v1}
+     subscription: ${GCP_PUBSUB_SUB_TRAMA_POS_FRAME:retail.local.trama.pos.request.v1-sub}
+@@ -185,8 +185,7 @@
+       topic-synchro-controller: ${GCP_PUBSUB_TOPIC_SYNCHRO_CONTROLLER:retail.local.synchro.controller.v1}
+     firestore:
+       collection: ${GCP_FIRESTORE_COLLECTION:frames}
+-      collection-repro: ${GCP_FIRESTORE_COLLECTION_REPRO:frames_repro}
+-      collection-process-error: ${GCP_FIRESTORE_COLLECTION_PROCESS_ERROR:process_error}
++      collection-repro: ${GCP_FIRESTORE_COLLECTION_REPRO:frames-repro}
+   repro:
+     enabled: true
+     polling-interval-ms: 30000
+
+
+--- Diff for /src/main/resources/application-local.yml ---
+--- a//src/main/resources/application-local.yml
++++ b//src/main/resources/application-local.yml
+@@ -66,7 +66,7 @@
+ 
+ syscardOutbox:
+   enabled: true
+-  collection: syscard_outbound_frames
++  collection: syscard-outbound-frames
+   pubsub:
+     topic: retail.local.syscard.frame.request.v1
+     subscription: retail.local.syscard.frame.request.v1-sub
+@@ -75,7 +75,7 @@
+ 
+ puntosOutbox:
+   enabled: true
+-  collection: puntos_outbound_frames
++  collection: puntos-outbound-frames
+   pubsub:
+     topic: retail.local.puntos.frame.request.v1
+     subscription: retail.local.puntos.frame.request.v1-sub
+@@ -84,7 +84,7 @@
+ 
+ syscardResponseOutbox:
+   enabled: true
+-  collection: syscard_response_outbound_frames
++  collection: syscard-response-outbound-frames
+   pubsub:
+     topic: retail.local.syscard.response.request.v1
+     subscription: retail.local.syscard.response.request.v1-sub
+@@ -93,7 +93,7 @@
+ 
+ trama-pos-outbox:
+   enabled: true
+-  collection: trama_pos_outbound_frames
++  collection: trama-pos-outbound-frames
+   pubsub:
+     topic: retail.local.trama.pos.request.v1
+     subscription: retail.local.trama.pos.request.v1-sub
+@@ -239,8 +239,7 @@
+       topic-synchro-controller: retail.local.synchro.controller.v1
+     firestore:
+       collection: frames
+-      collection-repro: frames_repro
+-      collection-process-error: process_error
++      collection-repro: frames-repro
+   repro:
+     enabled: true
+     polling-interval-ms: 30000
+
+
+--- Diff for /src/main/resources/application-prod.yml ---
+--- a//src/main/resources/application-prod.yml
++++ b//src/main/resources/application-prod.yml
+@@ -145,8 +145,7 @@
+       topic-synchro-controller: ${GCP_PUBSUB_TOPIC_SYNCHRO_CONTROLLER:retail.local.synchro.controller.v1}
+     firestore:
+       collection: ${GCP_FIRESTORE_COLLECTION:frames}
+-      collection-repro: ${GCP_FIRESTORE_COLLECTION_REPRO:frames_repro}
+-      collection-process-error: ${GCP_FIRESTORE_COLLECTION_PROCESS_ERROR:process_error}
++      collection-repro: ${GCP_FIRESTORE_COLLECTION_REPRO:frames-repro}
+   repro:
+     enabled: ${REPRO_ENABLED:true}
+     polling-interval-ms: ${REPRO_POLLING_MS:30000}
+@@ -187,7 +186,7 @@
+ 
+ syscardOutbox:
+   enabled: ${SYSCARD_OUTBOX_ENABLED:true}
+-  collection: ${GCP_FIRESTORE_COLLECTION_SYSCARD_OUTBOX:syscard_outbound_frames}
++  collection: ${GCP_FIRESTORE_COLLECTION_SYSCARD_OUTBOX:syscard-outbound-frames}
+   pubsub:
+     topic: ${GCP_PUBSUB_TOPIC_SYSCARD_FRAME:retail.local.syscard.frame.request.v1}
+     subscription: ${GCP_PUBSUB_SUB_SYSCARD_FRAME:retail.local.syscard.frame.request.v1-sub}
+@@ -196,7 +195,7 @@
+ 
+ puntosOutbox:
+   enabled: ${PUNTOS_OUTBOX_ENABLED:true}
+-  collection: ${GCP_FIRESTORE_COLLECTION_PUNTOS_OUTBOX:puntos_outbound_frames}
++  collection: ${GCP_FIRESTORE_COLLECTION_PUNTOS_OUTBOX:puntos-outbound-frames}
+   pubsub:
+     topic: ${GCP_PUBSUB_TOPIC_PUNTOS_FRAME:retail.local.puntos.frame.request.v1}
+     subscription: ${GCP_PUBSUB_SUB_PUNTOS_FRAME:retail.local.puntos.frame.request.v1-sub}
+@@ -205,7 +204,7 @@
+ 
+ syscardResponseOutbox:
+   enabled: ${SYSCARD_RESPONSE_OUTBOX_ENABLED:true}
+-  collection: ${GCP_FIRESTORE_COLLECTION_SYSCARD_RESPONSE_OUTBOX:syscard_response_outbound_frames}
++  collection: ${GCP_FIRESTORE_COLLECTION_SYSCARD_RESPONSE_OUTBOX:syscard-response-outbound-frames}
+   pubsub:
+     topic: ${GCP_PUBSUB_TOPIC_SYSCARD_RESPONSE_FRAME:retail.local.syscard.response.request.v1}
+     subscription: ${GCP_PUBSUB_SUB_SYSCARD_RESPONSE_FRAME:retail.local.syscard.response.request.v1-sub}
+@@ -214,7 +213,7 @@
+ 
+ trama-pos-outbox:
+   enabled: ${TRAMA_POS_OUTBOX_ENABLED:true}
+-  collection: ${GCP_FIRESTORE_COLLECTION_TRAMA_POS_OUTBOX:trama_pos_outbound_frames}
++  collection: ${GCP_FIRESTORE_COLLECTION_TRAMA_POS_OUTBOX:trama-pos-outbound-frames}
+   pubsub:
+     topic: ${GCP_PUBSUB_TOPIC_TRAMA_POS_FRAME:retail.local.trama.pos.request.v1}
+     subscription: ${GCP_PUBSUB_SUB_TRAMA_POS_FRAME:retail.local.trama.pos.request.v1-sub}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/event/PuntosFrameOutboxSubscriberAdapterTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/event/PuntosFrameOutboxSubscriberAdapterTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/event/PuntosFrameOutboxSubscriberAdapterTest.java
+@@ -16,7 +16,7 @@
+ class PuntosFrameOutboxSubscriberAdapterTest {
+ 
+     private static final PuntosOutboxProperties PROPS =
+-            new PuntosOutboxProperties(true, "puntos_outbound_frames",
++            new PuntosOutboxProperties(true, "puntos-outbound-frames",
+                     new PuntosOutboxProperties.Pubsub("retail.local.puntos.frame.request.v1",
+                             "retail.local.puntos.frame.request.v1-sub"),
+                     60000, 50);
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/event/SyscardFrameOutboxSubscriberAdapterTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/event/SyscardFrameOutboxSubscriberAdapterTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/event/SyscardFrameOutboxSubscriberAdapterTest.java
+@@ -16,7 +16,7 @@
+ class SyscardFrameOutboxSubscriberAdapterTest {
+ 
+     private static final SyscardOutboxProperties PROPS =
+-            new SyscardOutboxProperties(true, "syscard_outbound_frames",
++            new SyscardOutboxProperties(true, "syscard-outbound-frames",
+                     new SyscardOutboxProperties.Pubsub("retail.local.syscard.frame.request.v1",
+                             "retail.local.syscard.frame.request.v1-sub"),
+                     60000, 50);
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/event/SyscardResponseFrameOutboxSubscriberAdapterTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/event/SyscardResponseFrameOutboxSubscriberAdapterTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/event/SyscardResponseFrameOutboxSubscriberAdapterTest.java
+@@ -16,7 +16,7 @@
+ class SyscardResponseFrameOutboxSubscriberAdapterTest {
+ 
+     private static final SyscardResponseOutboxProperties PROPS =
+-            new SyscardResponseOutboxProperties(true, "syscard_response_outbound_frames",
++            new SyscardResponseOutboxProperties(true, "syscard-response-outbound-frames",
+                     new SyscardResponseOutboxProperties.Pubsub("retail.local.syscard.response.request.v1",
+                             "retail.local.syscard.response.request.v1-sub"),
+                     60000, 50);
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/event/TramaPosFrameOutboxSubscriberAdapterTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/event/TramaPosFrameOutboxSubscriberAdapterTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/event/TramaPosFrameOutboxSubscriberAdapterTest.java
+@@ -16,7 +16,7 @@
+ class TramaPosFrameOutboxSubscriberAdapterTest {
+ 
+     private static final TramaPosOutboxProperties PROPS =
+-            new TramaPosOutboxProperties(true, "trama_pos_outbound_frames",
++            new TramaPosOutboxProperties(true, "trama-pos-outbound-frames",
+                     new TramaPosOutboxProperties.Pubsub("retail.local.trama.pos.request.v1",
+                             "retail.local.trama.pos.request.v1-sub"),
+                     60000, 50);
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/PuntosOutboxSweepSchedulerAdapterTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/PuntosOutboxSweepSchedulerAdapterTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/PuntosOutboxSweepSchedulerAdapterTest.java
+@@ -27,14 +27,14 @@
+ 
+     @BeforeEach
+     void setUp() {
+-        enabledProps = new PuntosOutboxProperties(true, "puntos_outbound_frames",
++        enabledProps = new PuntosOutboxProperties(true, "puntos-outbound-frames",
+                 new PuntosOutboxProperties.Pubsub("topic", "sub"), 60000, 50);
+         scheduler = new PuntosOutboxSweepSchedulerAdapter(outboxPort, forwardUseCase, enabledProps);
+     }
+ 
+     @Test
+     void sweep_deshabilitado_noConsultaOutbox() {
+-        PuntosOutboxProperties disabled = new PuntosOutboxProperties(false, "puntos_outbound_frames",
++        PuntosOutboxProperties disabled = new PuntosOutboxProperties(false, "puntos-outbound-frames",
+                 new PuntosOutboxProperties.Pubsub("topic", "sub"), 60000, 50);
+         scheduler = new PuntosOutboxSweepSchedulerAdapter(outboxPort, forwardUseCase, disabled);
+ 
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SyscardResponseOutboxSweepSchedulerAdapterTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SyscardResponseOutboxSweepSchedulerAdapterTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/SyscardResponseOutboxSweepSchedulerAdapterTest.java
+@@ -27,7 +27,7 @@
+     @BeforeEach
+     void setUp() {
+         SyscardResponseOutboxProperties enabledProps = new SyscardResponseOutboxProperties(true,
+-                "syscard_response_outbound_frames",
++                "syscard-response-outbound-frames",
+                 new SyscardResponseOutboxProperties.Pubsub("topic", "sub"), 60000, 50);
+         scheduler = new SyscardResponseOutboxSweepSchedulerAdapter(outboxPort, forwardUseCase, enabledProps);
+     }
+@@ -35,7 +35,7 @@
+     @Test
+     void sweep_deshabilitado_noConsultaOutbox() {
+         SyscardResponseOutboxProperties disabled = new SyscardResponseOutboxProperties(false,
+-                "syscard_response_outbound_frames",
++                "syscard-response-outbound-frames",
+                 new SyscardResponseOutboxProperties.Pubsub("topic", "sub"), 60000, 50);
+         scheduler = new SyscardResponseOutboxSweepSchedulerAdapter(outboxPort, forwardUseCase, disabled);
+ 
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/TramaPosOutboxSweepSchedulerAdapterTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/TramaPosOutboxSweepSchedulerAdapterTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/in/scheduler/TramaPosOutboxSweepSchedulerAdapterTest.java
+@@ -27,14 +27,14 @@
+ 
+     @BeforeEach
+     void setUp() {
+-        enabledProps = new TramaPosOutboxProperties(true, "trama_pos_outbound_frames",
++        enabledProps = new TramaPosOutboxProperties(true, "trama-pos-outbound-frames",
+                 new TramaPosOutboxProperties.Pubsub("topic", "sub"), 60000, 50);
+         scheduler = new TramaPosOutboxSweepSchedulerAdapter(outboxPort, forwardUseCase, enabledProps);
+     }
+ 
+     @Test
+     void sweep_deshabilitado_noConsultaOutbox() {
+-        TramaPosOutboxProperties disabled = new TramaPosOutboxProperties(false, "trama_pos_outbound_frames",
++        TramaPosOutboxProperties disabled = new TramaPosOutboxProperties(false, "trama-pos-outbound-frames",
+                 new TramaPosOutboxProperties.Pubsub("topic", "sub"), 60000, 50);
+         scheduler = new TramaPosOutboxSweepSchedulerAdapter(outboxPort, forwardUseCase, disabled);
+ 
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestorePuntosOutboxAdapterTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestorePuntosOutboxAdapterTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestorePuntosOutboxAdapterTest.java
+@@ -38,12 +38,12 @@
+     @BeforeEach
+     void setUp() throws Exception {
+         adapter = new FirestorePuntosOutboxAdapter(firestore);
+-        setCollectionField(adapter, "puntos_outbound_frames");
++        setCollectionField(adapter, "puntos-outbound-frames");
+     }
+ 
+     @Test
+     void enqueue_creaDocumentoSinCampoStatusYRetornaId() throws Exception {
+-        when(firestore.collection("puntos_outbound_frames")).thenReturn(collectionReference);
++        when(firestore.collection("puntos-outbound-frames")).thenReturn(collectionReference);
+         when(collectionReference.document()).thenReturn(documentReference);
+         when(documentReference.getId()).thenReturn("doc-generated-1");
+         when(documentReference.set(org.mockito.ArgumentMatchers.<Map<String, Object>>any()))
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestoreSyscardOutboxAdapterTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestoreSyscardOutboxAdapterTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestoreSyscardOutboxAdapterTest.java
+@@ -39,12 +39,12 @@
+     @BeforeEach
+     void setUp() throws Exception {
+         adapter = new FirestoreSyscardOutboxAdapter(firestore);
+-        setCollectionField(adapter, "syscard_outbound_frames");
++        setCollectionField(adapter, "syscard-outbound-frames");
+     }
+ 
+     @Test
+     void enqueue_creaDocumentoSinCampoStatusYRetornaId() throws Exception {
+-        when(firestore.collection("syscard_outbound_frames")).thenReturn(collectionReference);
++        when(firestore.collection("syscard-outbound-frames")).thenReturn(collectionReference);
+         when(collectionReference.document()).thenReturn(documentReference);
+         when(documentReference.getId()).thenReturn("doc-generated-1");
+         when(documentReference.set(org.mockito.ArgumentMatchers.<Map<String, Object>>any()))
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestoreSyscardResponseOutboxAdapterTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestoreSyscardResponseOutboxAdapterTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestoreSyscardResponseOutboxAdapterTest.java
+@@ -38,12 +38,12 @@
+     @BeforeEach
+     void setUp() throws Exception {
+         adapter = new FirestoreSyscardResponseOutboxAdapter(firestore);
+-        setCollectionField(adapter, "syscard_response_outbound_frames");
++        setCollectionField(adapter, "syscard-response-outbound-frames");
+     }
+ 
+     @Test
+     void enqueue_creaDocumentoSinCampoStatusYRetornaId() throws Exception {
+-        when(firestore.collection("syscard_response_outbound_frames")).thenReturn(collectionReference);
++        when(firestore.collection("syscard-response-outbound-frames")).thenReturn(collectionReference);
+         when(collectionReference.document()).thenReturn(documentReference);
+         when(documentReference.getId()).thenReturn("doc-generated-1");
+         when(documentReference.set(org.mockito.ArgumentMatchers.<Map<String, Object>>any()))
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestoreTramaPosOutboxAdapterTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestoreTramaPosOutboxAdapterTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/infrastructure/adapter/out/firestore/FirestoreTramaPosOutboxAdapterTest.java
+@@ -38,12 +38,12 @@
+     @BeforeEach
+     void setUp() throws Exception {
+         adapter = new FirestoreTramaPosOutboxAdapter(firestore);
+-        setCollectionField(adapter, "trama_pos_outbound_frames");
++        setCollectionField(adapter, "trama-pos-outbound-frames");
+     }
+ 
+     @Test
+     void enqueue_creaDocumentoSinCampoStatusYRetornaId() throws Exception {
+-        when(firestore.collection("trama_pos_outbound_frames")).thenReturn(collectionReference);
++        when(firestore.collection("trama-pos-outbound-frames")).thenReturn(collectionReference);
+         when(collectionReference.document()).thenReturn(documentReference);
+         when(documentReference.getId()).thenReturn("doc-generated-1");
+         when(documentReference.set(org.mockito.ArgumentMatchers.<Map<String, Object>>any()))
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/JournalFileServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/JournalFileServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/JournalFileServiceTest.java
+@@ -7,7 +7,6 @@
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.JournalControlPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.JournalControllerPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.JournalErrorPort;
+-import com.elrosado.cersuitecloudlocalcore.domain.port.out.JournalErrorTrackerPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.JournalEventPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.JournalStoragePort;
+ import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.saadmin.entity.StoreEntity;
+@@ -46,7 +45,6 @@
+     @Mock JournalControllerPort controllerPort;
+     @Mock JournalStoragePort storagePort;
+     @Mock JournalEventPort eventPort;
+-    @Mock JournalErrorTrackerPort errorTrackerPort;
+     @Mock StoreRegistry storeRegistry;
+     @Mock ParameterProviderPort parameterProviderPort;
+ 
+@@ -75,7 +73,7 @@
+ 
+     private JournalFileService buildService(boolean enabled) {
+         return new JournalFileService(
+-                controlPort, errorPort, controllerPort, storagePort, eventPort, errorTrackerPort,
++                controlPort, errorPort, controllerPort, storagePort, eventPort,
+                 new JournalParserService(),
+                 storeRegistry,
+                 new SendJournalFileFtpProperties(enabled),
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/SearchInventarioStickerServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/SearchInventarioStickerServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/SearchInventarioStickerServiceTest.java
+@@ -1,9 +1,7 @@
+ package com.elrosado.cersuitecloudlocalcore.service;
+ 
+-import com.elrosado.cersuitecloudlocalcore.domain.model.StickerErrorRecord;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.in.ParameterProviderPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.StickerControllerFilePort;
+-import com.elrosado.cersuitecloudlocalcore.domain.port.out.StickerErrorTrackerPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.StickerInventoryPersistencePort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.StickerInventoryStoragePort;
+ import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.saadmin.entity.StoreEntity;
+@@ -38,7 +36,6 @@
+     @Mock StickerControllerFilePort controllerPort;
+     @Mock StickerInventoryStoragePort storagePort;
+     @Mock StickerInventoryPersistencePort persistencePort;
+-    @Mock StickerErrorTrackerPort errorTrackerPort;
+     @Mock StoreRegistry storeRegistry;
+     @Mock ParameterProviderPort parameterProviderPort;
+ 
+@@ -65,7 +62,7 @@
+ 
+     private SearchInventarioStickerService buildService(boolean enabled) {
+         return new SearchInventarioStickerService(
+-                controllerPort, storagePort, persistencePort, errorTrackerPort,
++                controllerPort, storagePort, persistencePort,
+                 new StickerInventoryParserService(),
+                 storeRegistry,
+                 new SearchInventarioStickerProperties(enabled),
+@@ -135,34 +132,31 @@
+         verify(storagePort).uploadFile(eq(STORE_CODE), anyString(), eq(FILE_CONTENT));
+         verify(persistencePort).saveEntry(eq(227934), any(LocalDate.class), eq(1039));
+         verify(storagePort).moveToBackup(eq(STORE_CODE), anyString());
+-        verifyNoInteractions(errorTrackerPort);
+     }
+ 
+     @Test
+-    void processAllPendingStores_errorDescarga_registraErrorYNoContinua() {
++    void processAllPendingStores_errorDescarga_noContinua() {
+         when(controllerPort.downloadFile(anyString(), anyString(), anyString()))
+                 .thenThrow(new IllegalStateException("controlador no disponible"));
+ 
+         service.processAllPendingStores();
+ 
+-        verify(errorTrackerPort).recordError(any(StickerErrorRecord.class));
+         verifyNoInteractions(storagePort, persistencePort);
+     }
+ 
+     @Test
+-    void processAllPendingStores_errorParseo_registraErrorYNoPersiste() {
++    void processAllPendingStores_errorParseo_noPersiste() {
+         when(controllerPort.downloadFile(anyString(), anyString(), anyString()))
+                 .thenReturn(Optional.of("invalida".getBytes()));
+ 
+         service.processAllPendingStores();
+ 
+-        verify(errorTrackerPort).recordError(any(StickerErrorRecord.class));
+         verifyNoInteractions(persistencePort);
+         verify(storagePort, never()).moveToBackup(anyString(), anyString());
+     }
+ 
+     @Test
+-    void processAllPendingStores_errorPersistencia_registraErrorYNoMueveABackup() {
++    void processAllPendingStores_errorPersistencia_noMueveABackup() {
+         when(controllerPort.downloadFile(anyString(), anyString(), anyString()))
+                 .thenReturn(Optional.of(FILE_CONTENT));
+         doThrow(new IllegalStateException("NO EXISTE CAMPAIGN"))
+@@ -170,7 +164,6 @@
+ 
+         service.processAllPendingStores();
+ 
+-        verify(errorTrackerPort).recordError(any(StickerErrorRecord.class));
+         verify(storagePort, never()).moveToBackup(anyString(), anyString());
+     }
+ 
+@@ -192,13 +185,12 @@
+     }
+ 
+     @Test
+-    void processAllPendingStores_controllerFolderNoDisponibleEnRedis_registraErrorYNoContinua() {
++    void processAllPendingStores_controllerFolderNoDisponibleEnRedis_noContinua() {
+         when(parameterProviderPort.getParameter(null, 4, "controlador.folder.sticker"))
+                 .thenReturn(Optional.empty());
+ 
+         service.processAllPendingStores();
+ 
+-        verify(errorTrackerPort).recordError(any(StickerErrorRecord.class));
+         verifyNoInteractions(storagePort, persistencePort);
+     }
+ }
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/SyncParametersServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/SyncParametersServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/SyncParametersServiceTest.java
+@@ -5,7 +5,6 @@
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.ParameterCachePort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.ParameterRepositoryPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.ParameterSourcePort;
+-import com.elrosado.cersuitecloudlocalcore.domain.port.out.ParameterSyncErrorTrackerPort;
+ import com.elrosado.cersuitecloudlocalcore.infrastructure.adapter.out.db.saadmin.entity.StoreEntity;
+ import com.elrosado.cersuitecloudlocalcore.infrastructure.config.ParameterSyncProperties;
+ import com.elrosado.cersuitecloudlocalcore.infrastructure.config.StoreRegistry;
+@@ -19,7 +18,6 @@
+ 
+ import static org.junit.jupiter.api.Assertions.assertEquals;
+ import static org.mockito.ArgumentMatchers.any;
+-import static org.mockito.ArgumentMatchers.argThat;
+ import static org.mockito.ArgumentMatchers.eq;
+ import static org.mockito.Mockito.doThrow;
+ import static org.mockito.Mockito.mock;
+@@ -40,10 +38,9 @@
+     @Mock ParameterRepositoryPort repositoryPort;
+     @Mock ParameterCachePort cachePort;
+     @Mock StoreRegistry storeRegistry;
+-    @Mock ParameterSyncErrorTrackerPort errorTrackerPort;
+ 
+     private SyncParametersService service(boolean dryRun, Integer... scopes) {
+-        return new SyncParametersService(sourcePort, repositoryPort, cachePort, storeRegistry, errorTrackerPort,
++        return new SyncParametersService(sourcePort, repositoryPort, cachePort, storeRegistry,
+                 new ParameterSyncProperties(List.of(scopes), dryRun));
+     }
+ 
+@@ -167,7 +164,6 @@
+ 
+         ParameterSyncResult result = service(false, 4).syncAll();
+ 
+-        verify(errorTrackerPort).recordError(argThat(err -> err.scope() == 4 && err.key() == null));
+         assertEquals(1, result.scopesProcessed());
+         assertEquals(1, result.errors());
+         assertEquals(0, result.parametersWritten());
+@@ -186,7 +182,6 @@
+         ParameterSyncResult result = service(false, 4).syncAll();
+ 
+         verify(repositoryPort).reconcileScopeKey(4, "K2", "B", Map.of());
+-        verify(errorTrackerPort).recordError(argThat(err -> "K1".equals(err.key())));
+         assertEquals(1, result.errors());
+         assertEquals(1, result.parametersWritten());
+     }
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/UpdateCedPadRucServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/UpdateCedPadRucServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/UpdateCedPadRucServiceTest.java
+@@ -1,18 +1,14 @@
+ package com.elrosado.cersuitecloudlocalcore.service;
+ 
+ import com.elrosado.cersuitecloudlocalcore.domain.model.GcsObjectReference;
+-import com.elrosado.cersuitecloudlocalcore.domain.model.UpdateCedPadRucErrorRecord;
+ import com.elrosado.cersuitecloudlocalcore.domain.model.UpdateCedPadRucFile;
+ import com.elrosado.cersuitecloudlocalcore.domain.model.UpdateCedPadRucFileType;
+-import com.elrosado.cersuitecloudlocalcore.domain.model.UpdateCedPadRucProcessingStage;
+-import com.elrosado.cersuitecloudlocalcore.domain.port.out.UpdateCedPadRucErrorTrackerPort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.UpdateCedPadRucPersistencePort;
+ import com.elrosado.cersuitecloudlocalcore.domain.port.out.UpdateCedPadRucStoragePort;
+ import com.elrosado.cersuitecloudlocalcore.infrastructure.config.UpdateCedPadRucProperties;
+ import org.junit.jupiter.api.BeforeEach;
+ import org.junit.jupiter.api.Test;
+ import org.junit.jupiter.api.extension.ExtendWith;
+-import org.mockito.ArgumentCaptor;
+ import org.mockito.Mock;
+ import org.mockito.junit.jupiter.MockitoExtension;
+ 
+@@ -20,8 +16,6 @@
+ import java.io.StringReader;
+ import java.util.List;
+ 
+-import static org.junit.jupiter.api.Assertions.assertEquals;
+-import static org.mockito.ArgumentMatchers.any;
+ import static org.mockito.Mockito.*;
+ 
+ @ExtendWith(MockitoExtension.class)
+@@ -31,8 +25,6 @@
+     UpdateCedPadRucStoragePort storagePort;
+     @Mock
+     UpdateCedPadRucPersistencePort persistencePort;
+-    @Mock
+-    UpdateCedPadRucErrorTrackerPort errorTrackerPort;
+ 
+     UpdateCedPadRucService service;
+ 
+@@ -41,7 +33,6 @@
+         service = new UpdateCedPadRucService(
+                 storagePort,
+                 persistencePort,
+-                errorTrackerPort,
+                 new UpdateCedPadRucParser(),
+                 new UpdateCedPadRucProperties(true, 2,
+                         new UpdateCedPadRucProperties.GcsProperties("gs://bucket/error"))
+@@ -64,11 +55,10 @@
+         verify(persistencePort).saveCedulas(argThat(records -> records.size() == 2));
+         verify(storagePort).moveToBackup(file);
+         verify(storagePort, never()).moveToError(any());
+-        verifyNoInteractions(errorTrackerPort);
+     }
+ 
+     @Test
+-    void processPendingFiles_parseFallaTresVeces_mueveErrorYRegistraFirestore() {
++    void processPendingFiles_parseFallaTresVeces_mueveArchivoAError() {
+         UpdateCedPadRucFile file = file("RUC0001.txt", UpdateCedPadRucFileType.RUC);
+         when(storagePort.listPendingFiles()).thenReturn(List.of(file));
+         when(storagePort.openReader(file)).thenAnswer(invocation -> reader("BAD|EMPRESA\n"));
+@@ -79,12 +69,6 @@
+         verify(storagePort, times(3)).openReader(file);
+         verify(storagePort, never()).moveToBackup(any());
+         verify(storagePort).moveToError(file);
+-
+-        ArgumentCaptor<UpdateCedPadRucErrorRecord> captor = ArgumentCaptor.forClass(UpdateCedPadRucErrorRecord.class);
+-        verify(errorTrackerPort).recordError(captor.capture());
+-        assertEquals("RUC0001.txt", captor.getValue().fileName());
+-        assertEquals(UpdateCedPadRucProcessingStage.PARSING, captor.getValue().processingStage());
+-        assertEquals("error/RUC0001.txt", captor.getValue().errorObjectName());
+     }
+ 
+     @Test
+@@ -92,7 +76,6 @@
+         service = new UpdateCedPadRucService(
+                 storagePort,
+                 persistencePort,
+-                errorTrackerPort,
+                 new UpdateCedPadRucParser(),
+                 new UpdateCedPadRucProperties(false, 2,
+                         new UpdateCedPadRucProperties.GcsProperties("gs://bucket/error"))
+@@ -100,7 +83,7 @@
+ 
+         service.processPendingFiles();
+ 
+-        verifyNoInteractions(storagePort, persistencePort, errorTrackerPort);
++        verifyNoInteractions(storagePort, persistencePort);
+     }
+ 
+     private UpdateCedPadRucFile file(String fileName, UpdateCedPadRucFileType type) {
+
+

@@ -1,0 +1,24 @@
+--- Diff for /k8s/hpa.yaml ---
+--- a//k8s/hpa.yaml
++++ b//k8s/hpa.yaml
+@@ -1,15 +1,15 @@
+ apiVersion: autoscaling/v2
+ kind: HorizontalPodAutoscaler
+ metadata:
+-  name: modern-gcp-microservice-hpa
++  name: cer-suite-local-core-hpa
+   namespace: ns-cer-suite-dev
+   labels:
+-    app: modern-gcp-microservice
++    app: cer-suite-local-core
+ spec:
+   scaleTargetRef:
+     apiVersion: apps/v1
+     kind: Deployment
+-    name: modern-gcp-microservice-deployment
++    name: cer-suite-local-core-deployment
+   minReplicas: 2
+   maxReplicas: 10
+   metrics:
+
+

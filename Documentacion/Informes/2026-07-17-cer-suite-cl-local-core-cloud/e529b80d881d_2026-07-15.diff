@@ -1,0 +1,247 @@
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/DistributedLockPort.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/DistributedLockPort.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/domain/port/out/DistributedLockPort.java
+@@ -0,0 +1,26 @@
++package com.elrosado.cersuitecloudlocalcore.domain.port.out;
++
++import java.time.Duration;
++
++/**
++ * Lock distribuido efÃ­mero (primitiva {@code SET NX PX} en Redis). Permite serializar entre rÃ©plicas
++ * del pod una secciÃ³n crÃ­tica identificada por una clave arbitraria.
++ * <p>
++ * Es la primitiva genÃ©rica reutilizada por dos usos: la elecciÃ³n de lÃ­der de la sincronizaciÃ³n de
++ * parÃ¡metros ({@link SyncLeaderLockPort}) y la serializaciÃ³n por operador de la operaciÃ³n 7
++ * (evita filas duplicadas en {@code OP_OPERADOR} cuando llegan tramas concurrentes del mismo operador).
++ */
++public interface DistributedLockPort {
++
++    /**
++     * Intenta adquirir el lock de forma atÃ³mica. Devuelve {@code true} si esta rÃ©plica/hilo queda como
++     * dueÃ±o; {@code false} si otro ya lo tiene.
++     *
++     * @param lockKey clave del lock
++     * @param ttl     tiempo de vida del lock; si el proceso muere sin liberarlo, expira y no queda bloqueado
++     */
++    boolean tryAcquire(String lockKey, Duration ttl);
++
++    /** Libera el lock si esta rÃ©plica/hilo es el dueÃ±o. Si ya expirÃ³ por TTL, es un no-op. */
++    void release(String lockKey);
++}
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateLock.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateLock.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateLock.java
+@@ -0,0 +1,106 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.exception.OperatorUpdateException;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.DistributedLockPort;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.stereotype.Component;
++
++import java.time.Duration;
++import java.util.function.Supplier;
++
++/**
++ * Serializa el upsert de la operaciÃ³n 7 por {@code CC_OPERADOR} mediante un lock distribuido.
++ * <p>
++ * <b>Por quÃ© existe:</b> el legacy {@code OperatorUpdateOperation} procesaba las tramas de forma
++ * secuencial sobre la misma conexiÃ³n TCP, por lo que una trama duplicada del mismo operador (Central
++ * reenvÃ­a, o Pub/Sub reentrega at-least-once) veÃ­a la fila creada por la anterior y la <em>actualizaba</em>.
++ * En cloud, el carril ventas despacha cada trama en un virtual thread independiente, de modo que dos
++ * tramas del mismo operador corren el {@code findFirstByCcOperador â insert} en paralelo, ambas no
++ * encuentran fila y ambas insertan â dos filas con el mismo {@code CC_OPERADOR} (la tabla no tiene Ã­ndice
++ * Ãºnico sobre esa columna). Este lock reproduce la serializaciÃ³n del legacy: la segunda trama espera,
++ * luego encuentra la fila de la primera y la actualiza.
++ * <p>
++ * Solo envuelve la secciÃ³n crÃ­tica de persistencia (el upsert), no el push por socket al agente, para
++ * mantener el lock corto y no sostenerlo durante I/O de red â el doble push que pudiera ocurrir ante un
++ * duplicado es inocuo (idempotente en el agente) y tambiÃ©n sucedÃ­a en el legacy (una trama = un push).
++ */
++@Component
++public class OperatorUpdateLock {
++
++    private static final Logger log = LoggerFactory.getLogger(OperatorUpdateLock.class);
++
++    private static final String KEY_PREFIX = "operator:update:lock:";
++
++    /** Vida del lock; supera con holgura el upsert (round-trips a OPERAC_EC). Si el hilo muere, expira. */
++    private static final Duration LOCK_TTL = Duration.ofSeconds(20);
++    /** Espera mÃ¡xima de un hilo por el lock; mayor que el TTL para poder tomarlo si el dueÃ±o muriÃ³. */
++    private static final Duration MAX_WAIT = Duration.ofSeconds(25);
++    /** Pausa entre reintentos de adquisiciÃ³n. */
++    private static final Duration RETRY_BACKOFF = Duration.ofMillis(100);
++
++    private final DistributedLockPort lockPort;
++    private final Duration lockTtl;
++    private final Duration maxWait;
++    private final Duration retryBackoff;
++
++    public OperatorUpdateLock(DistributedLockPort lockPort) {
++        this(lockPort, LOCK_TTL, MAX_WAIT, RETRY_BACKOFF);
++    }
++
++    /** Constructor con tiempos parametrizables (para pruebas). */
++    OperatorUpdateLock(DistributedLockPort lockPort, Duration lockTtl, Duration maxWait, Duration retryBackoff) {
++        this.lockPort = lockPort;
++        this.lockTtl = lockTtl;
++        this.maxWait = maxWait;
++        this.retryBackoff = retryBackoff;
++    }
++
++    /**
++     * Ejecuta {@code action} con exclusiÃ³n mutua para el operador dado. Si no logra adquirir el lock
++     * dentro de {@link #MAX_WAIT}, lanza {@link OperatorUpdateException} â el carril ventas hace NACK y
++     * Pub/Sub reentrega la trama mÃ¡s tarde, cuando el dueÃ±o ya liberÃ³.
++     *
++     * @param identityDocument cÃ©dula del operador ({@code CC_OPERADOR}), clave de serializaciÃ³n
++     * @param action           secciÃ³n crÃ­tica (el upsert); devuelve el id local del operador
++     */
++    public <T> T runExclusive(int identityDocument, Supplier<T> action) {
++        String lockKey = KEY_PREFIX + identityDocument;
++        if (!acquireWithWait(lockKey, identityDocument)) {
++            throw new OperatorUpdateException(
++                    "No se pudo adquirir el lock del operador " + identityDocument + " tras " + maxWait);
++        }
++        try {
++            return action.get();
++        } finally {
++            lockPort.release(lockKey);
++        }
++    }
++
++    /** Spin-acquire con backoff hasta {@link #MAX_WAIT}; los virtual threads hacen barata la espera. */
++    private boolean acquireWithWait(String lockKey, int identityDocument) {
++        long deadline = System.nanoTime() + maxWait.toNanos();
++        boolean waited = false;
++        while (true) {
++            if (lockPort.tryAcquire(lockKey, lockTtl)) {
++                return true;
++            }
++            if (System.nanoTime() >= deadline) {
++                return false;
++            }
++            if (!waited) {
++                waited = true;
++                log.atInfo()
++                        .setMessage("Trama de operador concurrente â esperando el lock para serializar el upsert")
++                        .addKeyValue("identityDocument", identityDocument)
++                        .log();
++            }
++            try {
++                Thread.sleep(RETRY_BACKOFF.toMillis());
++            } catch (InterruptedException e) {
++                Thread.currentThread().interrupt();
++                return false;
++            }
++        }
++    }
++}
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateLockTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateLockTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/OperatorUpdateLockTest.java
+@@ -0,0 +1,97 @@
++package com.elrosado.cersuitecloudlocalcore.service;
++
++import com.elrosado.cersuitecloudlocalcore.domain.exception.OperatorUpdateException;
++import com.elrosado.cersuitecloudlocalcore.domain.port.out.DistributedLockPort;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.time.Duration;
++import java.util.concurrent.atomic.AtomicInteger;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.assertj.core.api.Assertions.assertThatThrownBy;
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.ArgumentMatchers.eq;
++import static org.mockito.Mockito.never;
++import static org.mockito.Mockito.times;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.when;
++
++/**
++ * Verifica que {@link OperatorUpdateLock} serializa por {@code CC_OPERADOR}: ejecuta la acciÃ³n cuando
++ * adquiere el lock, siempre libera, y ante contenciÃ³n sostenida hace timeout con excepciÃ³n (â NACK).
++ */
++@ExtendWith(MockitoExtension.class)
++class OperatorUpdateLockTest {
++
++    private static final int CC_OPERADOR = 77712451;
++    private static final String LOCK_KEY = "operator:update:lock:" + CC_OPERADOR;
++
++    @Mock
++    DistributedLockPort lockPort;
++
++    /** Lock con tiempos pequeÃ±os para que el camino de timeout no ralentice la prueba. */
++    private OperatorUpdateLock newLock() {
++        return new OperatorUpdateLock(
++                lockPort, Duration.ofMillis(200), Duration.ofMillis(120), Duration.ofMillis(20));
++    }
++
++    @Test
++    void runExclusive_lockConcedido_ejecutaAccionYLibera() {
++        when(lockPort.tryAcquire(eq(LOCK_KEY), any(Duration.class))).thenReturn(true);
++        OperatorUpdateLock lock = newLock();
++
++        AtomicInteger calls = new AtomicInteger();
++        int result = lock.runExclusive(CC_OPERADOR, () -> {
++            calls.incrementAndGet();
++            return 5031;
++        });
++
++        assertThat(result).isEqualTo(5031);
++        assertThat(calls.get()).isEqualTo(1);
++        verify(lockPort).release(LOCK_KEY);
++    }
++
++    @Test
++    void runExclusive_liberaAunSiLaAccionFalla() {
++        when(lockPort.tryAcquire(eq(LOCK_KEY), any(Duration.class))).thenReturn(true);
++        OperatorUpdateLock lock = newLock();
++
++        assertThatThrownBy(() -> lock.runExclusive(CC_OPERADOR, () -> {
++            throw new IllegalStateException("boom");
++        })).isInstanceOf(IllegalStateException.class);
++
++        verify(lockPort).release(LOCK_KEY);
++    }
++
++    @Test
++    void runExclusive_contencionSostenida_timeoutLanzaExcepcion() {
++        // El lock nunca se concede â tras agotar la espera se lanza OperatorUpdateException y no se ejecuta.
++        when(lockPort.tryAcquire(eq(LOCK_KEY), any(Duration.class))).thenReturn(false);
++        OperatorUpdateLock lock = newLock();
++
++        AtomicInteger calls = new AtomicInteger();
++        assertThatThrownBy(() -> lock.runExclusive(CC_OPERADOR, () -> {
++            calls.incrementAndGet();
++            return 1;
++        })).isInstanceOf(OperatorUpdateException.class);
++
++        assertThat(calls.get()).isZero();
++        verify(lockPort, never()).release(LOCK_KEY);
++    }
++
++    @Test
++    void runExclusive_segundoIntentoTrasEspera_adquiereYEjecuta() {
++        // Primer intento ocupado, segundo libre: reproduce la trama duplicada que espera y luego procede.
++        when(lockPort.tryAcquire(eq(LOCK_KEY), any(Duration.class))).thenReturn(false, true);
++        OperatorUpdateLock lock = newLock();
++
++        int result = lock.runExclusive(CC_OPERADOR, () -> 5031);
++
++        assertThat(result).isEqualTo(5031);
++        verify(lockPort, times(2)).tryAcquire(eq(LOCK_KEY), any(Duration.class));
++        verify(lockPort).release(LOCK_KEY);
++    }
++}
+
+

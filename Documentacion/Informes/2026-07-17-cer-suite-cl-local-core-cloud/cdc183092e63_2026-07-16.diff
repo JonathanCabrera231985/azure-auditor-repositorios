@@ -1,0 +1,15 @@
+--- Diff for /k8s/configmap.yaml ---
+--- a//k8s/configmap.yaml
++++ b//k8s/configmap.yaml
+@@ -8,6 +8,9 @@
+ data:
+   SPRING_PROFILES_ACTIVE: "dev"
+   SERVER_PORT: "8080"
++  # Zona horaria del contenedor/JVM — la imagen base (eclipse-temurin:25-jre) no trae TZ seteado y
++  # cae a UTC por defecto, aunque el nodo tenga NTP sincronizado en hora local.
++  TZ: "America/Guayaquil"
+   # Identificación de Proyecto en Google Cloud Platform
+   GCP_PROJECT_ID: "modern-suite-cloud-inf"
+   
+
+

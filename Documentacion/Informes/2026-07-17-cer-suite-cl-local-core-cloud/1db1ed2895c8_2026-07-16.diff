@@ -1,0 +1,517 @@
+--- Diff for /.operations/ANALISIS_SendClosedToPinPadOperation_MIGRACION.md ---
+--- a//.operations/ANALISIS_SendClosedToPinPadOperation_MIGRACION.md
++++ b//.operations/ANALISIS_SendClosedToPinPadOperation_MIGRACION.md
+@@ -0,0 +1,296 @@
++# Análisis de Migración — `SendClosedToPinPadOperation` (op. 40)
++
++- **Clase legacy:** `com.allc.arms.server.operations.cer.pinpad.SendClosedToPinPadOperation`
++- **Modelo de dominio legacy:** `PinPad` (tabla `CFG_PINPAD`) + fila de lotes `CFG_LOTE_PINPAD` (leída/escrita por SQL nativo, sin entidad) + `Store` (IP de tienda/central).
++- **Serialización legacy:** **no XML**. Arma una trama de ancho fijo `"PC…"` (Pinpad Close) y la **cifra** con el componente propietario `EnvioSeg.Genera_Componente(...)` (3DES). La respuesta a Central (op. lote) es una `Frame` `'|'`-separada tipo 53.
++- **Datasources:** `EYES_EC` (`CFG_PINPAD`, `CFG_LOTE_PINPAD`) + `SAADMIN` (IP de tienda y de Central por `key`).
++- **Carril:** `ventas` / `sync: true` (**fire-and-forget** desde el Generador) — `seed-operation-types.js`:
++  `{ code: "40", description: "SendClosedToPinPadOperation", routeKey: "ventas", sync: true }`
++- **Estado:** 📝 **ANÁLISIS HECHO — pendiente de implementar.** Hay **bloqueantes** (ver §0): DDL de
++  `CFG_PINPAD`/`CFG_LOTE_PINPAD`, componente de seguridad `EnvioSeg` (jar propietario), y confirmación de
++  alcanzabilidad de las pinpads desde GKE.
++- **Regla clave:** sin SP (la lógica ya es Java + SQL nativo); **gate DDL NO satisfecho** — falta el DDL
++  exacto de las dos tablas EYES_EC.
++
++> **Qué hace (resumen):** al recibir la trama de **cierre de lote** (tipo 40) de una tienda, envía a
++> **todas las pinpads (terminales de pago Datafast/Medianet) de esa tienda** el comando de **cierre de
++> lote batch**. Por cada pinpad abre un **socket TCP** al terminal, le manda el mensaje `PC` cifrado con
++> el número de lote/secuencia/MID/TID actuales, lee la respuesta (`00` = OK), y marca
++> `FECHA_ULT_CIERRE`. Al terminar **incrementa** el número de lote de la tienda en `CFG_LOTE_PINPAD` y
++> —solo si `lote.actualizacion` no está seteado— reenvía los nuevos lotes a la **Central** (trama tipo
++> 53). Es una operación **push de distribución** (a los terminales), no una consulta.
++
++---
++
++## §0 — Bloqueantes (requieren confirmación del usuario antes de implementar)
++
++1. ⛔ **DDL exacto de `CFG_PINPAD` y `CFG_LOTE_PINPAD` (BD `EYES_EC`).** Gate DDL. Del `.hbm` y del SQL
++   nativo legacy se conocen las columnas usadas (§3), pero el gate exige el DDL completo real (tipos,
++   PK, nullability, defaults) antes de crear entidad/repositorio. **`CFG_LOTE_PINPAD` no tiene mapeo
++   Hibernate** — el legacy la lee/actualiza con `createSQLQuery` cruda.
++2. ⛔ **Componente de seguridad `EnvioSeg` (`com.lectora.cnx.EnvioSeg`, jar `coro:allc-arms-server-store:1.1`).**
++   `Genera_Componente(mensaje, 1)` = `mensaje + hash + 3DES(LlaveIzq, hash, LlaveDer)` (bytecode
++   verificado — §4). Usa **llaves 3DES estáticas** internas (`LlaveIzq`/`LlaveDer`) y `Encryption.encriptar3DES`.
++   Las pinpads validan ese componente (`Validar_Seguridad`). **Decisión requerida:** (a) reutilizar el jar
++   propietario tal cual en el pod (más simple, pero arrastra Log4j/JCE legacy y llaves embebidas), o
++   (b) reimplementar el esquema 3DES con las mismas llaves. Sin paridad byte-a-byte, las pinpads
++   **rechazan** el cierre. **No inventar** llaves ni algoritmo.
++3. ⛔ **Alcanzabilidad de las pinpads desde el pod GKE.** El legacy abre socket TCP directo a
++   `CFG_PINPAD.DIR_IP:PRT_ESCH` de cada terminal en la LAN de tienda. Confirmar que el pod alcanza esas
++   IPs (precedente: `OperatorPasswordSocketClient`/`OperatorDealerSocketClient` ya empujan a la LAN de
++   tienda por socket saliente — op. 7 y distribución de claves).
++4. ⚠️ **`pinpad.version` (`FT` | `MR`).** Selecciona el formato de la trama `PC` (§5). Valor legacy en
++   `ArmsServerConf.properties` = `MR` (MultiRedes). → registrar en `k8s/properties.yaml` (Fase 1).
++5. ⚠️ **`lote.actualizacion`.** Si **no es null** ⇒ **NO** se reenvía el lote a Central. En
++   `ArmsServerConf.properties` está seteada (`=1`) ⇒ hoy el envío a Central **está desactivado**.
++   Confirmar si el reenvío a Central (trama 53) debe migrarse (patrón outbox) o se considera código
++   muerto en la configuración actual.
++6. ⚠️ **Trama real tipo 40 + una respuesta real de pinpad.** Para validar el ancho de campos y el
++   parseo de la respuesta (`substring(2,4)` código, `substring(6,21)` mensaje). Falta el fixture.
++
++---
++
++## §1 — Comportamiento legacy (`process`)
++
++```
++sesión SAADMIN → storeCentralIP = StoreDAO.getStoreByCode(0).ip     // IP de Central (key='0')
++store = Integer(frame.header[3])                                     // tienda destino
++audit EYES "SEND_CLS_PP_O ... Iniciando busqueda pinpads"
++sesión EYES
++infoLote = getInfoPinpadByTienda(store)                             // fila CFG_LOTE_PINPAD (§3)
++// respuesta inmediata al emisor: header'|'0  (con prefijo de longitud de 6 dígitos)
++socket.write( addLength(header'|'"0", serverSocket.quantityBytesLength=6) )
++pinpads = PinPadDAO.getPinpadByStore(store)                         // CFG_PINPAD WHERE COD_TIENDA=store AND ACTUALIZAR=0
++if pinpads no vacío:
++    for each pinpad:
++        mensaje = setMethodPinpad(infoLote, pinpad)                // "PC…" ancho fijo, según pinpad.version (§5)
++        seguro  = EnvioSeg.Genera_Componente(mensaje, 1)           // + hash + 3DES (§4)
++        trama   = leftPad(hex(len(seguro)),4,'0') + seguro         // prefijo 4-hex
++        socketClient = new ConnSocketClient(pinpad.DIR_IP : pinpad.PRT_ESCH, retries=3, toConn=20s, bytesLen=2)
++        if connect && write(trama):
++            cant = int(read(4), 16)                                // longitud hex de 4 dígitos
++            if cant>0: data = read(cant); close
++            else: audit WAR "no respondió pero se envió"; pinpad.FECHA_ULT_CIERRE=now; saveOrUpdate
++        else: audit ERR "No hay conexión con el pinpad …"
++        if data no vacío:
++            if data.substring(2,4)=="00": audit PRC "éxito"; pinpad.FECHA_ULT_CIERRE=now; saveOrUpdate
++            else: audit WAR "error cod="+data.substring(2,4)+" msg="+data.substring(6,21)
++    loteData  = loteDataBuild(infoLote)                            // datafast: (lote+1) rollover 9999, pad6 (§6)
++    loteMedia = loteMediaBuild(infoLote)                           // medianet: (lote+1) rollover 999,  pad6 (§6)
++    updateNumLoteTienda(store, loteData, loteMedia)               // UPDATE CFG_LOTE_PINPAD ... WHERE DES_CLAVE=store
++    if properties["lote.actualizacion"] == null:
++        updateNumLoteInCentral(store, loteData, loteMedia)        // trama 53 por socket a storeCentralIP (§7)
++else:
++    audit WAR "No existen pinpads para la tienda"
++// (ante cualquier Exception) audit ERR "Error durante el proceso de envío de cierre a pinpads"
++return false
++```
++
++**Auditoría legacy** = líneas al archivo `eyes.ups.file.name + _ddMMyy` (`SEND_CLS_PP_O|host|3|ip|store|STR/PRC/WAR/ERR|ts|mensaje`).
++En la nube → **logging estructurado** (`log.atInfo()/atWarn()/atError().addKeyValue(...)`), como se hizo con la
++auditoría de `ConsultaCedPadRucOperation`. No se escribe archivo local (regla "sin filesystem local").
++
++---
++
++## §2 — Semántica del cierre de lote (dominio)
++
++Una **pinpad** es un terminal de pago con dos redes: **Datafast** y **Medianet**. Cada red mantiene un
++**número de lote** (batch) y un **secuencial de transacción**. El "cierre" (batch close / settlement)
++le dice al terminal que **corte el lote actual** y arranque uno nuevo. Por eso, tras enviar el comando a
++todas las pinpads, la operación **incrementa** el lote de la tienda en `CFG_LOTE_PINPAD` (con rollover) y
++—opcionalmente— **propaga** el nuevo lote a Central para mantener sincronía.
++
++- **Rollover Datafast:** lote 1..9999, al superar 9999 vuelve a 1 (`validateMaxValueLote(v, 9999)`).
++- **Rollover Medianet:** lote 1..999, al superar 999 vuelve a 1 (`validateMaxValueLote(v, 999)`).
++- **`FECHA_ULT_CIERRE`** por pinpad = timestamp del último cierre exitoso (o "enviado sin respuesta").
++
++---
++
++## §3 — Tablas EYES_EC (mapeo → gate DDL PENDIENTE)
++
++### `CFG_PINPAD` → entidad `PinPad` (mapeo `mappingPinPad.hbm.xml`, sí existe)
++
++| Columna | Campo dominio | Uso en op. 40 |
++|---|---|---|
++| `IDPINPAD` (PK, id nativo) | `idPinpad` | log |
++| `COD_TIENDA` | `codTienda` | filtro por tienda |
++| `DIR_IP` | `direccionIP` | **IP destino del socket** |
++| `PRT_ESCH` | `puertoEscucha` | **puerto destino del socket** |
++| `TID_DATA` | `tidDatafast` | trama PC |
++| `TID_MED` | `tidMedianet` | trama PC (solo MR) |
++| `CID_CAJA` | `cidCaja` | trama PC |
++| `FECHA_ULT_CIERRE` | `fechaUltimoCierre` | **se actualiza** al cerrar |
++| `ACTUALIZAR` | `actualizar` | filtro (`=0`) |
++| `MASCARA`,`GATEWAY`,`DIR_IP_HP_RA`,`PRT_HP_RA`,`DIR_IP_HA_RA`,`PRT_HA_RA`,`DIR_IP_HP_RB`,`PRT_HP_RB`,`DIR_IP_HA_RB`,`PRT_HA_RB` | resto | **no** usados por op. 40 (sí por `PinPadConfigurationProcess`) |
++
++Consulta: `getPinpadByStore` = `FROM PinPad WHERE codTienda = store AND actualizar = 0`.
++
++### `CFG_LOTE_PINPAD` → **sin entidad** (SQL nativo)
++
++Columnas leídas por `getInfoPinpadByTienda(store)` (`WHERE DES_CLAVE = store`), en este **orden**:
++
++| Índice `infoLote` | Columna | Significado |
++|:---:|---|---|
++| `[0]` | `NUM_LOT_R_DATA` | nº lote Datafast actual |
++| `[1]` | `NUM_LOT_R_MED` | nº lote Medianet actual |
++| `[2]` | `SEQ_TRX_DATA` | secuencial trx Datafast |
++| `[3]` | `SEQ_TRX_MED` | secuencial trx Medianet |
++| `[4]` | `MID_DATA` | merchant ID Datafast |
++| `[5]` | `MID_MED` | merchant ID Medianet |
++
++Escritura (`updateNumLoteTienda`): `UPDATE CFG_LOTE_PINPAD SET NUM_LOT_R_DATA=:v WHERE DES_CLAVE=store` y
++`SET NUM_LOT_R_MED=:v WHERE DES_CLAVE=store` (clave de tienda = `DES_CLAVE`, ojo: **no** `COD_TIENDA`).
++
++> ⛔ **Gate DDL:** se requiere el `CREATE TABLE` real de **ambas** tablas (idealmente en
++> `operation-40/EYES_EC-TABLES.sql`, análogo a `operation-7/OPERAC_EC-TABLES.sql`) antes de crear
++> entidad JPA + repositorio. `CFG_LOTE_PINPAD` en cloud sería una entidad nueva (el legacy usa SQL
++> crudo) o un `@Query` nativo — decidir con el DDL a la vista.
++
++---
++
++## §4 — Componente de seguridad `EnvioSeg.Genera_Componente(msg, 1)` (bytecode verificado)
++
++```
++r     = (int)(Math.random() * 999999)
++hash  = GenerateHash( Integer.toString(r) )                     // SHA1-based (métodos GenerateHash/Sha1 en la clase)
++llave = Encryption.encriptar3DES( LlaveIzq, hash, LlaveDer )    // 3DES con llaves estáticas internas
++return msg + hash + llave                                       // (el flag 1 solo activa logging DEBUG a "LogSeg")
++```
++
++- `LlaveIzq`/`LlaveDer` son **estáticas** (inicializadas en el `static {}` de la clase) — **llaves
++  embebidas** en el jar. La pinpad valida el par `hash`+`llave` con la misma llave.
++- **Implicación de migración:** o se reutiliza `allc-arms-server-store` (arrastra `com.lectora.*`, ISO8583,
++  Log4j embebido, JCE) o se reimplementa `encriptar3DES`+`GenerateHash` con paridad exacta. Es un
++  **bloqueante de seguridad**, no cosmético.
++
++---
++
++## §5 — Trama `PC` (Pinpad Close) hacia el terminal — según `pinpad.version`
++
++Prefijo final antes de enviar: `leftPad(Integer.toHexString(len), 4, "0")` (longitud en **hex, 4 dígitos**);
++`quantityBytesLength` del socket a la pinpad = **2**.
++
++### `MR` (MultiRedes) — `setMultiRedesTrama`
++```
++"PC"
+++ leftPad(NUM_LOT_R_DATA, 6, '0')      // lote datafast
+++ leftPad(SEQ_TRX_DATA,   6, '0')      // seq datafast
+++ leftPad(NUM_LOT_R_MED,  6, '0')      // lote medianet
+++ leftPad(SEQ_TRX_MED,    6, '0')      // seq medianet
+++ rightPad(MID_DATA,      15)          // merchant id datafast
+++ rightPad(tidDatafast,    8)          // terminal id datafast
+++ rightPad(MID_MED,       15)          // merchant id medianet
+++ rightPad(tidMedianet,    8)          // terminal id medianet
+++ rightPad(cidCaja,       15)          // id de caja
++```
++
++### `FT` (FastTrack) — `setFastTrackTrama` (solo Datafast)
++```
++"PC"
+++ leftPad(NUM_LOT_R_DATA, 6, '0')
+++ leftPad(SEQ_TRX_DATA,   6, '0')
+++ leftPad("",            12)           // relleno
+++ rightPad(MID_DATA,     15)
+++ rightPad(tidDatafast,   8)
+++ leftPad("",            23)           // relleno
+++ rightPad(cidCaja,      15)
+++ leftPad("1",            1)
++```
++
++**Respuesta del terminal:** `read(4 hex)=cant`; si `cant>0`, `data=read(cant)`. Éxito si
++`data.substring(2,4)=="00"`; si no, código de error `substring(2,4)` y mensaje `substring(6,21)`.
++
++---
++
++## §6 — Cálculo del nuevo lote (rollover)
++
++```java
++loteData  = leftPad( validateMaxValueLote(NUM_LOT_R_DATA + 1, 9999), 6, '0' )
++loteMedia = leftPad( validateMaxValueLote(NUM_LOT_R_MED  + 1, 999 ), 6, '0' )
++
++// validateMaxValueLote(v, max): n = v % (max+1); if (v > max) n += 1; return n;
++```
++Nota: el pad es a **6** aunque los máximos sean 9999/999 (compat. de ancho legacy).
++
++---
++
++## §7 — Reenvío a Central (`updateNumLoteInCentral`, trama tipo 53) — condicional
++
++Solo si `lote.actualizacion == null` (hoy **desactivado**, la propiedad vale `1`). Arma:
++```
++S'|'53'|'000'|'<tienda>'|'0'|'<yyyyMMddHHmmss>'|'<loteData>'|'<loteMedia>'|'<tienda>
++```
++y la envía por socket a `storeCentralIP` (`StoreDAO.getStoreByCode(SAADMIN, 0).ip`), esperando
++`statusTrama == 0`. **En la nube**, si se decide migrar, encaja en el **patrón outbox de reenvío a
++Central** (como `ForwardSyscardFrameToCentralService`): encolar en Firestore + disparo Pub/Sub + barrido,
++con `CentralFrameSenderPort`. **Pendiente de decisión** (§0.5): confirmar si sigue vivo o es código muerto.
++
++---
++
++## §8 — Diseño cloud propuesto (carril ventas, fire-and-forget)
++
++Bean `SalesLaneOperation` con `frameType()="40"` (auto-registrado en `SalesLaneRequestAdapter`; no toca YAML).
++El `seed-operation-types.js` ya trae `{ code: "40", routeKey: "ventas", sync: true }`.
++
++| Componente | Rol |
++|---|---|
++| `SendClosedToPinpadLaneOperation implements SalesLaneOperation` | `frameType()="40"`; lee `frames/{id}.storeId`/payload de Firestore y delega. |
++| `CloseBatchPinpadUseCase` + `SendClosedToPinpadService` | Orquesta: carga lote (`CFG_LOTE_PINPAD`) + pinpads (`CFG_PINPAD`) → por cada pinpad arma `PC`, cifra, empuja por socket, evalúa respuesta, marca `FECHA_ULT_CIERRE` → incrementa lote de tienda → (opcional) outbox Central. |
++| `PinpadRepositoryPort` + adapter `eyes-ec` | `findActiveByStore(store)` + `updateLastClose(idPinpad, ts)`. |
++| `PinpadBatchRepositoryPort` + adapter `eyes-ec` | `findBatchInfo(store)` (los 6 campos) + `updateBatchNumbers(store, loteData, loteMedia)` por `DES_CLAVE`. |
++| `PinpadCloseMessageBuilder` | Construye la trama `PC` de ancho fijo (`FT`/`MR` según `pinpad.version`). |
++| `PinpadSecurityComponentPort` (`generateSecureComponent`) | Envuelve `EnvioSeg.Genera_Componente` (o su reimplementación 3DES). Aísla la dependencia propietaria del dominio. |
++| `PinpadSocketClient` (TCP saliente) | Socket a `DIR_IP:PRT_ESCH` con prefijo de longitud **hex de 4 dígitos** (distinto del prefijo decimal de 6 de op. 7/40-claves) — reutiliza el patrón de `OperatorPasswordSocketClient`, con su propio framing. Lee respuesta `read(4 hex)`. |
++| `CentralFrameSenderPort` / outbox (opcional §7) | Reenvío del lote a Central (trama 53) si se decide migrar. |
++| Entidades JPA `CFG_PINPAD` / `CFG_LOTE_PINPAD` | **nuevas** — bloqueadas por gate DDL (§3). |
++
++- **Estado de la transacción:** igual que op. 7/67 → **no** avanza el enum `TransactionStatus` de ventas.
++  `frames/{id}` queda como portador del payload (estado `pending` del Generador). La "máquina de estados"
++  real es `CFG_PINPAD.FECHA_ULT_CIERRE` + `CFG_LOTE_PINPAD.NUM_LOT_*`.
++- **Semántica fire-and-forget:** el Generador ya respondió `0/-1` al emisor; el `header'|'0` que el legacy
++  escribía al socket **no** se replica (lo absorbe el modelo del carril).
++- **Concurrencia:** el fan-out por pinpad puede correr en virtual threads. El **incremento de lote** de la
++  tienda es una sección crítica por `store`; si dos tramas 40 de la misma tienda pudieran solaparse
++  (reentrega at-least-once de Pub/Sub), evaluar **lock distribuido por `store`** (`DistributedLockPort`,
++  como el `OperatorUpdateLock` de op. 7) para no saltar/duplicar números de lote. Confirmar en impl.
++- Identificadores en **inglés**; logs/descripciones en **español**. `record`s inmutables con `with*()`.
++
++---
++
++## §9 — Propiedades legacy (`ArmsServerConf.properties` → `k8s/properties.yaml`, Fase 1)
++
++| Clave legacy | Valor legacy | Rol |
++|---|---|---|
++| `pinpad.version` | `MR` | formato de la trama `PC` (`FT`/`MR`) |
++| `lote.actualizacion` | `1` | si presente ⇒ **no** reenvía lote a Central |
++| `serverSocket.quantityBytesLength` | `6` | prefijo de la respuesta al emisor (se descarta en cloud, fire-and-forget) |
++| `eyes.ups.file.name` | (ruta) | archivo de auditoría legacy → **reemplazado por logging estructurado** (no migra como archivo) |
++
++> Nota: el socket a la **pinpad** usa framing propio (prefijo **hex de 4 dígitos**, `quantityBytesLength=2`),
++> hardcodeado en `instanceSocketCliente` (retries=3, timeoutConn=20 s, timeoutSleep=600 ms) — **no** viene de
++> `serverSocket.*`. Mantener esos valores como constantes con nombre.
++
++---
++
++## §10 — Riesgos / decisiones abiertas
++
++1. ⛔ **DDL EYES_EC** (§0.1, §3) — bloqueante. Pedir `CREATE TABLE CFG_PINPAD` y `CFG_LOTE_PINPAD`.
++2. ⛔ **`EnvioSeg`/3DES** (§0.2, §4) — bloqueante de seguridad. Decidir reutilizar jar vs reimplementar.
++3. ⛔ **Alcanzabilidad de pinpads desde GKE** (§0.3) — confirmar red/routing a la LAN de tienda.
++4. ⚠️ **`lote.actualizacion` = 1** (§0.5, §7) — el reenvío a Central está hoy apagado; confirmar si migra.
++5. ⚠️ **Framing del socket a pinpad** (§9) — prefijo hex de 4 dígitos + `read(4 hex)`; distinto del socket
++   de op. 7. No reutilizar tal cual `OperatorDealerSocketClient` (usa prefijo decimal de 6).
++6. ⚠️ **Fixture real** (§0.6) — falta trama tipo 40 y una respuesta real de pinpad para validar anchos.
++7. **`rightPad(x, n, "")`** legacy usa `padStr` vacío → commons-lang lo trata como espacio; validar
++   relleno exacto contra una trama real antes de dar por buena la implementación.
++
++---
++
++## §11 — Diferencias con procesos/operaciones ya migrados
++
++- **No es** `PinPadConfigurationProcess` (envía `CP` de configuración de red por polling `@Scheduled`;
++  op. 40 envía `PC` de cierre, dirigido por trama). Comparten `CFG_PINPAD` y `EnvioSeg`.
++- **No genera XML** ni publica a Distributor (a diferencia de ventas 10/11). Efecto lateral: socket a
++  terminales + UPDATE de lote + (opcional) outbox a Central.
++- Reutiliza patrones ya presentes: socket TCP saliente a la LAN de tienda (op. 7 claves/dealer), lock
++  distribuido por clave (`OperatorUpdateLock`), outbox de reenvío a Central (familia Syscard).
+
+
+--- Diff for /.operations/ESTADO_MIGRACION_OPERATIONS.md ---
+--- a//.operations/ESTADO_MIGRACION_OPERATIONS.md
++++ b//.operations/ESTADO_MIGRACION_OPERATIONS.md
+@@ -29,7 +29,7 @@
+ | 29 | `cer.codopera.UpdateCodeOperaOperation` | ventas (sync) | ⏳ | |
+ | 33 | `cer.reserva.ConsultaReservaOperation` | consultas | ⏳ | |
+ | 35 | `fileUpdate.FileUpdaterDownOperation` | ventas (sync) | ⏳ | |
+-| 40 | `cer.pinpad.SendClosedToPinPadOperation` | ventas (sync) | ⏳ | |
++| 40 | `cer.pinpad.SendClosedToPinPadOperation` | ventas (sync) | 📝 | Cierre de lote a pinpads (Datafast/Medianet) de la tienda: socket TCP a cada terminal (trama `PC` cifrada con `EnvioSeg`/3DES) + incremento de lote en `CFG_LOTE_PINPAD` (EYES_EC) + reenvío opcional a Central (trama 53). **Bloqueantes:** DDL `CFG_PINPAD`/`CFG_LOTE_PINPAD`, jar de seguridad `EnvioSeg`, alcanzabilidad de pinpads desde GKE. Ver `.operations/ANALISIS_SendClosedToPinPadOperation_MIGRACION.md` |
+ | 41 | `cer.devolucion.ConsultaDevolucionOperation` | consultas | ⏳ | |
+ | 42 | `cer.itemUpdate.RegisterItemFilesOperation` | ventas (sync) | ⏳ | Distinto del Process `RegisterItemFilesProccess` (ya migrado como `RegisterItemFilesService`) |
+ | 43 | `file.sender.FileSenderOperation` | ventas (sync) | ⏳ | |
+@@ -51,7 +51,7 @@
+ | 68 | `cer.FlejPanaderia.ImpresionPandPos` | ventas (sync) | ⏳ | |
+ | 71 | `cer.factura.FacturaOperation` | consultas | ✅ | `LastInvoiceFrameOperation` → `LastInvoiceService` |
+ 
+-**Resumen:** 38 operations habilitadas · 6 migradas (10, 11, 13, 24, 67, 71) · 32 pendientes.
++**Resumen:** 38 operations habilitadas · 6 migradas (10, 11, 13, 24, 67, 71) · 1 con análisis hecho (40 📝) · 31 pendientes.
+ 
+ > Al migrar una operation nueva: agregar su bean (`SalesLaneOperation` para carril ventas /
+ > `RequestReplyOperation` para carril consultas), confirmar su documento en `operation-types` y
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/TslFrameParserService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/TslFrameParserService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/TslFrameParserService.java
+@@ -33,6 +33,8 @@
+     private static final int STORE_COUPON_ITEM_TYPE = 7;
+     private static final String PROMOTION_ITEM_CODE = "811099999998";
+     private static final String REDEMPTION_PROMOTION_ITEM_CODE = "811099999996";
++    /** Terminal del controlador para el cierre de tienda (legacy ELConstants.TerminalCode.CONTROLLER_TERM). */
++    private static final String CONTROLLER_TERMINAL_CODE = "0";
+ 
+     private final Clock clock;
+ 
+@@ -452,9 +454,26 @@
+            .log();
+     }
+ 
++    /**
++     * Registro "21" â STORE CLOSING (cierre de tienda â ControlTransaction EOD).
++     * La trama de cierre no trae registro "00", por lo que la cabecera se arma aquÃ­,
++     * replicando el legacy (TSLTransactionMethods, Type21 STORE_CLOSING):
++     *   [1] DATETIME â beginDateTime = endDateTime (yyMMddHHmm, SIN changeNDate)
++     *   workstationId = "0" (terminal del controlador), sequenceNumber = "0".
++     * operatorId queda vacÃ­o a propÃ³sito: el legacy no setea operatorCode aquÃ­ (XML sin OperatorID).
++     */
+     private void processStoreClosing(TransactionBuilder b, String[] f) {
+         b.isStoreClosing         = true;
+         b.xmlTransactionTypeCode = 2;
++        b.workstationId          = CONTROLLER_TERMINAL_CODE;
++        b.sequenceNumber         = "0";
++        // BeginDateTime/EndDateTime = DATETIME del registro "21" tal cual (el legacy formatea
++        // la fecha del payload directamente para el cierre, sin sustituir por la fecha del servidor).
++        LocalDateTime closingDateTime = parseTslDateTime(safeGet(f, 1));
++        if (closingDateTime != null) {
++            b.beginDateTime = closingDateTime;
++            b.endDateTime   = closingDateTime;
++        }
+         log.atInfo()
+            .setMessage("StoreClosing detectado â ControlTransaction EOD")
+            .addKeyValue("closingDateTime", safeGet(f, 1))
+
+
+--- Diff for /src/main/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorService.java ---
+--- a//src/main/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorService.java
++++ b//src/main/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorService.java
+@@ -45,6 +45,8 @@
+     private static final String ATTR_TYPE_CODE = "TypeCode";
+     private static final String ELEMENT_LINE_ITEM = "LineItem";
+     private static final String VALUE_FALSE = "false";
++    /** TypeCode del ControlTransaction de cierre (legacy TSLConstants.Type21.STORE_CLOSING). */
++    private static final String CONTROL_TYPE_STORE_CLOSING = "1";
+ 
+     private final TslProperties properties;
+ 
+@@ -136,7 +138,12 @@
+         attr(root, "VoidedFlag",       h.voidedFlag());
+ 
+         // Orden correcto de hijos Transaction (ISSUE-23)
+-        child(doc, root, "OperatorID",          h.operatorId());
++        // El cierre de tienda (EOD) no emite OperatorID: el legacy no setea operatorCode
++        // en la Type21, por lo que XStream lo omite. Las ventas/control con cabecera "00"
++        // siempre traen cÃ©dula y conservan el elemento.
++        if (!tx.isStoreClosing()) {
++            child(doc, root, "OperatorID",       h.operatorId());
++        }
+         child(doc, root, "WorkstationID",        h.workstationId());
+         child(doc, root, "RetailStoreID",        tx.storeCode());
+         child(doc, root, "BusinessDayDate",      formatBusinessDay(h.businessDayDate()));
+@@ -309,10 +316,18 @@
+ 
+     private Element buildControlTransaction(Document doc, SaleTransaction tx) {
+         Element ct = elem(doc, "ControlTransaction");
+-        String typeCode = tx.isStoreClosing() ? "EOD" : "SignOff";
+-        attr(ct, ATTR_TYPE_CODE, typeCode);
+-        child(doc, ct, "BusinessEOD",     tx.isStoreClosing());
+-        child(doc, ct, "FlgConciliacion", false);
++        if (tx.isStoreClosing()) {
++            // Cierre de tienda (EOD): replica legacy Type21 STORE_CLOSING.
++            // TypeCode="1", <FlgConciliacion>1</FlgConciliacion> y <BusinessEOD/> vacÃ­o, en ese orden.
++            attr(ct, ATTR_TYPE_CODE, CONTROL_TYPE_STORE_CLOSING);
++            child(doc, ct, "FlgConciliacion", 1);
++            ct.appendChild(elem(doc, "BusinessEOD"));
++        } else {
++            // SignOff (subtipos 15/17): comportamiento previo conservado.
++            attr(ct, ATTR_TYPE_CODE, "SignOff");
++            child(doc, ct, "BusinessEOD",     tx.isStoreClosing());
++            child(doc, ct, "FlgConciliacion", false);
++        }
+         return ct;
+     }
+ 
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/TslFrameParserServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/TslFrameParserServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/TslFrameParserServiceTest.java
+@@ -23,6 +23,11 @@
+             "000152S'|'10'|'000'|'100'|'1'|'20250808073812'|'" +
+                     "00|0202|7286|2508080738|03|0001|99910002|99999999|00|00|||||0576|00," +
+                     "13|01|030000|00|00|11|030000|99'|'20250808";
++
++    // Trama de CIERRE DE TIENDA (registro "21") â ControlTransaction EOD.
++    // Sin registro "00": la cabecera se arma en processStoreClosing.
++    static final String TRAMA_STORE_CLOSING =
++            "000076S'|'10'|'000'|'100'|'1'|'20260716144152'|'21|2607161434|02|63|30|'|'20260714";
+ 
+     // Trama 2: CHECKOUT TRANTYPE=00 â RetailTransaction simple
+     // Fuente: tramas_type_10.txt lÃ­nea 18
+@@ -256,6 +261,29 @@
+     }
+ 
+     // -----------------------------------------------------------------------
++    // buildTransaction â STORE_CLOSING (ControlTransaction EOD)
++    // -----------------------------------------------------------------------
++
++    @Test
++    void buildTransaction_storeClosing_buildsEodHeader() {
++        TslFrame frame = service.parseFrame(TRAMA_STORE_CLOSING);
++        SaleTransaction tx = service.buildTransaction("trx-eod-001", frame, sampleStore);
++
++        assertTrue(tx.isStoreClosing(), "El registro 21 debe marcar isStoreClosing");
++        assertEquals(2, tx.header().xmlTransactionTypeCode(),
++                "El cierre debe producir xmlTypeCode=2 (ControlTransaction)");
++        // Cabecera armada por processStoreClosing (paridad legacy Type21).
++        assertEquals("0", tx.header().workstationId(), "workstationId del cierre = 0 (controlador)");
++        assertEquals("0", tx.header().sequenceNumber(), "sequenceNumber del cierre = 0");
++        assertEquals("", tx.header().operatorId(), "el cierre no trae operador");
++        // DATETIME del registro 21 (f[1]=2607161434) â 2026-07-16T14:34, begin=end, sin changeNDate.
++        assertNotNull(tx.header().beginDateTime());
++        assertEquals(tx.header().beginDateTime(), tx.header().endDateTime(),
++                "begin y end deben ser iguales en el cierre");
++        assertEquals("2026-07-16T14:34", tx.header().beginDateTime().toString());
++    }
++
++    // -----------------------------------------------------------------------
+     // buildTransaction â CHECKOUT (RetailTransaction)
+     // -----------------------------------------------------------------------
+ 
+
+
+--- Diff for /src/test/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorServiceTest.java ---
+--- a//src/test/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorServiceTest.java
++++ b//src/test/java/com/elrosado/cersuitecloudlocalcore/service/XmlGeneratorServiceTest.java
+@@ -579,16 +579,18 @@
+ 
+     @Test
+     void generate_controlTransaction_eod_structure() throws Exception {
++        // Cierre de tienda (registro "21"): la cabecera se arma en processStoreClosing â
++        // workstationId="0", sequenceNumber="0", operatorId vacÃ­o (sin OperatorID en el XML).
+         TslTransactionHeader eodHeader = new TslTransactionHeader(
+-                "0201", "3291",
+-                LocalDateTime.of(2025, 8, 8, 18, 0),
+-                LocalDateTime.of(2025, 8, 8, 17, 59),
+-                "20250808",
+-                60, 0, 0,
++                "0", "0",
++                LocalDateTime.of(2026, 7, 16, 14, 34),
++                LocalDateTime.of(2026, 7, 16, 14, 34),
++                "20260714",
++                null, null, 0,
+                 null,     // lockElapsedTime
+-                "17", 2,
++                "", 2,
+                 false, false, false,
+-                "0001", "", "", 0L, ""
++                "", "", "", 0L, ""
+         );
+         SaleTransaction eodTx = new SaleTransaction(
+                 "trx-eod-001", "100", sampleStore,
+@@ -606,10 +608,18 @@
+         Document doc = parse(xml);
+ 
+         assertEquals("2", text(doc, "TransactionTypeCode"));
++        assertFalse(xml.contains("<OperatorID"), "El cierre no debe emitir OperatorID (paridad legacy)");
++        assertEquals("0", text(doc, "WorkstationID"));
++        assertEquals("0", text(doc, "SequenceNumber"));
+         assertTrue(xml.contains("<ControlTransaction "), "<ControlTransaction> debe estar presente");
+-        assertTrue(xml.contains("TypeCode=\"EOD\""), "TypeCode debe ser EOD");
+-        assertTrue(xml.contains("<BusinessEOD>true</BusinessEOD>"),
+-                "BusinessEOD debe ser true para EOD");
++        assertTrue(xml.contains("TypeCode=\"1\""), "TypeCode del cierre debe ser \"1\" (Type21.STORE_CLOSING)");
++        assertTrue(xml.contains("<FlgConciliacion>1</FlgConciliacion>"),
++                "FlgConciliacion debe ser 1 para EOD");
++        assertTrue(xml.contains("<BusinessEOD/>"),
++                "BusinessEOD debe ser un elemento vacÃ­o para EOD");
++        // Orden legacy: FlgConciliacion antes de BusinessEOD
++        assertTrue(xml.indexOf("<FlgConciliacion>") < xml.indexOf("<BusinessEOD/>"),
++                "FlgConciliacion debe preceder a BusinessEOD");
+     }
+ 
+     // -----------------------------------------------------------------------
+
+
