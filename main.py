@@ -109,6 +109,14 @@ def analyze_diffs():
                 "task_description": task_description
             })
             
+            # Save analysis to JSON metadata file on disk
+            try:
+                metadata["analysis"] = analysis
+                with open(meta_filepath, "w", encoding="utf-8") as f:
+                    json.dump(metadata, f, indent=4)
+            except Exception as e:
+                logging.error(f"Error saving analysis to metadata JSON in analyze_diffs: {e}")
+            
             logging.info(f"Result: {analysis}")
 
         except Exception as e:

@@ -216,6 +216,27 @@
             cursor: not-allowed;
         }
 
+        .btn-extract {
+            background: linear-gradient(135deg, #0078d4 0%, #00569b 100%);
+            color: white;
+            box-shadow: 0 4px 15px rgba(0, 120, 212, 0.3);
+        }
+
+        .btn-extract:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 120, 212, 0.5);
+            filter: brightness(1.1);
+        }
+
+        .btn-extract:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        .btn-extract:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
         .btn-cancel {
             background: rgba(255, 255, 255, 0.05);
             border: 1px solid rgba(255, 255, 255, 0.1);
@@ -642,7 +663,13 @@
             </div>
 
             <div class="button-group">
-                <button id="btn-generate" class="btn btn-generate">
+                <button id="btn-extract" class="btn btn-extract">
+                    <svg style="width: 20px; height: 20px; fill: white;" viewBox="0 0 24 24">
+                        <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/>
+                    </svg>
+                    Extraer Diffs
+                </button>
+                <button id="btn-generate" class="btn btn-generate" disabled>
                     <svg style="width: 20px; height: 20px; fill: white;" viewBox="0 0 24 24">
                         <path d="M19 13H5v-2h14v2z"/>
                         <path d="M12 5L5 12l7 7"/>
@@ -730,6 +757,7 @@
         const elOllamaTip = document.getElementById('ollama-tip');
         const elSimulationMode = document.getElementById('simulation-mode');
 
+        const btnExtract = document.getElementById('btn-extract');
         const btnGenerate = document.getElementById('btn-generate');
         const btnCancel = document.getElementById('btn-cancel');
         const btnExit = document.getElementById('btn-exit');
@@ -829,12 +857,36 @@
                     }
                     updateModelOptions();
                     showToast('Configuración cargada desde .env', 'success');
+                    await checkPendingDiffs();
                 } else {
                     showToast('No se pudo cargar la configuración de defaults', 'error');
                 }
             } catch (err) {
                 console.error(err);
                 showToast('Error al conectar con el servidor', 'error');
+            }
+        }
+
+        // Check if there are pending diffs in the folder on startup
+        async function checkPendingDiffs() {
+            try {
+                const response = await fetch('/api/check_diffs');
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.hasDiffs) {
+                        const accept = confirm(`Se detectaron ${data.count} archivos Diff pendientes de procesar en el servidor.\n¿Desea generar el reporte directamente con estos archivos?`);
+                        if (accept) {
+                            btnGenerate.disabled = false;
+                            showToast('Botón Generar Reporte habilitado con archivos existentes.', 'success');
+                        } else {
+                            btnGenerate.disabled = true;
+                        }
+                    } else {
+                        btnGenerate.disabled = true;
+                    }
+                }
+            } catch (err) {
+                console.error('Error checking pending diffs:', err);
             }
         }
 
@@ -913,6 +965,101 @@
             btnCopy.disabled = true;
             
             showToast('Formulario y visor limpiados', 'success');
+            btnGenerate.disabled = true;
+        });
+
+        // Extract Diffs event
+        btnExtract.addEventListener('click', async () => {
+            const collection = elCollection.value.trim();
+            const project = elProject.value.trim();
+            const repository = elRepository.value.trim();
+            const days = elDays.value.trim();
+            const simulationMode = elSimulationMode.checked;
+
+            if (!collection || !project || !repository) {
+                showToast('Por favor, rellene todos los campos de Azure DevOps.', 'error');
+                return;
+            }
+
+            if (!days || isNaN(days) || parseInt(days) < 1) {
+                showToast('Por favor, ingrese un número válido de días.', 'error');
+                return;
+            }
+
+            // UI Loading state
+            loadingOverlay.style.display = 'flex';
+            loadingTitle.textContent = 'Extrayendo Diffs...';
+            loadingSubtitle.textContent = simulationMode 
+                ? 'Modo Simulación activo: Generando archivos diff de prueba localmente...' 
+                : 'Conectando a Azure DevOps para descargar commits y cambios de código...';
+            loadingLogs.textContent = 'Iniciando extracción...\n';
+            
+            btnExtract.disabled = true;
+            btnGenerate.disabled = true;
+            btnCancel.disabled = true;
+            btnExit.disabled = true;
+
+            let logStep = 0;
+            const logSteps = simulationMode ? [
+                'Iniciando generación de datos de prueba...',
+                'Creando mock_1.diff y mock_1.json...',
+                'Creando mock_2.diff y mock_2.json...',
+                'Archivos diff de prueba listos.'
+            ] : [
+                'Conectando a Azure DevOps API...',
+                'Consultando commits del repositorio...',
+                'Descargando metadatos y código de diferencias (diffs)...',
+                'Escribiendo archivos diff y json en diff_reports/...'
+            ];
+
+            const logTimer = setInterval(() => {
+                if (logStep < logSteps.length) {
+                    loadingLogs.textContent += '\n' + logSteps[logStep];
+                    loadingLogs.scrollTop = loadingLogs.scrollHeight;
+                    logStep++;
+                }
+            }, 1500);
+
+            try {
+                const response = await fetch('/api/extract', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ 
+                        collection, 
+                        project, 
+                        repository, 
+                        days, 
+                        simulationMode 
+                    })
+                });
+
+                clearInterval(logTimer);
+                const data = await response.json();
+
+                if (response.ok && data.status === 'success') {
+                    showToast(`Extracción completada. ${data.count} archivos diff listos para analizar.`, 'success');
+                    btnGenerate.disabled = false;
+                } else {
+                    const errorMsg = data.message || 'Error al extraer diffs del servidor';
+                    showToast(errorMsg, 'error');
+                    btnGenerate.disabled = true;
+                    if (data.logs && data.logs.length > 0) {
+                        loadingLogs.textContent += '\n\nLOG DE ERROR:\n' + data.logs.join('\n');
+                    }
+                }
+            } catch (err) {
+                clearInterval(logTimer);
+                console.error(err);
+                showToast('Error de red al intentar comunicarse con el servidor', 'error');
+                btnGenerate.disabled = true;
+            } finally {
+                loadingOverlay.style.display = 'none';
+                btnExtract.disabled = false;
+                btnCancel.disabled = false;
+                btnExit.disabled = false;
+            }
         });
 
         // Copy Raw Markdown to Clipboard
@@ -1071,42 +1218,40 @@
             
             if (simulationMode) {
                 loadingTitle.textContent = 'Ejecutando Simulación Local...';
-                loadingSubtitle.textContent = 'Modo Offline activo. Extrayendo datos de DevOps y aplicando reglas de simulación locales sin llamar a Gemini.';
-                loadingLogs.textContent = 'Iniciando simulación...\nConectando a Azure DevOps...\n';
+                loadingSubtitle.textContent = 'Modo Offline activo. Leyendo archivos diff extraídos y aplicando reglas de simulación locales sin llamar a Gemini.';
+                loadingLogs.textContent = 'Iniciando simulación de auditoría...\n';
             } else if (provider === 'ollama') {
                 loadingTitle.textContent = 'Procesando con Ollama Local...';
-                loadingSubtitle.textContent = 'Extrayendo commits de DevOps y solicitando análisis técnico a su modelo Ollama (' + model + ').';
-                loadingLogs.textContent = 'Iniciando proceso...\nConectando a Azure DevOps...\n';
+                loadingSubtitle.textContent = 'Leyendo archivos diff extraídos y solicitando análisis técnico a su modelo Ollama (' + model + ').';
+                loadingLogs.textContent = 'Iniciando proceso...\n';
             } else {
                 loadingTitle.textContent = 'Procesando Auditoría Real (Gemini)...';
-                loadingSubtitle.textContent = 'Conectando con Azure DevOps y llamando a la API de Gemini para analizar cambios.';
-                loadingLogs.textContent = 'Iniciando proceso...\nConectando a Azure DevOps...\n';
+                loadingSubtitle.textContent = 'Leyendo archivos diff extraídos y llamando a la API de Gemini para analizar cambios.';
+                loadingLogs.textContent = 'Iniciando proceso...\n';
             }
 
             // Simulate log progress additions
             let logStep = 0;
             const logSteps = simulationMode ? [
-                'Consultando commits del repositorio...',
-                'Procesando metadatos de los commits...',
-                'Aplicando motor heurístico local para auditorías...',
-                'Compilando reporte consolidado en Markdown...',
-                'Generando documento Word (.docx) local...',
-                'Carga simulada completada exitosamente.'
+                'Buscando archivos diff generados...',
+                'Procesando metadatos de prueba...',
+                'Aplicando motor de auditoría simulado...',
+                'Consolidando informe Markdown...',
+                'Compilando archivo Word (.docx)...',
+                'Simulación de auditoría completada.'
             ] : (provider === 'ollama' ? [
+                'Buscando archivos diff generados...',
                 'Verificando servidor de Ollama en localhost:11434...',
-                'Conectando al repositorio...',
-                'Extrayendo commits de los últimos ' + days + ' días...',
-                'Analizando diferencias en los commits...',
-                'Procesando análisis local con modelo Ollama: ' + model + ' (Esto puede tardar según su hardware)...',
-                'Compilando reporte consolidado en Markdown y Word...',
+                'Procesando análisis de commits con Ollama: ' + model + '...',
+                'Consolidando reporte técnico en Markdown...',
+                'Generando documento Word (.docx) final...',
                 'Archivando archivos procesados en Documentacion/Informes...'
             ] : [
-                'Verificando credenciales de Azure DevOps...',
-                'Conectando al repositorio...',
-                'Extrayendo commits de los últimos ' + days + ' días...',
-                'Analizando diferencias en los commits...',
+                'Buscando archivos diff generados...',
                 'Consultando modelo de IA (Gemini - ' + model + ')...',
-                'Compilando reporte en Markdown y Word...',
+                'Analizando diferencias en los commits...',
+                'Consolidando reporte técnico en Markdown...',
+                'Generando documento Word (.docx) final...',
                 'Archivando archivos procesados en Documentacion/Informes...'
             ]);
             
@@ -1166,7 +1311,7 @@
                 showToast('Error de red al intentar comunicarse con el servidor', 'error');
             } finally {
                 loadingOverlay.style.display = 'none';
-                btnGenerate.disabled = false;
+                btnGenerate.disabled = true;  // Disabled again since files are processed and moved
                 btnCancel.disabled = false;
                 btnExit.disabled = false;
             }
