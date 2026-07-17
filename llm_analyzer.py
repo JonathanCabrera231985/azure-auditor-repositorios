@@ -201,7 +201,7 @@ def analyze_commit_with_ollama(commit_message, code_diff, task_description="", m
     }
 
     try:
-        res = requests.post(url, json=payload, timeout=240)
+        res = requests.post(url, json=payload, timeout=480)
         res.raise_for_status()
         analysis = res.json().get("response", "").strip()
         logging.info("Ollama analysis received.")
@@ -285,7 +285,7 @@ Repository/Branch: {branch_name}
     }
 
     try:
-        res = requests.post(url, json=payload, timeout=360)
+        res = requests.post(url, json=payload, timeout=1800)
         res.raise_for_status()
         analysis = res.json().get("response", "").strip()
         logging.info("Consolidated Ollama analysis received.")
